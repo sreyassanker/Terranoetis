@@ -11259,11 +11259,10 @@ case 'openPanel':
           <TopbarMenu
             id="view" title="View & Capture" icon={<Eye size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={isLayerEnabled('india_cctv') || showTimeSlider || isAutoRotating}
+            active={isLayerEnabled('india_cctv') || isAutoRotating}
             items={[
               { label: 'Worldwide Public Cameras', icon: <Cctv size={15} />, active: isLayerEnabled('india_cctv'), onClick: () => toggleLayer('india_cctv') },
               { label: 'ISS Tracker', icon: <Satellite size={15} />, onClick: () => toggleISS() },
-              { label: 'Timeline', icon: <Timer size={15} />, active: showTimeSlider, onClick: () => toggleTimeline() },
               { label: 'Auto Rotate', icon: <RefreshCw size={15} />, active: isAutoRotating, onClick: () => toggleAutoRotate() },
               { label: 'Snapshot', icon: <Camera size={15} />, onClick: () => takeSnapshot() },
             ]}

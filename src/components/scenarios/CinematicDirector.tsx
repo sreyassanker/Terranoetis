@@ -1,24 +1,21 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Clapperboard, Circle, Flame, TriangleAlert, Waves, CloudLightning, Wind, Globe, MapPin, Play, Square, RotateCw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import {
+  Clapperboard, Circle, Flame, TriangleAlert, Waves, CloudLightning, Wind,
+  Globe, MapPin, Play, Pause, Square, RotateCw, Video, Volume2, VolumeX,
+  Plus, Trash2, Camera, Download, Upload, Eye, Compass, Mountain,
+  Layers, Sliders, Maximize2, Minimize2, ChevronUp, ChevronDown, Sparkles,
+  Radio, Check, RefreshCw, X, ArrowLeft
+} from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
-
-interface Waypoint {
-  lat: number;
-  lon: number;
-  height: number;
-  heading: number;
-  pitch: number;
-}
-
-interface CameraPath {
-  name: string;
-  description: string;
-  category: string;
-  duration: number;
-  waypoints: Waypoint[];
-  narration: string[];
-}
+import {
+  evaluateSplinePath,
+  formatTimecode,
+  type Waypoint,
+  type CameraPath,
+  type EvaluatedCameraFrame
+} from '@/rendering/cinematicSpline';
+import { SHOWCASE_PRESETS } from '@/data/cinematicPresets';
 
 interface CinematicDirectorProps {
   viewer: Cesium.Viewer | null;
@@ -28,35 +25,35 @@ interface CinematicDirectorProps {
   zIndex?: number;
 }
 
-/* ── Easing ────────────────────────────────────────────── */
-
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-function easeOutQuad(t: number): number {
-  return 1 - (1 - t) * (1 - t);
-}
-
-/* ── Entity extraction ─────────────────────────────────── */
-
+const CUSTOM_TOURS_KEY = 'terranoetis_custom_cinematic_tours';
 const DISASTER_LAYERS = ['earthquakes', 'wildfires', 'volcanoes', 'floods', 'severe_storms', 'dust'];
 
+const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  landmarks: <Mountain size={12} color="#38bdf8" />,
+  earthquakes: <Circle size={12} fill="#ef4444" color="#ef4444" />,
+  wildfires: <Flame size={12} color="#f97316" />,
+  volcanoes: <TriangleAlert size={12} color="#a855f7" />,
+  floods: <Waves size={12} color="#3b82f6" />,
+  severe_storms: <CloudLightning size={12} color="#eab308" />,
+  dust: <Wind size={12} color="#94a3b8" />,
+  overview: <Globe size={12} color="#60a5fa" />,
+  custom: <Sparkles size={12} color="#ec4899" />,
+};
+
+/* ── Live Entity Extraction for Hazard Paths ── */
 function extractEntityPositions(viewer: Cesium.Viewer): Map<string, { lat: number; lon: number; magnitude?: number; name?: string }[]> {
   const groups = new Map<string, { lat: number; lon: number; magnitude?: number; name?: string }[]>();
   const now = Cesium.JulianDate.now();
 
   for (const entity of viewer.entities.values) {
-    // Skip hidden entities (layer toggled off)
     if (entity.show === false) continue;
-
     const props = entity.properties?.getValue(now) as Record<string, unknown> | undefined;
     const layer = (props?.layer as string) ?? '';
     if (!DISASTER_LAYERS.includes(layer)) continue;
 
     let pos: Cesium.Cartesian3 | undefined;
     if (entity.position) {
-      pos = entity.position.getValue instanceof Function ? entity.position.getValue(now) : entity.position as unknown as Cesium.Cartesian3;
+      pos = entity.position.getValue instanceof Function ? entity.position.getValue(now) : (entity.position as unknown as Cesium.Cartesian3);
     }
     if (!pos) continue;
 
@@ -73,359 +70,194 @@ function extractEntityPositions(viewer: Cesium.Viewer): Map<string, { lat: numbe
   return groups;
 }
 
-/* ── Dynamic path generation ───────────────────────────── */
-
-function generateOrbitalPath(
-  name: string,
-  category: string,
-  description: string,
-  lat: number,
-  lon: number,
-  baseHeight: number,
-  orbitRadius: number,
-  segments: number,
-  narration: string[],
-): CameraPath {
-  const waypoints: Waypoint[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    waypoints.push({
-      lat: lat + (Math.cos(angle) * orbitRadius) / 111320,
-      lon: lon + (Math.sin(angle) * orbitRadius) / (111320 * Math.cos((lat * Math.PI) / 180)),
-      height: baseHeight,
-      heading: Cesium.Math.toDegrees(angle) + 180,
-      pitch: -45,
-    });
-  }
-  return { name, description, category, duration: segments * 2.5, waypoints, narration };
-}
-
-function generateFlyThroughPath(
-  name: string,
-  category: string,
-  description: string,
-  lat: number,
-  lon: number,
-  narration: string[],
-): CameraPath {
-  return {
-    name,
-    description,
-    category,
-    duration: 12,
-    waypoints: [
-      { lat: lat - 2, lon: lon - 3, height: 80000, heading: 30, pitch: -25 },
-      { lat: lat - 0.5, lon: lon - 1, height: 40000, heading: 45, pitch: -35 },
-      { lat, lon, height: 15000, heading: 60, pitch: -60 },
-      { lat: lat + 0.3, lon: lon + 0.5, height: 5000, heading: 90, pitch: -75 },
-    ],
-    narration,
-  };
-}
-
-function generateRevealPath(
-  name: string,
-  category: string,
-  description: string,
-  lat: number,
-  lon: number,
-  narration: string[],
-): CameraPath {
-  return {
-    name,
-    description,
-    category,
-    duration: 14,
-    waypoints: [
-      { lat, lon, height: 2000, heading: 0, pitch: -70 },
-      { lat, lon, height: 15000, heading: 90, pitch: -50 },
-      { lat, lon, height: 60000, heading: 180, pitch: -35 },
-      { lat, lon, height: 120000, heading: 270, pitch: -25 },
-    ],
-    narration,
-  };
-}
-
-const CATEGORY_NARRATION: Record<string, string[]> = {
-  earthquakes: [
-    'Seismic event detected. Scanning epicentral region for surface deformation.',
-    'Fault rupture analysis in progress. Mapping aftershock distribution along the rupture zone.',
-    'Ground motion data shows significant energy release. Assessing structural impact radius.',
-  ],
-  wildfires: [
-    'Thermal anomaly detected. Sweeping along the active fire front.',
-    'Pyrocumulus development visible. Crown fire activity intensifying in the canopy layer.',
-    'Fire behavior analysis: spotting distance and rate of spread indicate extreme conditions.',
-  ],
-  volcanoes: [
-    'Volcanic unrest detected. Ascending through the eruption column.',
-    'Ash plume reaching stratospheric altitudes. Aviation advisories in effect.',
-    'Thermal signature analysis: lava flow progression mapped from crater to flanks.',
-  ],
-  floods: [
-    'Inundation mapping initiated. Water level exceeds flood stage in low-lying areas.',
-    'Pulling back to reveal the full extent of the floodplain. Multiple tributaries contributing.',
-    'Watershed analysis shows peak flow propagation. Inundation extent expanding.',
-  ],
-  severe_storms: [
-    'Severe weather system identified. Orbiting the storm core structure.',
-    'Mesocyclone signature detected. Supercell dynamics under analysis.',
-    'Storm-relative velocity indicates strong rotation. Tornado potential assessed.',
-  ],
-  dust: [
-    'Dust event detected. Mapping atmospheric particulate concentration.',
-    'Visibility reduction extending across the region. Transport trajectory modeled.',
-    'Aerosol optical depth measurement indicates significant mineral dust loading.',
-  ],
-};
-
-function buildDynamicPaths(entityGroups: Map<string, { lat: number; lon: number; magnitude?: number; name?: string }[]>): CameraPath[] {
+function buildDisasterPaths(entityGroups: Map<string, { lat: number; lon: number; magnitude?: number; name?: string }[]>): CameraPath[] {
   const paths: CameraPath[] = [];
 
   for (const [layer, entities] of entityGroups) {
     if (!entities.length) continue;
-    const baseNarration = CATEGORY_NARRATION[layer] ?? ['Analyzing event region...'];
-
-    // Sort by magnitude descending (if available), pick top 3 — copy first
-    // so we never mutate the caller's array.
-    const sorted = [...entities]
-      .sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0))
-      .slice(0, 3);
+    const sorted = [...entities].sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0)).slice(0, 2);
 
     for (const [idx, ent] of sorted.entries()) {
       const magLabel = ent.magnitude ? ` M${ent.magnitude.toFixed(1)}` : '';
-      const suffix = sorted.length > 1 ? ` #${idx + 1}` : '';
-      const displayName = ent.name ?? `${ent.lat.toFixed(1)}°, ${ent.lon.toFixed(1)}`;
+      const displayName = ent.name ?? `${ent.lat.toFixed(2)}°, ${ent.lon.toFixed(2)}°`;
+      const baseAlt = ent.magnitude ? ent.magnitude * 15000 + 25000 : 45000;
 
-      // Data-driven narration
-      const narration = baseNarration.map(line => {
-        let result = line;
-        if (ent.magnitude) result = result.replace('event', `M${ent.magnitude.toFixed(1)} event`);
-        if (ent.name) result = result.replace(/region|zone|epicenter/gi, ent.name.length > 30 ? ent.name.slice(0, 30) + '…' : ent.name);
-        return result;
+      paths.push({
+        id: `live_${layer}_${idx}`,
+        name: `${displayName}${magLabel}`,
+        description: `Tactical 3D orbit around active ${layer.replace('_', ' ')} incident.`,
+        category: layer,
+        duration: 20,
+        waypoints: [
+          { lat: ent.lat + 0.35, lon: ent.lon - 0.45, height: baseAlt * 1.4, heading: 135, pitch: -30, narration: `Approaching ${layer.replace('_', ' ')} incident area.` },
+          { lat: ent.lat - 0.30, lon: ent.lon - 0.35, height: baseAlt, heading: 45, pitch: -40, narration: `Sweeping along the perimeter. Mapping ground deformation and hazard radius.` },
+          { lat: ent.lat - 0.35, lon: ent.lon + 0.40, height: baseAlt * 0.9, heading: 315, pitch: -45, narration: `Direct sensor look-angle. Energy concentration and thermal signature verified.` },
+          { lat: ent.lat + 0.40, lon: ent.lon + 0.30, height: baseAlt * 1.5, heading: 225, pitch: -30, narration: `Pulling back to establish regional containment boundary.` },
+        ],
+        narration: [
+          `Approaching ${layer.replace('_', ' ')} incident area.`,
+          `Sweeping along the perimeter. Mapping ground deformation and hazard radius.`,
+          `Direct sensor look-angle. Energy concentration and thermal signature verified.`,
+          `Pulling back to establish regional containment boundary.`,
+        ],
       });
-
-      if (layer === 'earthquakes') {
-        paths.push(generateOrbitalPath(
-          `${displayName}${magLabel}`,
-          layer,
-          `Orbital scan of seismic event`,
-          ent.lat, ent.lon, ent.magnitude ? ent.magnitude * 20000 + 30000 : 50000,
-          ent.magnitude ? ent.magnitude * 15000 + 20000 : 30000,
-          8, narration,
-        ));
-      } else if (layer === 'wildfires' || layer === 'volcanoes') {
-        paths.push(generateRevealPath(
-          `${displayName}${suffix}`,
-          layer,
-          `Reveal ${layer} event from crater/front`,
-          ent.lat, ent.lon, narration,
-        ));
-      } else {
-        paths.push(generateFlyThroughPath(
-          `${displayName}${suffix}`,
-          layer,
-          `Fly through ${layer} event zone`,
-          ent.lat, ent.lon, narration,
-        ));
-      }
     }
-  }
-
-  // Fallback: global overview if no entities
-  if (paths.length === 0) {
-    paths.push({
-      name: 'Global Overview',
-      description: 'Cinematic orbit around the globe',
-      category: 'overview',
-      duration: 20,
-      waypoints: [
-        { lat: 20, lon: 0, height: 2.2e7, heading: 0, pitch: -90 },
-        { lat: 20, lon: 90, height: 2.2e7, heading: 90, pitch: -90 },
-        { lat: 20, lon: 180, height: 2.2e7, heading: 180, pitch: -90 },
-        { lat: 20, lon: 270, height: 2.2e7, heading: 270, pitch: -90 },
-      ],
-      narration: [
-        'Initiating global survey. Scanning all active monitoring regions.',
-        'Earth observation systems online. Real-time data fusion active.',
-        'Planetary intelligence network fully operational.',
-      ],
-    });
   }
 
   return paths;
 }
 
-/* ── Camera interpolation ──────────────────────────────── */
+export default function CinematicDirector({
+  viewer,
+  onClose,
+  layerVersion,
+  focusEntity,
+  zIndex = 110,
+}: CinematicDirectorProps) {
+  // Navigation tabs: 'showcase' | 'studio' | 'settings'
+  const [activeTab, setActiveTab] = useState<'showcase' | 'studio' | 'settings'>('showcase');
 
-function setCameraAtT(viewer: Cesium.Viewer, path: CameraPath, t: number) {
-  const wps = path.waypoints;
-  const idx = t * (wps.length - 1);
-  const i0 = Math.floor(idx);
-  const i1 = Math.min(i0 + 1, wps.length - 1);
-  const rawF = idx - i0;
-  const f = easeInOutCubic(rawF);
-  const hF = easeOutQuad(rawF);
-
-  const wp0 = wps[i0];
-  const wp1 = wps[i1];
-
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(
-      wp0.lon + (wp1.lon - wp0.lon) * f,
-      wp0.lat + (wp1.lat - wp0.lat) * f,
-      wp0.height + (wp1.height - wp0.height) * hF,
-    ),
-    orientation: {
-      heading: Cesium.Math.toRadians(
-        wp0.heading + (wp1.heading - wp0.heading) * f,
-      ),
-      pitch: Cesium.Math.toRadians(
-        wp0.pitch + (wp1.pitch - wp0.pitch) * f,
-      ),
-      roll: 0,
-    },
+  // Custom user tours loaded from localStorage
+  const [customTours, setCustomTours] = useState<CameraPath[]>(() => {
+    try {
+      const saved = localStorage.getItem(CUSTOM_TOURS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
-}
 
-function getSegmentIndex(path: CameraPath, t: number): number {
-  const idx = t * (path.waypoints.length - 1);
-  return Math.floor(idx);
-}
+  // Dynamic disaster paths
+  const [disasterPaths, setDisasterPaths] = useState<CameraPath[]>([]);
 
-/* ── Component ─────────────────────────────────────────── */
-
-export default function CinematicDirector({ viewer, onClose, layerVersion, focusEntity, zIndex = 110 }: CinematicDirectorProps) {
-  const [paths, setPaths] = useState<CameraPath[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  // Active tour index & state
+  const [selectedTourId, setSelectedTourId] = useState<string>(SHOWCASE_PRESETS[0].id ?? 'himalayan_ridge');
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [showNarration, setShowNarration] = useState(true);
-  const [narrationText, setNarrationText] = useState('');
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [isLooping, setIsLooping] = useState(false);
+  const [cinemaMode, setCinemaMode] = useState(false);
 
+  // Voice narration & speech synthesis
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [currentNarration, setCurrentNarration] = useState('');
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Video recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedDuration, setRecordedDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Live evaluated camera telemetry for Broadcast HUD
+  const [liveTelemetry, setLiveTelemetry] = useState<EvaluatedCameraFrame | null>(null);
+
+  // Studio authoring draft state
+  const [editingTour, setEditingTour] = useState<CameraPath | null>(null);
+  const [studioFeedback, setStudioFeedback] = useState<string | null>(null);
+
+  // Two-step inline confirmation states (replaces window.confirm for Tauri compatibility)
+  const [confirmDeleteTourId, setConfirmDeleteTourId] = useState<string | null>(null);
+  const [confirmStudioDelete, setConfirmStudioDelete] = useState(false);
+  const confirmDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmStudioTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+      if (confirmStudioTimerRef.current) clearTimeout(confirmStudioTimerRef.current);
+    };
+  }, []);
+
+  // Animation frame refs
   const animRef = useRef<number>(0);
   const startRef = useRef(0);
   const pauseTRef = useRef(0);
   const lastSegmentRef = useRef(-1);
-  const selectedIdxRef = useRef(0);
 
-  const selectedPath = paths[selectedIdx] ?? null;
+  // All combined paths
+  const allPaths = useMemo(() => {
+    return [...SHOWCASE_PRESETS, ...customTours, ...disasterPaths];
+  }, [customTours, disasterPaths]);
 
-  // Keep ref in sync
-  useEffect(() => { selectedIdxRef.current = selectedIdx; }, [selectedIdx]);
+  const activePath = useMemo(() => {
+    if (activeTab === 'studio' && editingTour) {
+      return editingTour;
+    }
+    return allPaths.find(p => (p.id ?? p.name) === selectedTourId) || allPaths[0];
+  }, [allPaths, selectedTourId, activeTab, editingTour]);
 
-  // Generate paths from live entities — use interval with 0ms first tick
-  const refreshPaths = useCallback(() => {
+  // Refresh live disaster paths on layer changes
+  const refreshLivePaths = useCallback(() => {
     if (!viewer) return;
     const groups = extractEntityPositions(viewer);
-    const newPaths = buildDynamicPaths(groups);
-    setPaths(prev => {
-      if (prev.length === newPaths.length && prev.every((p, i) => p.name === newPaths[i].name)) return prev;
-      return newPaths;
-    });
+    const generated = buildDisasterPaths(groups);
+    setDisasterPaths(generated);
   }, [viewer]);
 
   useEffect(() => {
-    // Kick off immediately via setTimeout to avoid setState-in-effect lint
-    const id = setTimeout(refreshPaths, 0);
-    const interval = setInterval(refreshPaths, 15000);
-    return () => { clearTimeout(id); clearInterval(interval); };
-  }, [refreshPaths, layerVersion]);
+    refreshLivePaths();
+    const interval = setInterval(refreshLivePaths, 15000);
+    return () => clearInterval(interval);
+  }, [refreshLivePaths, layerVersion]);
 
-  // ── Focus entity: generate path and auto-play ─────────
+  // Save custom tours to localStorage
+  const saveCustomTours = useCallback((tours: CameraPath[]) => {
+    setCustomTours(tours);
+    try {
+      localStorage.setItem(CUSTOM_TOURS_KEY, JSON.stringify(tours));
+    } catch { /* ignore */ }
+  }, []);
 
-  const focusEntityRef = useRef<string>('');
-  // Mirror showNarration so long-lived RAF loops read the latest value without
-  // the effect needing to list it as a dep (which would restart playback).
-  const showNarrationRef = useRef(showNarration);
-  useEffect(() => { showNarrationRef.current = showNarration; }, [showNarration]);
+  /* ── Speech Synthesis ── */
+  const speakNarration = useCallback((text: string) => {
+    if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      speechRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    } catch { /* ignore */ }
+  }, [voiceEnabled]);
 
-  useEffect(() => {
-    if (!focusEntity || !viewer) return;
-    const key = `${focusEntity.lat.toFixed(3)}_${focusEntity.lon.toFixed(3)}_${focusEntity.layer}`;
-    if (focusEntityRef.current === key) return;
-    focusEntityRef.current = key;
+  const stopSpeech = useCallback(() => {
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch { /* ignore */ }
+    }
+  }, []);
 
-    const narration = CATEGORY_NARRATION[focusEntity.layer] ?? ['Analyzing selected event...'];
-    const path = focusEntity.layer === 'earthquakes'
-      ? generateOrbitalPath(
-          focusEntity.name ?? `Event at ${focusEntity.lat.toFixed(1)}°, ${focusEntity.lon.toFixed(1)}°`,
-          focusEntity.layer, 'Orbital scan of selected event',
-          focusEntity.lat, focusEntity.lon, 60000, 40000, 8, narration,
-        )
-      : focusEntity.layer === 'wildfires' || focusEntity.layer === 'volcanoes'
-        ? generateRevealPath(
-            focusEntity.name ?? `Event at ${focusEntity.lat.toFixed(1)}°, ${focusEntity.lon.toFixed(1)}°`,
-            focusEntity.layer, `Reveal selected ${focusEntity.layer}`,
-            focusEntity.lat, focusEntity.lon, narration,
-          )
-        : generateFlyThroughPath(
-            focusEntity.name ?? `Event at ${focusEntity.lat.toFixed(1)}°, ${focusEntity.lon.toFixed(1)}°`,
-            focusEntity.layer, `Fly through selected event zone`,
-            focusEntity.lat, focusEntity.lon, narration,
-          );
-
-    // Defer state updates to avoid setState-in-effect lint
-    const id = setTimeout(() => {
-      setPaths(prev => {
-        const filtered = prev.filter(p => p.category !== '_focused');
-        return [{ ...path, category: '_focused' }, ...filtered];
+  /* ── Camera Motion & Playback ── */
+  const applyCamera = useCallback((path: CameraPath, t: number): EvaluatedCameraFrame => {
+    const frame = evaluateSplinePath(path.waypoints, t);
+    if (viewer) {
+      viewer.camera.setView({
+        destination: frame.position,
+        orientation: {
+          heading: Cesium.Math.toRadians(frame.heading),
+          pitch: Cesium.Math.toRadians(frame.pitch),
+          roll: Cesium.Math.toRadians(frame.roll),
+        },
       });
-      setSelectedIdx(0);
-      lastSegmentRef.current = -1;
-
-      // Auto-play the focused path
-      const totalMs = path.duration * 1000;
-      setIsPlaying(true);
-      setProgress(0);
-      pauseTRef.current = 0;
-      startRef.current = performance.now();
-      lastSegmentRef.current = -1;
-
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-
-      const animate = () => {
-        const elapsed = performance.now() - startRef.current;
-        const rawT = elapsed / totalMs;
-        const t = Math.min(1, rawT);
-
-        setCameraAtT(viewer, path, t);
-        setProgress(t);
-
-        if (showNarrationRef.current) {
-          const seg = getSegmentIndex(path, t);
-          if (seg !== lastSegmentRef.current) {
-            lastSegmentRef.current = seg;
-            setNarrationText(path.narration[seg % path.narration.length] ?? '');
-          }
-        }
-
-        if (t >= 1) {
-          setIsPlaying(false);
-          lastSegmentRef.current = -1;
-          return;
-        }
-        animRef.current = requestAnimationFrame(animate);
-      };
-      animRef.current = requestAnimationFrame(animate);
-    }, 0);
-
-    return () => clearTimeout(id);
-  }, [focusEntity, viewer]);
-
-  // ── Playback ──────────────────────────────────────────
+    }
+    setLiveTelemetry(frame);
+    return frame;
+  }, [viewer]);
 
   const stopPlayback = useCallback(() => {
     setIsPlaying(false);
     if (animRef.current) cancelAnimationFrame(animRef.current);
     animRef.current = 0;
-  }, []);
+    stopSpeech();
+    if (isRecording) stopRecording();
+  }, [stopSpeech, isRecording]);
 
-  const playPath = useCallback((pathIdx: number, fromT = 0) => {
-    if (!viewer) return;
-    const path = paths[pathIdx];
-    if (!path) return;
-
+  const playPath = useCallback((fromT = 0) => {
+    if (!viewer || !activePath || activePath.waypoints.length === 0) return;
     stopPlayback();
     setIsPlaying(true);
     setProgress(fromT);
@@ -433,31 +265,39 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     startRef.current = performance.now();
     lastSegmentRef.current = -1;
 
-    const totalMs = path.duration * 1000;
+    const baseDurationMs = activePath.duration * 1000;
+    const effectiveDurationMs = baseDurationMs / playbackSpeed;
 
     const animate = () => {
-      // Pin to the captured `path` so a mid-playback refreshPaths() reorder
-      // doesn't teleport the camera to a different path at the same index.
       const elapsed = performance.now() - startRef.current;
-      const remaining = (1 - pauseTRef.current) * totalMs;
-      const rawT = pauseTRef.current + (elapsed / remaining) * (1 - pauseTRef.current);
+      const remainingProgress = 1 - pauseTRef.current;
+      const progressDelta = (elapsed / (effectiveDurationMs * remainingProgress)) * remainingProgress;
+      const rawT = pauseTRef.current + progressDelta;
       const t = Math.min(1, rawT);
 
-      setCameraAtT(viewer, path, t);
+      const frame = applyCamera(activePath, t);
       setProgress(t);
 
-      if (showNarrationRef.current) {
-        const seg = getSegmentIndex(path, t);
-        if (seg !== lastSegmentRef.current) {
-          lastSegmentRef.current = seg;
-          const lines = path.narration;
-          setNarrationText(lines[seg % lines.length] ?? '');
-        }
+      // Segment narration check
+      const seg = frame.segmentIndex;
+      if (seg !== lastSegmentRef.current) {
+        lastSegmentRef.current = seg;
+        const line = activePath.waypoints[seg]?.narration || activePath.narration[seg % activePath.narration.length] || '';
+        setCurrentNarration(line);
+        speakNarration(line);
       }
 
       if (t >= 1) {
+        if (isLooping) {
+          pauseTRef.current = 0;
+          startRef.current = performance.now();
+          lastSegmentRef.current = -1;
+          animRef.current = requestAnimationFrame(animate);
+          return;
+        }
         setIsPlaying(false);
         lastSegmentRef.current = -1;
+        if (isRecording) stopRecording();
         return;
       }
 
@@ -465,217 +305,1005 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     };
 
     animRef.current = requestAnimationFrame(animate);
-  }, [viewer, paths, stopPlayback]);
+  }, [viewer, activePath, playbackSpeed, isLooping, applyCamera, stopPlayback, speakNarration, isRecording]);
+
+  // Scrubbing
+  const handleScrub = useCallback((val: number) => {
+    if (!activePath) return;
+    const t = val / 100;
+    setProgress(t);
+    pauseTRef.current = t;
+    const frame = applyCamera(activePath, t);
+
+    const seg = frame.segmentIndex;
+    const line = activePath.waypoints[seg]?.narration || activePath.narration[seg % activePath.narration.length] || '';
+    setCurrentNarration(line);
+  }, [activePath, applyCamera]);
+
+  /* ── Video Recording (MediaRecorder) ── */
+  const startRecording = useCallback(() => {
+    if (!viewer?.scene?.canvas) return;
+    try {
+      const canvas = viewer.scene.canvas;
+      const stream = canvas.captureStream(60);
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : 'video/mp4';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recordedChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const filename = `${(activePath?.name || 'cinematic_tour').replace(/[^a-z0-9_-]/gi, '_')}.webm`;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      recorder.start(500);
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordedDuration(0);
+
+      recordIntervalRef.current = setInterval(() => {
+        setRecordedDuration(p => p + 1);
+      }, 1000);
+
+      // Start flight from current or beginning
+      playPath(progress >= 1 ? 0 : progress);
+    } catch (err) {
+      console.error('Failed to start MediaRecorder:', err);
+    }
+  }, [viewer, activePath, playPath, progress]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+    recordIntervalRef.current = null;
+    setIsRecording(false);
+  }, []);
+
+  /* ── Capture Viewpoint from Active Camera ── */
+  const captureCurrentCamera = useCallback((): Waypoint | null => {
+    if (!viewer) return null;
+    const cam = viewer.camera;
+    const carto = cam.positionCartographic;
+    if (!carto) return null;
+
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    const height = Math.round(carto.height);
+    const heading = Math.round(Cesium.Math.toDegrees(cam.heading));
+    const pitch = Math.round(Cesium.Math.toDegrees(cam.pitch));
+    const roll = Math.round(Cesium.Math.toDegrees(cam.roll));
+
+    return {
+      lat: Number(lat.toFixed(4)),
+      lon: Number(lon.toFixed(4)),
+      height,
+      heading,
+      pitch,
+      roll,
+      narration: `Waypoint at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° (altitude ${height.toLocaleString()}m)`,
+    };
+  }, [viewer]);
+
+  /* ── Keyframe Studio Handlers ── */
+  const handleStartNewTour = () => {
+    const currentWp = captureCurrentCamera();
+    const newTour: CameraPath = {
+      id: `custom_${Date.now()}`,
+      name: 'Custom Mission Tour',
+      description: 'Operator authored tactical flight path.',
+      category: 'custom',
+      duration: 25,
+      isCustom: true,
+      waypoints: currentWp ? [currentWp] : [
+        { lat: 35.68, lon: 139.75, height: 3000, heading: 45, pitch: -30, narration: 'Mission approach viewpoint' }
+      ],
+      narration: ['Mission approach viewpoint'],
+    };
+    setEditingTour(newTour);
+    setActiveTab('studio');
+  };
+
+  const handleAddWaypoint = () => {
+    if (!editingTour) return;
+    const wp = captureCurrentCamera();
+    if (!wp) return;
+    const updatedWps = [...editingTour.waypoints, wp];
+    const updatedTour = {
+      ...editingTour,
+      waypoints: updatedWps,
+      duration: Math.max(10, updatedWps.length * 6),
+      narration: updatedWps.map((w, i) => w.narration || `Waypoint #${i + 1}`),
+    };
+    setEditingTour(updatedTour);
+    setStudioFeedback(`Captured viewpoint #${updatedWps.length}`);
+    setTimeout(() => setStudioFeedback(null), 2500);
+  };
+
+  const handleDeleteWaypoint = (idx: number) => {
+    if (!editingTour || editingTour.waypoints.length <= 1) return;
+    const updatedWps = editingTour.waypoints.filter((_, i) => i !== idx);
+    setEditingTour({
+      ...editingTour,
+      waypoints: updatedWps,
+      duration: Math.max(10, updatedWps.length * 6),
+    });
+  };
+
+  const handleMoveWaypoint = (idx: number, dir: -1 | 1) => {
+    if (!editingTour) return;
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= editingTour.waypoints.length) return;
+    const copy = [...editingTour.waypoints];
+    const temp = copy[idx];
+    copy[idx] = copy[targetIdx];
+    copy[targetIdx] = temp;
+    setEditingTour({ ...editingTour, waypoints: copy });
+  };
+
+  const handleSaveTour = () => {
+    if (!editingTour) return;
+    const updated = [...customTours.filter(t => t.id !== editingTour.id), editingTour];
+    saveCustomTours(updated);
+    setSelectedTourId(editingTour.id || editingTour.name);
+    setStudioFeedback('Tour saved successfully!');
+    setTimeout(() => {
+      setStudioFeedback(null);
+      setActiveTab('showcase');
+    }, 1200);
+  };
+
+  const handleDeleteTour = (tourId: string) => {
+    stopPlayback();
+    if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+    setConfirmDeleteTourId(null);
+    const updated = customTours.filter(t => t.id !== tourId);
+    saveCustomTours(updated);
+    if (editingTour?.id === tourId) {
+      setEditingTour(null);
+      setActiveTab('showcase');
+    }
+    if (selectedTourId === tourId) {
+      setSelectedTourId(SHOWCASE_PRESETS[0].id ?? 'himalayan_ridge');
+    }
+    setStudioFeedback('Tour deleted completely.');
+    setTimeout(() => setStudioFeedback(null), 2000);
+  };
+
+  const handleDiscardOrDeleteTour = () => {
+    stopPlayback();
+    if (confirmStudioTimerRef.current) clearTimeout(confirmStudioTimerRef.current);
+    setConfirmStudioDelete(false);
+    if (editingTour?.id) {
+      const updated = customTours.filter(t => t.id !== editingTour.id);
+      saveCustomTours(updated);
+      if (selectedTourId === editingTour.id) {
+        setSelectedTourId(SHOWCASE_PRESETS[0].id ?? 'himalayan_ridge');
+      }
+    }
+    setEditingTour(null);
+    setActiveTab('showcase');
+    setStudioFeedback('Tour deleted / discarded.');
+    setTimeout(() => setStudioFeedback(null), 2000);
+  };
+
+  // Export custom tours to JSON
+  const handleExportJSON = () => {
+    const blob = new Blob([JSON.stringify(customTours, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `terranoetis_cinematic_tours_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import custom tours from JSON
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (Array.isArray(parsed)) {
+          const merged = [...customTours, ...parsed.map((p, idx) => ({ ...p, id: p.id || `imported_${Date.now()}_${idx}`, isCustom: true }))];
+          saveCustomTours(merged);
+          setStudioFeedback(`Imported ${parsed.length} tour(s)!`);
+          setTimeout(() => setStudioFeedback(null), 2500);
+        }
+      } catch (err) {
+        setStudioFeedback('Error: Invalid JSON format.');
+        setTimeout(() => setStudioFeedback(null), 3000);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Preview single waypoint
+  const previewWaypoint = (wp: Waypoint) => {
+    if (!viewer) return;
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(wp.lon, wp.lat, wp.height),
+      orientation: {
+        heading: Cesium.Math.toRadians(wp.heading),
+        pitch: Cesium.Math.toRadians(wp.pitch),
+        roll: Cesium.Math.toRadians(wp.roll ?? 0),
+      },
+      duration: 1.5,
+    });
+  };
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
+      if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+      stopSpeech();
     };
-  }, []);
-
-  // ── Slider scrub ──────────────────────────────────────
-
-  // Resume from the scrub position if the user was playing when they grabbed
-  // the slider, otherwise leave playback stopped at the scrubbed position.
-  const wasPlayingRef = useRef(false);
-
-  const handleScrubStart = useCallback(() => {
-    wasPlayingRef.current = isPlaying;
-    if (isPlaying) {
-      pauseTRef.current = progress;
-      stopPlayback();
-    }
-  }, [isPlaying, progress, stopPlayback]);
-
-  const handleScrubChange = useCallback((val: number) => {
-    if (!viewer || !selectedPath) return;
-    const t = val / 100;
-    setProgress(t);
-    pauseTRef.current = t;
-    setCameraAtT(viewer, selectedPath, t);
-
-    if (showNarrationRef.current) {
-      const seg = getSegmentIndex(selectedPath, t);
-      const lines = selectedPath.narration;
-      setNarrationText(lines[seg % lines.length] ?? '');
-    }
-  }, [viewer, selectedPath]);
-
-  const handleScrubEnd = useCallback(() => {
-    if (wasPlayingRef.current && progress < 1) {
-      playPath(selectedIdx, progress);
-    }
-  }, [playPath, progress, selectedIdx]);
-
-  // ── Path selection ────────────────────────────────────
-
-  const selectPath = useCallback((idx: number) => {
-    stopPlayback();
-    setSelectedIdx(idx);
-    setProgress(0);
-    setNarrationText('');
-    lastSegmentRef.current = -1;
-    if (viewer && paths[idx]) {
-      setCameraAtT(viewer, paths[idx], 0);
-    }
-  }, [viewer, paths, stopPlayback]);
-
-  const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-    earthquakes: <Circle size={12} fill="#ef4444" color="#ef4444" />,
-    wildfires: <Flame size={12} color="#f97316" />,
-    volcanoes: <TriangleAlert size={12} color="#a855f7" />,
-    floods: <Waves size={12} color="#3b82f6" />,
-    severe_storms: <CloudLightning size={12} color="#eab308" />,
-    dust: <Wind size={12} color="#94a3b8" />,
-    overview: <Globe size={12} color="#60a5fa" />,
-  };
+  }, [stopSpeech]);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 380 }}>
-      <Panel
-        title="CINEMATIC DIRECTOR"
-        icon={<Clapperboard size={14} />}
-        accentColor="#3b82f6"
-        iconColor="#60a5fa"
-        titleColor="#93c5fd"
-        onClose={onClose}
-        style={{ maxHeight: 'calc(100vh - 92px)' }}
-      >
-
-      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
-        {/* Path list */}
-        <div>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>
-            Live Event Paths ({paths.length})
-          </div>
-          {paths.map((path, i) => (
-            <div key={`${path.category}-${i}`}
-              className={`scenario-card ${selectedIdx === i ? 'active' : ''}`}
-              style={{
-                background: selectedIdx === i ? 'rgba(59,130,246,0.15)' : 'rgba(0,0,0,0.2)',
-                borderRadius: 6, padding: 8, marginBottom: 4, cursor: 'pointer',
-                border: selectedIdx === i ? '1px solid rgba(59,130,246,0.3)' : '1px solid transparent',
-              }}
-              onClick={() => selectPath(i)}>
-              <div style={{ fontSize: 11, fontWeight: 600 }}>
-                {CATEGORY_ICONS[path.category] ?? <MapPin size={12} color="#64748b" style={{display:'inline'}} />} {path.name}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{path.description}</div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
-                {path.duration.toFixed(0)}s · {path.waypoints.length} waypoints · {path.category}
-              </div>
-            </div>
-          ))}
-          {paths.length === 0 && (
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: 8 }}>
-              Enable disaster layers to generate cinematic paths from live data.
-            </div>
-          )}
-        </div>
-
-        {/* Playback controls */}
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button className="glass-button" style={{ fontSize: 12, padding: '6px 16px', flex: 1 }}
-              onClick={() => {
-                if (isPlaying) {
-                  stopPlayback();
-                } else {
-                  playPath(selectedIdx, progress < 1 ? progress : 0);
-                }
-              }}
-              disabled={!selectedPath}>
-              {isPlaying ? <><Square size={12} fill="#60a5fa" color="#60a5fa" style={{display:'inline',marginRight:3}} /> Stop</> : progress > 0 && progress < 1 ? <><Play size={12} color="#60a5fa" style={{display:'inline',marginRight:3}} /> Resume</> : <><Play size={12} color="#60a5fa" style={{display:'inline',marginRight:3}} /> Play</>}
-            </button>
-            {progress >= 1 && (
-              <button className="glass-button" style={{ fontSize: 11, padding: '6px 10px' }}
-                onClick={() => { setProgress(0); setNarrationText(''); lastSegmentRef.current = -1; if (viewer && selectedPath) setCameraAtT(viewer, selectedPath, 0); }}>
-                <RotateCw size={12} style={{display:'inline',marginRight:3}} /> Reset
-              </button>
-            )}
-          </div>
-
-          {/* Scrub slider with Granular Timecode & Easing */}
-          <div style={{ marginTop: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, fontFamily: 'monospace', color: '#94a3b8', marginBottom: 4 }}>
-              <span style={{ color: '#38bdf8', fontWeight: 700 }}>
-                {(() => {
-                  const sec = progress * (selectedPath?.duration || 0);
-                  const m = Math.floor(sec / 60);
-                  const s = Math.floor(sec % 60);
-                  const ms = Math.floor((sec % 1) * 10);
-                  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms}`;
-                })()}
-              </span>
-              <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', letterSpacing: '0.04em' }}>
-                CUBIC EASING · {(progress * 100).toFixed(0)}%
-              </span>
-              <span style={{ color: '#64748b' }}>
-                {(() => {
-                  const sec = selectedPath?.duration || 0;
-                  const m = Math.floor(sec / 60);
-                  const s = Math.floor(sec % 60);
-                  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.0`;
-                })()}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="range" min="0" max="100" value={progress * 100}
-                onMouseDown={handleScrubStart}
-                onTouchStart={handleScrubStart}
-                onChange={e => handleScrubChange(Number(e.target.value))}
-                onMouseUp={handleScrubEnd}
-                onTouchEnd={handleScrubEnd}
-                style={{ flex: 1, height: 4, accentColor: '#38bdf8', cursor: 'pointer' }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Narration toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Narration</span>
-          <label className="switch">
-            <input type="checkbox" checked={showNarration} onChange={() => setShowNarration(p => !p)} />
-            <span className="slider" />
-          </label>
-        </div>
-
-        {/* Narration text */}
-        {showNarration && narrationText && (
+    <>
+      {/* ── BROADCAST CINEMA MODE OVERLAY (Anamorphic 2.39:1 Letterbox) ── */}
+      {cinemaMode && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: zIndex + 50, pointerEvents: 'none',
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+        }}>
+          {/* Top Letterbox Bar */}
           <div style={{
-            background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 10, fontSize: 11, lineHeight: 1.5,
-            color: 'var(--text)', borderLeft: '3px solid #60a5fa',
+            height: '11vh', minHeight: 70, background: '#020617', pointerEvents: 'auto',
+            borderBottom: '1px solid rgba(56, 189, 248, 0.25)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
           }}>
-            {narrationText}
-          </div>
-        )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Clapperboard size={18} color="#38bdf8" />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', letterSpacing: '0.04em' }}>
+                  {activePath?.name.toUpperCase()}
+                </div>
+                <div style={{ fontSize: 10, color: '#94a3b8', letterSpacing: '0.02em' }}>
+                  {activePath?.category.toUpperCase()} MISSION RECONNAISSANCE · 2.39:1 CINEMATIC PROJECTION
+                </div>
+              </div>
+            </div>
 
-        {/* Path profile */}
-        {selectedPath && (
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>Altitude Profile</div>
-            <div style={{ display: 'flex', gap: 2, height: 40, alignItems: 'flex-end', overflow: 'hidden' }}>
-              {selectedPath.waypoints.map((wp, i) => {
-                const h = Math.log10(wp.height) / 5.5 * 40;
-                const isActive = i === getSegmentIndex(selectedPath, progress);
-                return (
-                  <div key={i} style={{
-                    flex: 1, height: `${Math.max(2, h)}px`, borderRadius: '2px 2px 0 0',
-                    background: isActive ? '#60a5fa' : 'rgba(96,165,250,0.3)',
-                    transition: 'background 0.15s',
-                  }} title={`${wp.lat.toFixed(1)}°, ${wp.lon.toFixed(1)}° @ ${wp.height.toLocaleString()}m`} />
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>
-              <span>Start</span>
-              <span>End</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: '#38bdf8',
+                background: 'rgba(56, 189, 248, 0.12)', padding: '4px 10px', borderRadius: 6,
+                border: '1px solid rgba(56, 189, 248, 0.3)'
+              }}>
+                {formatTimecode(progress * (activePath?.duration || 0))} / {formatTimecode(activePath?.duration || 0)}
+              </div>
+              <button
+                onClick={() => setCinemaMode(false)}
+                className="glass-button"
+                style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                title="Exit Cinema Mode"
+              >
+                <Minimize2 size={13} /> Exit Cinema
+              </button>
             </div>
           </div>
-        )}
+
+          {/* Bottom Letterbox Bar with Broadcast Lower-Thirds & Telemetry */}
+          <div style={{
+            height: '15vh', minHeight: 90, background: '#020617', pointerEvents: 'auto',
+            borderTop: '1px solid rgba(56, 189, 248, 0.25)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px',
+            boxShadow: '0 -8px 32px rgba(0,0,0,0.8)',
+          }}>
+            {/* Live Subtitle Banner */}
+            <div style={{ flex: 1, maxWidth: '60%' }}>
+              <div style={{ fontSize: 10, color: '#38bdf8', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 2 }}>
+                TACTICAL INTELLIGENCE NARRATION
+              </div>
+              <div style={{
+                fontSize: 14, fontWeight: 500, color: '#f8fafc', lineHeight: 1.4,
+                textShadow: '0 2px 4px rgba(0,0,0,0.8)', minHeight: 40,
+              }}>
+                {currentNarration || 'Analyzing survey trajectory and terrain elevation profile...'}
+              </div>
+            </div>
+
+            {/* Real-time Telemetry & Mini Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+                fontFamily: 'monospace', fontSize: 10, color: '#94a3b8', gap: 2
+              }}>
+                <span>LAT/LON: <strong style={{ color: '#f8fafc' }}>{liveTelemetry?.lat.toFixed(4)}°, {liveTelemetry?.lon.toFixed(4)}°</strong></span>
+                <span>ALTITUDE: <strong style={{ color: '#38bdf8' }}>{Math.round(liveTelemetry?.height || 0).toLocaleString()} m ASL</strong></span>
+                <span>HEADING: <strong style={{ color: '#f8fafc' }}>{Math.round(liveTelemetry?.heading || 0)}°</strong> | PITCH: <strong style={{ color: '#f8fafc' }}>{Math.round(liveTelemetry?.pitch || 0)}°</strong></span>
+              </div>
+
+              {/* Transport controls */}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={() => (isPlaying ? stopPlayback() : playPath(progress >= 1 ? 0 : progress))}
+                  className="glass-button"
+                  style={{
+                    width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: isPlaying ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.08)',
+                    borderColor: '#38bdf8', color: '#38bdf8'
+                  }}
+                >
+                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                </button>
+                <button
+                  onClick={stopPlayback}
+                  className="glass-button"
+                  style={{ width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Stop and Reset"
+                >
+                  <Square size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MAIN DIRECTOR'S DESK PANEL ── */}
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 440 }}>
+        <Panel
+          title="CINEMATIC DIRECTOR STUDIO"
+          icon={<Clapperboard size={14} />}
+          accentColor="#3b82f6"
+          iconColor="#60a5fa"
+          titleColor="#93c5fd"
+          onClose={onClose}
+          style={{ maxHeight: 'calc(100vh - 80px)' }}
+        >
+          {/* Tab Navigation */}
+          <div style={{
+            display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)',
+            padding: '6px 10px', gap: 6, background: 'rgba(0,0,0,0.2)'
+          }}>
+            <button
+              onClick={() => setActiveTab('showcase')}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                background: activeTab === 'showcase' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                color: activeTab === 'showcase' ? '#38bdf8' : '#94a3b8',
+                border: activeTab === 'showcase' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Showcase & Live ({allPaths.length})
+            </button>
+            <button
+              onClick={() => {
+                if (!editingTour && customTours.length > 0) setEditingTour(customTours[0]);
+                else if (!editingTour) handleStartNewTour();
+                setActiveTab('studio');
+              }}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                background: activeTab === 'studio' ? 'rgba(236, 72, 153, 0.2)' : 'transparent',
+                color: activeTab === 'studio' ? '#f472b6' : '#94a3b8',
+                border: activeTab === 'studio' ? '1px solid rgba(236, 72, 153, 0.4)' : '1px solid transparent',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Keyframe Studio
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                background: activeTab === 'settings' ? 'rgba(96, 165, 250, 0.2)' : 'transparent',
+                color: activeTab === 'settings' ? '#60a5fa' : '#94a3b8',
+                border: activeTab === 'settings' ? '1px solid rgba(96, 165, 250, 0.4)' : '1px solid transparent',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Settings & Export
+            </button>
+          </div>
+
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 170px)' }}>
+
+            {/* ═══ TAB 1: SHOWCASE & LIVE EVENT TOURS ═══ */}
+            {activeTab === 'showcase' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 700, letterSpacing: '0.04em' }}>
+                    SELECT CAMERA FLIGHT
+                  </span>
+                  <button
+                    onClick={refreshLivePaths}
+                    className="glass-button"
+                    style={{ fontSize: 9, padding: '2px 6px', display: 'flex', alignItems: 'center', gap: 3 }}
+                    title="Refresh live disaster paths"
+                  >
+                    <RefreshCw size={10} /> Scan Globe
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {allPaths.map((path) => {
+                    const isSelected = (path.id ?? path.name) === selectedTourId;
+                    return (
+                      <div
+                        key={path.id ?? path.name}
+                        onClick={() => {
+                          stopPlayback();
+                          setSelectedTourId(path.id ?? path.name);
+                          setProgress(0);
+                          applyCamera(path, 0);
+                        }}
+                        style={{
+                          background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.03)',
+                          border: isSelected ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255,255,255,0.06)',
+                          borderRadius: 8, padding: 10, cursor: 'pointer', transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: isSelected ? '#38bdf8' : '#f8fafc', fontSize: 12 }}>
+                            {CATEGORY_ICONS[path.category] ?? <MapPin size={12} color="#94a3b8" />}
+                            {path.name}
+                          </div>
+                          <span style={{
+                            fontSize: 9, padding: '1px 6px', borderRadius: 4,
+                            background: path.isCustom ? 'rgba(236,72,153,0.15)' : 'rgba(255,255,255,0.08)',
+                            color: path.isCustom ? '#f472b6' : '#94a3b8', textTransform: 'uppercase', fontWeight: 600
+                          }}>
+                            {path.category}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.4 }}>
+                          {path.description}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>
+                          <span>⏱ {path.duration}s duration · 📍 {path.waypoints.length} waypoints</span>
+                          {path.isCustom && (
+                            <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={() => {
+                                  setEditingTour(path);
+                                  setActiveTab('studio');
+                                }}
+                                className="glass-button"
+                                style={{ padding: '2px 6px', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3, color: '#f472b6' }}
+                                title="Edit this custom tour in Keyframe Studio"
+                              >
+                                <Sliders size={10} /> Edit
+                              </button>
+                              {confirmDeleteTourId === (path.id ?? path.name) ? (
+                                <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                  <button
+                                    onClick={() => {
+                                      if (path.id) handleDeleteTour(path.id);
+                                    }}
+                                    className="glass-button"
+                                    style={{
+                                      padding: '2px 6px', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3,
+                                      color: '#ffffff', borderColor: '#ef4444', background: '#dc2626', fontWeight: 700
+                                    }}
+                                    title="Confirm permanent deletion"
+                                  >
+                                    <Check size={10} /> Delete Now
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+                                      setConfirmDeleteTourId(null);
+                                    }}
+                                    className="glass-button"
+                                    style={{ padding: '2px 4px', fontSize: 9, color: '#94a3b8' }}
+                                    title="Cancel"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+                                    setConfirmDeleteTourId(path.id ?? path.name);
+                                    confirmDeleteTimerRef.current = setTimeout(() => setConfirmDeleteTourId(null), 4000);
+                                  }}
+                                  className="glass-button"
+                                  style={{
+                                    padding: '2px 6px', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3,
+                                    color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)'
+                                  }}
+                                  title="Delete this custom tour permanently"
+                                >
+                                  <Trash2 size={10} /> Delete
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ TAB 2: KEYFRAME STUDIO (AUTHORING) ═══ */}
+            {activeTab === 'studio' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Header actions */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, color: '#f472b6', fontWeight: 700, letterSpacing: '0.04em' }}>
+                    KEYFRAME AUTHORING STUDIO
+                  </span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => setActiveTab('showcase')}
+                      className="glass-button"
+                      style={{ fontSize: 10, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8' }}
+                      title="Return to Showcase tours list"
+                    >
+                      <ArrowLeft size={11} /> Showcase
+                    </button>
+                    <button
+                      onClick={handleStartNewTour}
+                      className="glass-button"
+                      style={{ fontSize: 10, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <Plus size={11} /> New Tour
+                    </button>
+                  </div>
+                </div>
+
+                {editingTour ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Tour Metadata */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Tour Name</label>
+                      <input
+                        type="text"
+                        value={editingTour.name}
+                        onChange={e => setEditingTour({ ...editingTour, name: e.target.value })}
+                        style={{
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: 6, padding: '6px 8px', color: '#f8fafc', fontSize: 11
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Description</label>
+                      <input
+                        type="text"
+                        value={editingTour.description}
+                        onChange={e => setEditingTour({ ...editingTour, description: e.target.value })}
+                        style={{
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: 6, padding: '6px 8px', color: '#f8fafc', fontSize: 11
+                        }}
+                      />
+                    </div>
+
+                    {/* "Capture Current Camera" & "Play Live Draft" Actions */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                      <button
+                        onClick={handleAddWaypoint}
+                        style={{
+                          flex: 1,
+                          background: 'rgba(236, 72, 153, 0.2)', border: '1px solid rgba(236, 72, 153, 0.4)',
+                          color: '#f472b6', borderRadius: 8, padding: '8px 10px', fontSize: 11, fontWeight: 700,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <Camera size={14} /> Capture Viewpoint
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (isPlaying) {
+                            stopPlayback();
+                          } else {
+                            playPath(progress >= 1 ? 0 : progress);
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          background: isPlaying ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.15)',
+                          border: '1px solid rgba(56, 189, 248, 0.4)',
+                          color: '#38bdf8', borderRadius: 8, padding: '8px 10px', fontSize: 11, fontWeight: 700,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Preview and play this flight path right now without saving"
+                      >
+                        {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                        {isPlaying ? 'Pause' : 'Play Live Draft'}
+                      </button>
+                    </div>
+
+                    {studioFeedback && (
+                      <div style={{ fontSize: 10, color: '#4ade80', textAlign: 'center', fontWeight: 600 }}>
+                        {studioFeedback}
+                      </div>
+                    )}
+
+                    {/* Waypoints List */}
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, marginBottom: 6 }}>
+                        Waypoints Sequence ({editingTour.waypoints.length})
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                        {editingTour.waypoints.map((wp, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)',
+                              borderRadius: 6, padding: 8, display: 'flex', flexDirection: 'column', gap: 4
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: '#f472b6' }}>
+                                #{idx + 1} · {wp.lat.toFixed(2)}°, {wp.lon.toFixed(2)}°
+                              </span>
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                <button
+                                  onClick={() => previewWaypoint(wp)}
+                                  className="glass-button" style={{ padding: '2px 5px', fontSize: 9 }}
+                                  title="Fly camera to this waypoint"
+                                >
+                                  <Eye size={10} />
+                                </button>
+                                <button
+                                  onClick={() => handleMoveWaypoint(idx, -1)}
+                                  disabled={idx === 0}
+                                  className="glass-button" style={{ padding: '2px 5px', fontSize: 9 }}
+                                >
+                                  <ChevronUp size={10} />
+                                </button>
+                                <button
+                                  onClick={() => handleMoveWaypoint(idx, 1)}
+                                  disabled={idx === editingTour.waypoints.length - 1}
+                                  className="glass-button" style={{ padding: '2px 5px', fontSize: 9 }}
+                                >
+                                  <ChevronDown size={10} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteWaypoint(idx)}
+                                  className="glass-button" style={{ padding: '2px 5px', fontSize: 9, color: '#ef4444' }}
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div style={{ fontSize: 9, color: '#94a3b8', display: 'flex', gap: 10 }}>
+                              <span>ALT: {Math.round(wp.height).toLocaleString()}m</span>
+                              <span>HDG: {wp.heading}°</span>
+                              <span>PITCH: {wp.pitch}°</span>
+                            </div>
+
+                            {/* Narration note */}
+                            <input
+                              type="text"
+                              placeholder="Narration note for this viewpoint..."
+                              value={wp.narration || ''}
+                              onChange={e => {
+                                const copy = [...editingTour.waypoints];
+                                copy[idx] = { ...copy[idx], narration: e.target.value };
+                                setEditingTour({ ...editingTour, waypoints: copy });
+                              }}
+                              style={{
+                                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: 4, padding: '3px 6px', color: '#e2e8f0', fontSize: 10, marginTop: 2
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Action Buttons: Save & Delete/Discard */}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                      <button
+                        onClick={handleSaveTour}
+                        style={{
+                          flex: 1,
+                          background: 'rgba(56, 189, 248, 0.25)', border: '1px solid rgba(56, 189, 248, 0.4)',
+                          color: '#38bdf8', borderRadius: 8, padding: '8px 12px', fontSize: 11, fontWeight: 700,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                        }}
+                      >
+                        <Check size={14} /> Save Tour & Exit
+                      </button>
+
+                      {confirmStudioDelete ? (
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <button
+                            onClick={handleDiscardOrDeleteTour}
+                            style={{
+                              background: '#dc2626', border: '1px solid #ef4444',
+                              color: '#ffffff', borderRadius: 8, padding: '8px 12px', fontSize: 11, fontWeight: 700,
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                            }}
+                            title="Confirm deletion / discard"
+                          >
+                            <Trash2 size={13} /> {customTours.some(t => t.id === editingTour.id) ? 'Confirm Delete' : 'Confirm Discard'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirmStudioTimerRef.current) clearTimeout(confirmStudioTimerRef.current);
+                              setConfirmStudioDelete(false);
+                            }}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.15)',
+                              color: '#94a3b8', borderRadius: 8, padding: '8px 10px', fontSize: 11,
+                              cursor: 'pointer', display: 'flex', alignItems: 'center'
+                            }}
+                            title="Cancel"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            if (confirmStudioTimerRef.current) clearTimeout(confirmStudioTimerRef.current);
+                            setConfirmStudioDelete(true);
+                            confirmStudioTimerRef.current = setTimeout(() => setConfirmStudioDelete(false), 4000);
+                          }}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)',
+                            color: '#f87171', borderRadius: 8, padding: '8px 12px', fontSize: 11, fontWeight: 700,
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                          }}
+                          title={customTours.some(t => t.id === editingTour.id) ? "Delete this saved tour completely" : "Discard this unsaved draft"}
+                        >
+                          <Trash2 size={14} /> {customTours.some(t => t.id === editingTour.id) ? 'Delete Tour' : 'Discard Draft'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '24px 10px', color: '#94a3b8' }}>
+                    Click "New Tour" to author a custom camera sequence.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ TAB 3: SETTINGS & EXPORT ═══ */}
+            {activeTab === 'settings' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <span style={{ fontSize: 10, color: '#60a5fa', fontWeight: 700, letterSpacing: '0.04em' }}>
+                  DIRECTOR SETTINGS & VIDEO CAPTURE
+                </span>
+
+                {/* Speed selector */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: '#f8fafc' }}>Playback Speed</span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {[0.5, 1.0, 2.0].map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setPlaybackSpeed(s)}
+                        style={{
+                          background: playbackSpeed === s ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.05)',
+                          border: playbackSpeed === s ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                          color: playbackSpeed === s ? '#38bdf8' : '#94a3b8',
+                          padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer'
+                        }}
+                      >
+                        {s}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Voice narration toggle */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#f8fafc' }}>Voiceover AI (Speech)</div>
+                    <div style={{ fontSize: 9, color: '#94a3b8' }}>Synthesizes subtitles aloud using Web Speech API</div>
+                  </div>
+                  <button
+                    onClick={() => setVoiceEnabled(p => !p)}
+                    style={{
+                      background: voiceEnabled ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: voiceEnabled ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+                      color: voiceEnabled ? '#4ade80' : '#94a3b8',
+                      padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4
+                    }}
+                  >
+                    {voiceEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                    {voiceEnabled ? 'Enabled' : 'Muted'}
+                  </button>
+                </div>
+
+                {/* Loop toggle */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#f8fafc' }}>Loop Sequence</div>
+                    <div style={{ fontSize: 9, color: '#94a3b8' }}>Continuously loops tour for presentations / kiosk</div>
+                  </div>
+                  <button
+                    onClick={() => setIsLooping(p => !p)}
+                    style={{
+                      background: isLooping ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: isLooping ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                      color: isLooping ? '#38bdf8' : '#94a3b8',
+                      padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {isLooping ? 'Looping' : 'Off'}
+                  </button>
+                </div>
+
+                {/* Video recording */}
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10 }}>
+                  <div style={{ fontSize: 11, color: '#f8fafc', fontWeight: 600, marginBottom: 4 }}>
+                    Canvas Video Capture (MediaRecorder)
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 8 }}>
+                    Record 60 FPS 1080p WebM flight directly from Cesium graphics buffer.
+                  </div>
+                  <button
+                    onClick={() => (isRecording ? stopRecording() : startRecording())}
+                    style={{
+                      width: '100%',
+                      background: isRecording ? 'rgba(239, 68, 68, 0.25)' : 'rgba(56, 189, 248, 0.2)',
+                      border: isRecording ? '1px solid #ef4444' : '1px solid rgba(56, 189, 248, 0.4)',
+                      color: isRecording ? '#f87171' : '#38bdf8',
+                      borderRadius: 8, padding: '8px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                    }}
+                  >
+                    <Video size={14} />
+                    {isRecording ? `Recording in progress... (${recordedDuration}s) Click to Finish` : 'Start Video Recording'}
+                  </button>
+                </div>
+
+                {/* Import / Export JSON */}
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10 }}>
+                  <div style={{ fontSize: 11, color: '#f8fafc', fontWeight: 600, marginBottom: 6 }}>
+                    Tour Storage & Exchange
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={handleExportJSON}
+                      className="glass-button"
+                      style={{ flex: 1, padding: '6px 8px', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                    >
+                      <Download size={12} /> Export JSON
+                    </button>
+                    <label
+                      className="glass-button"
+                      style={{ flex: 1, padding: '6px 8px', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
+                    >
+                      <Upload size={12} /> Import JSON
+                      <input type="file" accept=".json" onChange={handleImportJSON} style={{ display: 'none' }} />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ UNIVERSAL PLAYBACK & SCRUBBER DOCK ═══ */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Transport Buttons */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    if (isPlaying) stopPlayback();
+                    else playPath(progress >= 1 ? 0 : progress);
+                  }}
+                  className="glass-button"
+                  style={{
+                    flex: 1, padding: '8px 12px', fontSize: 12, fontWeight: 700,
+                    background: isPlaying ? 'rgba(56, 189, 248, 0.25)' : undefined,
+                    borderColor: isPlaying ? '#38bdf8' : undefined,
+                    color: isPlaying ? '#38bdf8' : '#f8fafc',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                  }}
+                >
+                  {isPlaying ? (
+                    <><Pause size={14} /> Pause{activeTab === 'studio' && editingTour ? ' Draft' : ''}</>
+                  ) : progress > 0 && progress < 1 ? (
+                    <><Play size={14} /> Resume{activeTab === 'studio' && editingTour ? ' Draft' : ''}</>
+                  ) : (
+                    <><Play size={14} /> {activeTab === 'studio' && editingTour ? 'Play Live Draft' : 'Play Tour'}</>
+                  )}
+                </button>
+
+                <button
+                  onClick={stopPlayback}
+                  className="glass-button"
+                  style={{ padding: '8px 12px' }}
+                  title="Stop and Reset"
+                >
+                  <Square size={13} />
+                </button>
+
+                <button
+                  onClick={() => {
+                    stopPlayback();
+                    setProgress(0);
+                    if (activePath) applyCamera(activePath, 0);
+                  }}
+                  className="glass-button"
+                  style={{ padding: '8px 12px' }}
+                  title="Reset to Beginning"
+                >
+                  <RotateCw size={13} />
+                </button>
+
+                {/* Cinema Mode Toggle */}
+                <button
+                  onClick={() => setCinemaMode(p => !p)}
+                  className="glass-button"
+                  style={{
+                    padding: '8px 12px',
+                    background: cinemaMode ? 'rgba(56, 189, 248, 0.25)' : undefined,
+                    color: cinemaMode ? '#38bdf8' : undefined
+                  }}
+                  title="Anamorphic 2.39:1 Cinema Mode"
+                >
+                  <Maximize2 size={13} />
+                </button>
+              </div>
+
+              {/* Timecode & Cubic Spline Progress Bar */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, fontFamily: 'monospace', color: '#94a3b8' }}>
+                  <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                    {formatTimecode(progress * (activePath?.duration || 0))}
+                  </span>
+                  <span style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>
+                    CATMULL-ROM 3D · {(progress * 100).toFixed(0)}%
+                  </span>
+                  <span>{formatTimecode(activePath?.duration || 0)}</span>
+                </div>
+
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={progress * 100}
+                  onChange={e => handleScrub(Number(e.target.value))}
+                  style={{ width: '100%', height: 5, accentColor: '#38bdf8', cursor: 'pointer' }}
+                />
+              </div>
+
+              {/* Subtitle / Narration preview box */}
+              {currentNarration && (
+                <div style={{
+                  background: 'rgba(0,0,0,0.3)', borderRadius: 6, padding: '6px 10px', fontSize: 10,
+                  color: '#e2e8f0', borderLeft: '3px solid #38bdf8', lineHeight: 1.4
+                }}>
+                  {currentNarration}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </Panel>
       </div>
-    </Panel>
-    </div>
+    </>
   );
 }
