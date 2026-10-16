@@ -84,6 +84,17 @@ export const PluginManager: React.FC<PluginManagerProps> = ({ token, onPluginsCh
     durationMs: number | null;
   } | null>(null);
 
+  // Delete modal & notification state
+  const [pluginToDelete, setPluginToDelete] = useState<PluginInfo | null>(null);
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  }, []);
+
   // Install custom state
   const [installMode, setInstallMode] = useState<InstallMode>('code');
   const [installUrl, setInstallUrl] = useState<string>('');
@@ -165,36 +176,44 @@ module.exports.init = function(api) {
       if (!resp.ok) {
         // Revert on failure
         setPlugins(prev => prev.map(p => p.id === id ? { ...p, enabled: !newEnabled } : p));
-        alert('Could not update plugin status.');
+        showToast('Could not update plugin status.', 'error');
       } else {
         if (onPluginsChange) onPluginsChange();
+        showToast(`Plugin ${newEnabled ? 'enabled' : 'disabled'} successfully.`);
       }
     } catch {
       setPlugins(prev => prev.map(p => p.id === id ? { ...p, enabled: !newEnabled } : p));
+      showToast('Network error while updating plugin status.', 'error');
     }
-  }, [token, onPluginsChange]);
+  }, [token, onPluginsChange, showToast]);
 
-  // Remove Plugin
-  const removePlugin = useCallback(async (id: string) => {
-    if (!confirm(`Are you sure you want to remove plugin "${id}"? This will delete the plugin file.`)) return;
+  // Remove Plugin (called from modal)
+  const confirmDeletePlugin = useCallback(async () => {
+    if (!pluginToDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
 
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
     try {
-      const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}`, {
+      const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(pluginToDelete.id)}`, {
         method: 'DELETE',
         headers,
       });
       if (resp.ok) {
-        setPlugins(prev => prev.filter(p => p.id !== id));
+        setPlugins(prev => prev.filter(p => p.id !== pluginToDelete.id));
         if (onPluginsChange) onPluginsChange();
+        showToast(`Plugin "${pluginToDelete.name}" was permanently removed.`);
+        setPluginToDelete(null);
       } else {
-        const err = await resp.json().catch(() => ({ error: 'Remove failed' }));
-        alert(`Error: ${err.error || resp.statusText}`);
+        const err = await resp.json().catch(() => ({ error: 'Delete failed' }));
+        setDeleteError(err.error || resp.statusText || 'Failed to remove extension');
       }
     } catch (e) {
-      alert(`Error: ${(e as Error).message}`);
+      setDeleteError((e as Error).message);
+    } finally {
+      setDeleting(false);
     }
-  }, [token, onPluginsChange]);
+  }, [pluginToDelete, token, onPluginsChange, showToast]);
 
   // Install Curated Template
   const installTemplate = useCallback(async (template: CuratedTemplate) => {
@@ -662,7 +681,11 @@ module.exports.init = function(api) {
                       {/* Remove Button for custom plugins */}
                       {!p.isBuiltin && (
                         <button
-                          onClick={() => void removePlugin(p.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteError(null);
+                            setPluginToDelete(p);
+                          }}
                           title="Remove custom plugin"
                           style={{
                             background: 'rgba(239, 68, 68, 0.1)',
@@ -1281,6 +1304,163 @@ module.exports.init = function(api) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Production Delete Confirmation Modal ── */}
+      {pluginToDelete && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: 440,
+            background: '#0f172a',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7), 0 0 30px rgba(239, 68, 68, 0.15)',
+            borderRadius: 12,
+            padding: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                background: 'rgba(239, 68, 68, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                flexShrink: 0,
+              }}>
+                <Trash2 size={20} style={{ color: '#ef4444' }} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                  Delete Extension
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                  Permanent removal from disk and runtime
+                </p>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>
+              Are you sure you want to delete <strong style={{ color: '#f1f5f9' }}>{pluginToDelete.name}</strong>?
+              <div style={{
+                marginTop: 10,
+                padding: '8px 12px',
+                borderRadius: 6,
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: '#94a3b8',
+              }}>
+                File: {pluginToDelete.id.replace(/^file:/, '')}
+                <br />
+                Tools to unregister: {pluginToDelete.toolCount}
+              </div>
+            </div>
+
+            {deleteError && (
+              <div style={{
+                padding: '8px 12px',
+                borderRadius: 6,
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#f87171',
+                fontSize: 12,
+              }}>
+                {deleteError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
+              <button
+                onClick={() => {
+                  if (!deleting) setPluginToDelete(null);
+                }}
+                disabled={deleting}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#cbd5e1',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => void confirmDeletePlugin()}
+                disabled={deleting}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 6,
+                  background: '#ef4444',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Delete Extension</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast Notification Banner ── */}
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          zIndex: 10000,
+          background: toastMessage.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'rgba(34, 197, 94, 0.95)',
+          color: '#ffffff',
+          padding: '10px 18px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 600,
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          {toastMessage.type === 'error' ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+          <span>{toastMessage.text}</span>
         </div>
       )}
     </div>

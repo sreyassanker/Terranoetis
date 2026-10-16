@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth, getToken, isDesktopApp } from '../context/AuthContext';
-import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu } from 'lucide-react';
+import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu, RefreshCw, LogOut } from 'lucide-react';
 import { useUserPrefStore } from '../store/userPrefStore';
 import { formatISTTime, getAllTimezones } from '../lib/formatTime';
 import { LocalAiHub } from '../components/admin/LocalAiHub';
 import { MetricsDashboard } from '../components/admin/MetricsDashboard';
 import { PluginManager } from '../components/admin/PluginManager';
+import { EvolutionHub } from '../components/admin/EvolutionHub';
 
 type Tab = 'home' | 'local-ai' | 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
 
@@ -343,7 +344,29 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}><Shield size={18} style={{display:'inline',marginRight:6}} /> Admin Dashboard</h2>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={logout} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}>Logout</button>
+            <button
+              onClick={() => {
+                onClose();
+                logout();
+              }}
+              title="Sign out of administrative session"
+              style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: '1px solid rgba(239,68,68,0.3)',
+                background: 'rgba(239,68,68,0.08)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <LogOut size={13} /> Sign Out
+            </button>
             <button onClick={onClose} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 }}><X size={12} /></button>
           </div>
         </div>
@@ -447,15 +470,6 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              {/* ── Local AI Model Hub ── */}
-              <div style={{ marginBottom: 24 }}>
-                <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Cpu size={14} style={{ color: '#60a5fa' }} />
-                  <span>Local AI Models & Hugging Face Hub</span>
-                </h3>
-                <LocalAiHub token={token} />
-              </div>
-
               {/* ── Quick access to all sections ── */}
               <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Dashboard Sections</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
@@ -552,107 +566,123 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
           )}
 
           {tab === 'health' && (
-            <div>
-              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8' }}>System Health <span style={{ fontSize: 11, color: '#64748b' }}>(polling every 5s)</span></h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-                {health ? (
-                  <>
-                    <HealthCard label="Overall Status" value={health.status} color={healthColor} />
-                    <HealthCard label="Uptime" value={`${(health.uptime_ms / 3600000).toFixed(1)}h`} color="#60a5fa" />
-                    <HealthCard label="Version" value={health.version || '0.0.0'} color="#94a3b8" />
-                    {Object.entries(health.checks).map(([key, val]) => (
-                      <HealthCard key={key} label={key} value={val.status} color={val.status === 'ok' ? '#22c55e' : val.status === 'degraded' ? '#f59e0b' : '#ef4444'} detail={val.detail} />
-                    ))}
-                  </>
-                ) : (
-                  <div style={{ color: '#64748b' }}>Loading health data...</div>
-                )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Heart size={16} style={{ color: healthColor }} />
+                    <span>System Health &amp; Runtime Subsystems</span>
+                  </h3>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>
+                    Live empirical health diagnostics (polling every 5s)
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => void fetchHealth()}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                  }}
+                >
+                  <RefreshCw size={13} />
+                  <span>Re-check Now</span>
+                </button>
               </div>
+
+              {health ? (
+                <>
+                  {/* Category 1: Core Platform */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                      Core Platform &amp; Host Telemetry
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
+                      <HealthCard label="Overall Status" value={health.status} color={healthColor} detail={health.status === 'healthy' ? 'All critical subsystems nominal' : 'Some non-critical subsystems need attention'} />
+                      <HealthCard label="Uptime" value={`${(health.uptime_ms / 3600000).toFixed(1)}h`} color="#60a5fa" detail={`Uptime ${(health.uptime_ms / 1000).toFixed(0)}s`} />
+                      <HealthCard label="Release Version" value={`v${health.version || '3.0.0'}`} color="#38bdf8" detail="Production Desktop Engine" />
+                      {health.checks.db && (
+                        <HealthCard label="Database (SQLite)" value={health.checks.db.status} color={getCheckColor(health.checks.db.status)} detail={health.checks.db.detail || 'Connected'} />
+                      )}
+                      {health.checks.memory && (
+                        <HealthCard label="System Memory" value={health.checks.memory.status} color={getCheckColor(health.checks.memory.status)} detail={health.checks.memory.detail} />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Category 2: Cognitive AI Engines */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                      Cognitive Architecture &amp; Intelligence Engines
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
+                      {['reflex', 'forks', 'dream', 'entropy', 'discovery'].map(key => {
+                        const chk = health.checks[key];
+                        if (!chk) return null;
+                        const titleMap: Record<string, string> = {
+                          reflex: 'Reflex Engine',
+                          forks: 'Fork Manager',
+                          dream: 'Dream Engine',
+                          entropy: 'Entropy Mixer',
+                          discovery: 'Intent Discovery',
+                        };
+                        return (
+                          <HealthCard
+                            key={key}
+                            label={titleMap[key] || key}
+                            value={chk.status}
+                            color={getCheckColor(chk.status)}
+                            detail={chk.detail || (chk.status === 'ok' ? 'Engine Active' : 'Offline')}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Category 3: Communications & External Services */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                      Services &amp; Integrations
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
+                      {health.checks.pubsub && (
+                        <HealthCard label="Event Bus (PubSub)" value={health.checks.pubsub.status} color={getCheckColor(health.checks.pubsub.status)} detail={health.checks.pubsub.detail || 'In-process loopback active'} />
+                      )}
+                      {health.checks.redis && (
+                        <HealthCard
+                          label="Cluster Cache (Redis)"
+                          value={health.checks.redis.status === 'standby' ? 'Standby' : health.checks.redis.status}
+                          color={getCheckColor(health.checks.redis.status)}
+                          detail={health.checks.redis.detail || 'In-memory fallback active'}
+                        />
+                      )}
+                      {health.checks.gemini && (
+                        <HealthCard
+                          label="Google Gemini Cloud"
+                          value={health.checks.gemini.status === 'not_configured' ? 'Optional / Unset' : health.checks.gemini.status}
+                          color={getCheckColor(health.checks.gemini.status)}
+                          detail={health.checks.gemini.detail || (health.checks.gemini.status === 'not_configured' ? 'Key unset in Settings' : 'Cloud LLM Provider')}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: '#64748b', padding: 30, textAlign: 'center' }}>Loading system health diagnostics...</div>
+              )}
             </div>
           )}
 
           {tab === 'evolution' && (
-            <div>
-              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8' }}>
-                <Sparkles size={14} style={{display:'inline',marginRight:4}} /> Self-Improvement Evolution
-              </h3>
-
-              {/* Status cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
-                <HealthCard label="Evolution Status" value={evoStatus?.active ? 'Active' : 'Standby'} color={evoStatus?.active ? '#22c55e' : '#94a3b8'} />
-                <HealthCard label="Pending Proposals" value={`${evoStatus?.pendingProposals ?? evoStatus?.proposals ?? 0}`} color={evoStatus && (evoStatus.pendingProposals ?? evoStatus?.proposals ?? 0) > 0 ? '#f59e0b' : '#94a3b8'} />
-                <HealthCard label="Arch. Proposals" value={`${archProposals.length}`} color={archProposals.length > 0 ? '#818cf8' : '#94a3b8'} />
-                <HealthCard label="Intent Proposals" value={`${intentProposals.length}`} color={intentProposals.length > 0 ? '#a78bfa' : '#94a3b8'} />
-              </div>
-
-              {/* Architecture Proposals */}
-              {archProposals.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 12, color: '#818cf8', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Brain size={12} /> Architecture Proposals
-                  </h4>
-                  {archProposals.slice(0, 10).map((p, i) => (
-                    <div key={i} style={{
-                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
-                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.name || `Proposal #${i + 1}`}`}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        {p.status === 'approved' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'rejected' ? <XCircle size={10} color="#ef4444" /> : <Sparkles size={10} color="#f59e0b" />}
-                        <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Intent Proposals */}
-              {intentProposals.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 12, color: '#a78bfa', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Sparkles size={12} /> Intent Proposals
-                  </h4>
-                  {intentProposals.slice(0, 10).map((p, i) => (
-                    <div key={i} style={{
-                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
-                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.name || p.intent || `Intent #${i + 1}`}`}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        {p.status === 'active' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'explored' ? <CheckCircle size={10} color="#818cf8" /> : <Sparkles size={10} color="#f59e0b" />}
-                        <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Self-Evolution Proposals */}
-              {ecoProposals.length > 0 && (
-                <div>
-                  <h4 style={{ fontSize: 12, color: '#f472b6', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Sparkles size={12} /> Self-Evolution Proposals
-                  </h4>
-                  {ecoProposals.slice(0, 10).map((p, i) => (
-                    <div key={i} style={{
-                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
-                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.description || p.name || `Proposal #${i + 1}`}`}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 9, color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {!archProposals.length && !intentProposals.length && !ecoProposals.length && (
-                <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
-                  <Brain size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
-                  <div>No evolution proposals yet</div>
-                  <div style={{ fontSize: 11, marginTop: 4 }}>The self-improvement engine will generate proposals as the system learns.</div>
-                </div>
-              )}
-            </div>
+            <EvolutionHub token={token} onDataChange={() => { void fetchAdminData(); void fetchEvolution(); }} />
           )}
         </div>
       </div>
@@ -660,18 +690,27 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   );
 }
 
+function getCheckColor(status: string) {
+  if (status === 'ok' || status === 'healthy') return '#22c55e';
+  if (status === 'standby') return '#38bdf8';
+  if (status === 'not_configured') return '#a78bfa';
+  if (status === 'degraded') return '#f59e0b';
+  return '#ef4444';
+}
+
 function HealthCard({ label, value, color, detail }: { label: string; value: string; color: string; detail?: string }) {
   return (
     <div style={{
       background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '14px 16px',
-      border: `1px solid ${color}22`,
+      border: `1px solid ${color}33`,
+      display: 'flex', flexDirection: 'column', gap: 4,
     }}>
-      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
-        {value}
+      <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block', boxShadow: color === '#22c55e' ? '0 0 8px #22c55e' : 'none' }} />
+        <span style={{ textTransform: 'capitalize' }}>{value}</span>
       </div>
-      {detail && <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>{detail}</div>}
+      {detail && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.3 }}>{detail}</div>}
     </div>
   );
 }

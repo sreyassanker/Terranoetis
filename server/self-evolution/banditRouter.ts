@@ -54,6 +54,9 @@ export class BanditRouter {
   }
 
   updateReward(arm: string, reward: number): void {
+    if (!this.arms.includes(arm)) {
+      this.addArm(arm);
+    }
     this.totalPulls++;
     if (reward > 0) {
       this.successes.set(arm, (this.successes.get(arm) || 1) + reward);

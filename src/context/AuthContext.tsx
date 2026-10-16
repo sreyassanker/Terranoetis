@@ -10,7 +10,9 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  loginAsDesktopOperator: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -18,6 +20,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
 const ROLE_KEY = 'auth_role';
+const LOGGED_OUT_KEY = 'auth_logged_out';
 import { isDesktopApp, installDesktopFetchPatch } from '@/lib/desktop';
 export { isDesktopApp };
 
@@ -35,6 +38,11 @@ function parseJwtRole(token: string): string | null {
 }
 
 function loadAuth(): AuthState {
+  const isExplicitlyLoggedOut = localStorage.getItem(LOGGED_OUT_KEY) === 'true';
+  if (isExplicitlyLoggedOut) {
+    return { user: null, token: null, role: null, isLoggedIn: false, isAdmin: false };
+  }
+
   const token = localStorage.getItem(TOKEN_KEY);
   const user = localStorage.getItem(USER_KEY);
   const storedRole = localStorage.getItem(ROLE_KEY);
@@ -56,6 +64,7 @@ function loadAuth(): AuthState {
 }
 
 function persistAuth(token: string, userId: string, role: string): void {
+  localStorage.removeItem(LOGGED_OUT_KEY);
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, userId);
   localStorage.setItem(ROLE_KEY, role);
@@ -78,6 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // DEV mode or Desktop App: always try dev-login for a fresh token, fall back to stored token
   useEffect(() => {
     if (!import.meta.env.DEV && !isDesktopApp) {
+      setAuthReady(true);
+      return;
+    }
+    if (localStorage.getItem(LOGGED_OUT_KEY) === 'true') {
       setAuthReady(true);
       return;
     }
@@ -159,17 +172,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('auth:updated'));
   }, []);
 
+  const register = useCallback(async (username: string, password: string) => {
+    const resp = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Registration failed' }));
+      throw new Error(err.error || `Registration failed (${resp.status})`);
+    }
+    const data = await resp.json();
+    const role = typeof data.role === 'string' ? data.role : 'user';
+    persistAuth(data.token, data.userId, role);
+    setAuth({
+      user: data.userId,
+      token: data.token,
+      role,
+      isLoggedIn: true,
+      isAdmin: role === 'admin',
+    });
+    window.dispatchEvent(new CustomEvent('auth:updated'));
+  }, []);
+
+  const loginAsDesktopOperator = useCallback(async () => {
+    localStorage.removeItem(LOGGED_OUT_KEY);
+    // Instant local admin state for smooth UI transition
+    const opAuth: AuthState = {
+      user: 'desktop-operator',
+      token: null,
+      role: 'admin',
+      isLoggedIn: true,
+      isAdmin: true,
+    };
+    setAuth(opAuth);
+    window.dispatchEvent(new CustomEvent('auth:updated'));
+
+    // Attempt to acquire fresh loopback token for authenticated backend services
+    try {
+      const resp = await fetch('/api/auth/dev-login', { method: 'POST' });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.token) {
+          persistAuth(data.token, data.userId || 'desktop-operator', data.role ?? 'admin');
+          setAuth({
+            user: data.userId || 'desktop-operator',
+            token: data.token,
+            role: data.role ?? 'admin',
+            isLoggedIn: true,
+            isAdmin: true,
+          });
+          window.dispatchEvent(new CustomEvent('auth:updated'));
+        }
+      }
+    } catch {
+      // Offline fallback: keep desktop-operator local admin
+    }
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(ROLE_KEY);
+    localStorage.setItem(LOGGED_OUT_KEY, 'true');
     setAuth({ user: null, token: null, role: null, isLoggedIn: false, isAdmin: false });
     window.dispatchEvent(new CustomEvent('auth:updated'));
-    window.location.reload();
+    window.dispatchEvent(new CustomEvent('auth:required'));
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...auth, login, logout }}>
+    <AuthContext.Provider value={{ ...auth, login, register, logout, loginAsDesktopOperator }}>
       {children}
     </AuthContext.Provider>
   );

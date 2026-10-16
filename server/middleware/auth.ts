@@ -172,6 +172,45 @@ export function login(req: Request, res: Response): void {
   res.json({ token, userId: user.id, role: user.role });
 }
 
+export function registerUser(req: Request, res: Response): void {
+  const { username, password } = req.body ?? {};
+
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    res.status(400).json({ error: 'Username and password required' });
+    return;
+  }
+
+  const normalized = normalizeUsername(username);
+  if (!normalized) {
+    res.status(400).json({ error: 'Username must be 3-32 alphanumeric characters' });
+    return;
+  }
+  if (!isValidPassword(password)) {
+    res.status(400).json({ error: 'Password must be at least 8 characters' });
+    return;
+  }
+
+  const existing = getUserByName(normalized);
+  if (existing) {
+    res.status(409).json({ error: 'Username is already taken' });
+    return;
+  }
+
+  try {
+    const hash = hashPassword(password);
+    const role = 'user';
+    getDb()
+      .prepare('INSERT INTO users (id, name, password_hash, role) VALUES (?, ?, ?, ?)')
+      .run(normalized, normalized, hash, role);
+
+    const token = jwt.sign({ sub: normalized, role }, JWT_SECRET(), { expiresIn: TOKEN_TTL });
+    res.status(201).json({ token, userId: normalized, role });
+  } catch (err) {
+    logger.error({ err, username: normalized }, 'Failed to register new user');
+    res.status(500).json({ error: 'Failed to create user account' });
+  }
+}
+
 export function authGuard(req: Request, res: Response, next: NextFunction): void {
   const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
   const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
