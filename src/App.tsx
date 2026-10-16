@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -11407,8 +11407,22 @@ case 'openPanel':
             <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.05)', borderColor: showTimeSlider ? 'rgba(96,165,250,0.5)' : undefined, fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}><Clock size={12} style={{display:'inline',marginRight:3}} /> Timeline</button>
             <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}><Ruler size={12} style={{display:'inline',marginRight:3}} /> Measure</button>
             <button className="btn-all" style={{background: navMode==='route' ? 'rgba(34,211,238,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='route'; setNavMode(on?'route':'none'); if(!on){clearNavEntities(); setRoutePoints([]); setRouteResult(null);} setShowMeasureTool(false); }}><Navigation2 size={12} style={{display:'inline',marginRight:3}} /> Route</button>
-            <button className="btn-all" style={{background: navMode==='safest' ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='safest'; setNavMode(on?'safest':'none'); if(!on){clearNavEntities(); setSafestHazard(null); setSafestResult(null);} setShowMeasureTool(false); }}><Shield size={12} style={{display:'inline',marginRight:3}} /> Safest</button>
-            {(isAdmin || isDesktopApp) && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}><Shield size={12} style={{display:'inline',marginRight:3}} /> Admin</button>}
+            {isLoggedIn ? (
+              (isAdmin || isDesktopApp) && (
+                <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}>
+                  <Shield size={12} style={{display:'inline',marginRight:3}} /> Admin
+                </button>
+              )
+            ) : (
+              <button
+                className="btn-all"
+                style={{background:'rgba(59,130,246,0.25)', color:'#60a5fa', borderColor:'rgba(59,130,246,0.4)', fontSize:10}}
+                onClick={() => window.dispatchEvent(new CustomEvent('auth:required'))}
+                title="Sign in to Terranoetis"
+              >
+                <Lock size={12} style={{display:'inline',marginRight:3}} /> Sign In
+              </button>
+            )}
           </div>
           <button className="btn-all" onClick={enableDefaultLayers}>Reset to Defaults</button>
         </div>

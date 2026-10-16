@@ -84,12 +84,12 @@ export function storeEval(
   }
 }
 
-export function getRecentEvals(limit = 100): Array<EvalScores & { query: string; createdAt: string }> {
+export function getRecentEvals(limit = 100): Array<EvalScores & { query: string; createdAt: string; metadata_json?: string | null }> {
   try {
     const db = getDb();
     return db.prepare(
-      'SELECT query, relevance, factual_accuracy, helpfulness, conciseness, overall, created_at FROM eval_scores ORDER BY created_at DESC LIMIT ?',
-    ).all(limit) as Array<EvalScores & { query: string; createdAt: string }>;
+      'SELECT query, relevance, factual_accuracy, helpfulness, conciseness, overall, created_at, metadata_json FROM eval_scores ORDER BY created_at DESC LIMIT ?',
+    ).all(limit) as Array<EvalScores & { query: string; createdAt: string; metadata_json?: string | null }>;
   } catch {
     return [];
   }

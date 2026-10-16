@@ -1,4 +1,4 @@
-import { evaluateResponse, storeEval, type EvalScores } from './ml/evals';
+import { evaluateResponse, storeEval, getRecentEvals, type EvalScores } from './ml/evals';
 import { promptLab } from './ml/promptLab';
 import { logger } from './observability/logger';
 import { MetaCognition } from './meta-cognition/index';
@@ -6,6 +6,7 @@ import { performanceAnalyzer } from './meta-cognition/performanceAnalyzer';
 import { intentDiscovery } from './meta-cognition/intentDiscovery';
 import { architectureProposals } from './meta-cognition/architectureProposals';
 import type { FeedbackManager } from './selfImprover';
+import type { BanditRouter } from './self-evolution/banditRouter';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export interface SelfImprovementReport {
 export class SelfImproverV2 {
   private metaCognition: MetaCognition;
   private feedbackManager: FeedbackManager | null = null;
+  private banditRouter: BanditRouter | null = null;
   private cycleCount = 0;
 
   constructor() {
@@ -37,6 +39,10 @@ export class SelfImproverV2 {
 
   setFeedbackManager(fm: FeedbackManager): void {
     this.feedbackManager = fm;
+  }
+
+  setBanditRouter(router: BanditRouter): void {
+    this.banditRouter = router;
   }
 
   init(): void {
@@ -74,6 +80,11 @@ export class SelfImproverV2 {
 
     // Update reward model
     this.metaCognition.feedbackLearning.learnFromVote(query, response, vote, intentType, modelTier);
+
+    // Update multi-armed bandit arm
+    if (this.banditRouter && modelTier) {
+      this.banditRouter.updateReward(modelTier, vote === 'up' ? 1 : 0);
+    }
   }
 
   /** Evaluate a response and feed results into all systems */
@@ -92,6 +103,11 @@ export class SelfImproverV2 {
 
       // Record latency in performance analyzer
       performanceAnalyzer.recordLatency(context.intentType || 'unknown', 0);
+
+      // Update bandit arm reward from empirical evaluation
+      if (this.banditRouter && context.modelTier) {
+        this.banditRouter.updateReward(context.modelTier, scores.overall >= 0.7 ? 1 : 0);
+      }
 
       // Record unmatched queries for intent discovery
       if (context.intentType === 'unknown') {
@@ -132,6 +148,25 @@ export class SelfImproverV2 {
     for (let i = 0; i < Math.min(underperformers.length, 3); i++) {
       await this.metaCognition.runCycle();
       promptsEvolved++;
+    }
+
+    // Calibrate bandit router against historical database evals if arms are unsampled
+    if (this.banditRouter) {
+      const stats = this.banditRouter.getStats();
+      const totalPulls = stats.reduce((sum, s) => sum + s.pulls, 0);
+      if (totalPulls === 0) {
+        const dbEvals = getRecentEvals(200);
+        for (const ev of dbEvals) {
+          if (ev.metadata_json) {
+            try {
+              const meta = JSON.parse(ev.metadata_json);
+              if (meta?.modelTier) {
+                this.banditRouter.updateReward(meta.modelTier, (ev.overall ?? 0.5) >= 0.7 ? 1 : 0);
+              }
+            } catch { /* ignore parse error */ }
+          }
+        }
+      }
     }
 
     // Update baselines

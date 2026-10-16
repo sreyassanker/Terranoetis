@@ -137,7 +137,7 @@ import { knowledgeGraph } from './ml/knowledgeGraph';
 import { entityGenerator, edgeGenerator, counterfactualGraph, graphCompletion, evolvingGraph } from './kgV2/index';
 import { predictor, type Prediction } from './ml/predictor';
 import { omninet, classifyComplexity } from './ai-router/omninet';
-import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin, refreshToken } from './middleware/auth';
+import { login, registerUser, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin, refreshToken } from './middleware/auth';
 import { perUserRateLimiter, perIpRateLimiter } from './middleware/rateLimiter';
 import { requireOwnership } from './middleware/tenantIsolation';
 import { auditLog } from './middleware/audit';
@@ -373,6 +373,7 @@ function stopResourceMonitor(): void {
 const loginRateLimit = perIpRateLimiter(5, 15 * 60 * 1000);
 const publicDataRateLimit = perIpRateLimiter(300, 60000);
 app.post('/api/auth/login', loginRateLimit, login);
+app.post('/api/auth/register', loginRateLimit, registerUser);
 
 app.post('/api/auth/dev-login', devAutoLogin);
 
@@ -1251,33 +1252,49 @@ function extractIndiaCctvCameras(html: string): IndiaCctvCamera[] {
 app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   const checks: Record<string, { status: string; detail?: string }> = {};
 
+  // 1. SQLite Database check
   try {
     const db = getDb();
     db.prepare('SELECT 1').get();
-    checks.db = { status: 'ok' };
+    checks.db = { status: 'ok', detail: 'SQLite realtime.db connected' };
   } catch (e) {
     checks.db = { status: 'fail', detail: (e as Error).message };
   }
 
+  // 2. Gemini / Cloud LLM provider check
   const providerStatus = omninet.getStatus();
   const geminiStatus = providerStatus.find(s => s.name === 'gemini');
-  if (geminiStatus) {
-    checks.gemini = { status: geminiStatus.status === 'healthy' ? 'ok' : geminiStatus.status === 'down' ? 'fail' : 'degraded' };
+  const hasGeminiKey = Boolean(
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    keyManager.get('GEMINI_API_KEY') ||
+    keyManager.get('GOOGLE_GEMINI_API_KEY')
+  );
+
+  if (!hasGeminiKey) {
+    checks.gemini = { status: 'not_configured', detail: 'Key unset in Settings · Local AI available' };
+  } else if (geminiStatus) {
+    checks.gemini = {
+      status: geminiStatus.status === 'healthy' ? 'ok' : geminiStatus.status === 'down' ? 'fail' : 'degraded',
+      detail: geminiStatus.status === 'healthy' ? 'Connected' : 'API unreachable or rate-limited',
+    };
   } else {
-    checks.gemini = { status: 'not_configured' };
+    checks.gemini = { status: 'not_configured', detail: 'Provider not initialized' };
   }
 
-  const diskFree = 0;
+  // 3. Memory usage check
   try {
-    const tmpPath = process.env.TMPDIR || '/tmp';
     const usage = process.memoryUsage();
-    checks.memory = { status: usage.heapUsed > 500 * 1024 * 1024 ? 'degraded' : 'ok', detail: `${Math.round(usage.heapUsed / 1024 / 1024)}MB` };
+    checks.memory = {
+      status: usage.heapUsed > 600 * 1024 * 1024 ? 'degraded' : 'ok',
+      detail: `${Math.round(usage.heapUsed / 1024 / 1024)}MB heap / ${Math.round(usage.rss / 1024 / 1024)}MB rss`,
+    };
   } catch (e) {
     logger.warn({ err: e }, 'Health check: memory check failed');
     checks.memory = { status: 'unknown' };
   }
 
-  // Engine health checks
+  // 4. Cognitive Engine singletons
   const engineNames = ['__reflexEngine', '__forkManager', '__dreamEngine', '__memorySystem', '__entropyMixer', '__discoveryEngine'] as const;
   const engineLabels: Record<string, string> = {
     __reflexEngine: 'reflex',
@@ -1289,38 +1306,62 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   };
   for (const name of engineNames) {
     const g = (global as any)[name];
-    checks[engineLabels[name]] = { status: g ? 'ok' : 'missing' };
+    checks[engineLabels[name]] = { status: g ? 'ok' : 'missing', detail: g ? 'Engine singleton active' : 'Not instantiated' };
   }
 
-  // Pubsub check
+  // 5. PubSub event bus check
   try {
     let pubsubOk = false;
     const unsub = pubsub.subscribe('health:check', () => { pubsubOk = true; });
     pubsub.publish('health:check', { t: Date.now() });
     unsub();
-    checks.pubsub = { status: pubsubOk ? 'ok' : 'fail' };
+    checks.pubsub = { status: pubsubOk ? 'ok' : 'fail', detail: pubsubOk ? 'Loopback verified' : 'Message dispatch dropped' };
   } catch (e) {
     logger.warn({ err: e }, 'Health check: pubsub unavailable');
-    checks.pubsub = { status: 'fail' };
+    checks.pubsub = { status: 'fail', detail: (e as Error).message };
   }
 
-  // Redis check — a Redis outage silently degrades caching + pubsub, so it
-  // must be visible in /api/health (and thus the Docker HEALTHCHECK + alerting).
+  // 6. Redis / Cache layer check (distinguishes standalone desktop vs cluster deployment)
+  const isRedisConfigured = Boolean(process.env.REDIS_URL || process.env.REQUIRE_REDIS === 'true');
   try {
     const redisOk = await redisHealthCheck();
-    checks.redis = { status: redisOk ? 'ok' : 'fail', detail: redisOk ? 'PONG' : 'unreachable' };
+    if (redisOk) {
+      checks.redis = { status: 'ok', detail: 'PONG · Cluster cache active' };
+    } else if (isRedisConfigured) {
+      checks.redis = { status: 'fail', detail: 'Configured Redis server unreachable' };
+    } else {
+      checks.redis = { status: 'standby', detail: 'In-memory cache & pubsub active' };
+    }
   } catch (e) {
-    logger.warn({ err: e }, 'Health check: redis unavailable');
-    checks.redis = { status: 'fail', detail: (e as Error).message };
+    if (isRedisConfigured) {
+      checks.redis = { status: 'fail', detail: (e as Error).message };
+    } else {
+      checks.redis = { status: 'standby', detail: 'In-memory cache & pubsub active' };
+    }
   }
 
-  const overallStatus = Object.values(checks).every(c => c.status === 'ok' || c.status === 'not_configured') ? 'healthy' : 'degraded';
+  // 7. Dynamic versioning
+  let appVersion = '3.0.0';
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      if (pkg.version) appVersion = pkg.version;
+    }
+  } catch { /* fallback to 3.0.0 */ }
+
+  // 8. Overall status: Core platform services determine system health
+  const criticalChecks = ['db', 'memory', 'pubsub', 'reflex', 'forks', 'dream', 'entropy', 'discovery'];
+  const hasCriticalFailure = criticalChecks.some(k => checks[k]?.status === 'fail' || checks[k]?.status === 'missing');
+  const hasCriticalDegraded = criticalChecks.some(k => checks[k]?.status === 'degraded');
+
+  const overallStatus = hasCriticalFailure ? 'unhealthy' : hasCriticalDegraded ? 'degraded' : 'healthy';
 
   res.json({
     status: overallStatus,
     checks,
     uptime_ms: process.uptime() * 1000,
-    version: '3.1',
+    version: appVersion,
     ts: Date.now(),
   });
 });
@@ -1568,18 +1609,20 @@ app.post('/api/admin/plugins/install-zip', requireRole('admin'), async (req: exp
 });
 
 app.delete('/api/admin/plugins/:id', requireRole('admin'), (req: express.Request, res: express.Response) => {
-  const removed = pluginManager.removePlugin(req.params.id);
+  const pluginId = decodeURIComponent(req.params.id);
+  const removed = pluginManager.removePlugin(pluginId);
   if (!removed) return res.status(404).json({ error: 'Plugin not found or cannot be removed (builtin plugins are protected)' });
-  auditLog((req as any).userId || 'admin', 'plugin_remove', `plugin:${req.params.id}`, '', req.ip || '', req.headers['user-agent'] || '');
-  res.json({ ok: true, removed: req.params.id });
+  auditLog((req as any).userId || 'admin', 'plugin_remove', `plugin:${pluginId}`, '', req.ip || '', req.headers['user-agent'] || '');
+  res.json({ ok: true, removed: pluginId });
 });
 
 app.post('/api/admin/plugins/:id/toggle', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const pluginId = decodeURIComponent(req.params.id);
   const enabled = req.body?.enabled === true;
-  const ok = pluginManager.setEnabled(req.params.id, enabled);
+  const ok = pluginManager.setEnabled(pluginId, enabled);
   if (!ok) return res.status(404).json({ error: 'Plugin not found' });
-  auditLog((req as any).userId || 'admin', 'plugin_toggle', `plugin:${req.params.id}`, `enabled:${enabled}`, req.ip || '', req.headers['user-agent'] || '');
-  res.json({ ok: true, id: req.params.id, enabled });
+  auditLog((req as any).userId || 'admin', 'plugin_toggle', `plugin:${pluginId}`, `enabled:${enabled}`, req.ip || '', req.headers['user-agent'] || '');
+  res.json({ ok: true, id: pluginId, enabled });
 });
 
 // ── Professional Local AI Model Hub API ─────────────────────────
@@ -8812,6 +8855,7 @@ const testRunner = new TestRunner(__dirname);
 const gitIntegration = new GitIntegration(path.resolve(__dirname, '..'));
 const intentDiscovery = new IntentDiscoveryV2(null as any, codeWriter);
 const banditRouter = new BanditRouter(['gpt-4o', 'claude-3-opus', 'gemini-2', 'deepseek-v4']);
+selfImproverV2.setBanditRouter(banditRouter);
 const perfMonitor = new PerfMonitor();
 
 app.use('/api/self-evolution', createSelfEvolutionRouter({

@@ -250,33 +250,46 @@ export class PluginManager {
     if (id.startsWith('builtin:')) {
       return false;
     }
-    const plugin = this.plugins.get(id);
-    if (!plugin) return false;
+    const cleanId = id.trim();
+    let target = this.plugins.get(cleanId);
+    let resolvedId = cleanId;
 
-    this.plugins.delete(id);
+    if (!target) {
+      if (cleanId.startsWith('file:')) {
+        const bare = cleanId.slice(5);
+        target = this.plugins.get(bare);
+        if (target) resolvedId = bare;
+      } else {
+        const withFile = `file:${cleanId}`;
+        target = this.plugins.get(withFile);
+        if (target) resolvedId = withFile;
+      }
+    }
+
+    if (!target) return false;
+
+    this.plugins.delete(resolvedId);
 
     try {
       const db = getDb();
-      db.prepare('DELETE FROM plugin_states WHERE id = ?').run(id);
+      db.prepare('DELETE FROM plugin_states WHERE id = ? OR id = ?').run(resolvedId, resolvedId.replace(/^file:/, ''));
     } catch {
       /* ignore */
     }
 
-    for (const tool of plugin.tools || []) {
+    for (const tool of target.tools || []) {
       this.toolHandlers.delete(tool.name);
     }
-    for (const ds of plugin.dataSources || []) {
+    for (const ds of target.dataSources || []) {
       this.dataHandlers.delete(ds.name);
     }
 
-    if (id.startsWith('file:')) {
-      const filename = id.slice(5);
-      const pluginPath = path.join(PLUGINS_DIR, filename);
-      try {
-        if (fs.existsSync(pluginPath)) fs.unlinkSync(pluginPath);
-      } catch {
-        /* ignore */
-      }
+    const filename = resolvedId.replace(/^file:/, '');
+    const pluginPath = path.join(PLUGINS_DIR, filename);
+    try {
+      if (fs.existsSync(pluginPath)) fs.unlinkSync(pluginPath);
+    } catch {
+      /* ignore */
     }
 
     if (this.onToolChange) this.onToolChange();
