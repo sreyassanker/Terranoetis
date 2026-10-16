@@ -182,6 +182,7 @@ import { spacexEngine } from './foundation-models/spacexApi';
 import { bayFireDetector } from './foundation-models/bayFireDetector';
 import { weatherForecaster } from './foundation-models/weatherForecaster';
 import { agricultureMonitor } from './foundation-models/agricultureMonitor';
+import { localAiManager } from './localAiManager';
 dotenv.config();
 // Initialize dynamic encrypted key storage (AppData at rest + env injection)
 keyManager.init();
@@ -854,35 +855,11 @@ executor.init();
 // Initialize Omninet — free-tier AI provider router
 omninet.init();
 
-// Auto-start local llama-server GGUF fallback if the model file exists.
-// Spawns in background; the local-gguf provider in omninet uses it as a
-// last-resort when all remote providers are unavailable.
-const GGUF_MODEL = './models/LFM2.5-2.6B-Q4_K_M.gguf';
-const GGUF_PORT = 11436;
-if (fs.existsSync(GGUF_MODEL)) {
-  // Cross-platform: LLAMA_SERVER_PATH always wins; otherwise the conventional
-  // location per OS (Windows/Linux resolve `llama-server` from PATH).
-  const llamaBin = process.env.LLAMA_SERVER_PATH || (os.platform() === 'darwin' ? '/opt/homebrew/bin/llama-server' : 'llama-server');
-  try {
-    const llamaOut = fs.openSync(path.join(os.tmpdir(), 'terranoetis-llama.log'), 'a');
-    const llamaServer = spawn(llamaBin, [
-      '--model', GGUF_MODEL,
-      '--port', String(GGUF_PORT),
-      '-c', '2048',
-    ], { stdio: ['ignore', llamaOut, llamaOut], detached: true });
-    llamaServer.unref();
-    llamaServer.on('error', (err: Error) => logger.warn({ err: err.message }, 'llama-server failed to start'));
-    logger.info({ port: GGUF_PORT, model: GGUF_MODEL, bin: llamaBin }, 'Local GGUF fallback model started');
-  } catch (e) {
-    logger.warn({ err: (e as Error).message }, 'llama-server could not be launched on this platform — GGUF fallback disabled');
-  }
-  // Give it ~15s to load the model, then the provider is ready.
-  setTimeout(() => {
-    logger.info('Local GGUF model ready (or failed silently — harmless)');
-  }, 15000);
-} else {
-  logger.warn({ path: GGUF_MODEL }, 'GGUF model not found — local-gguf fallback unavailable');
-}
+// Initialize Local AI Manager for on-device GGUF models & llama-server
+localAiManager.init();
+setTimeout(() => {
+  void omninet.triggerImmediateHealthChecks();
+}, 2000);
 
 // Phase 4: Initialize memory systems with embedding engine
 const embeddingEngine = new EmbeddingEngine();
@@ -925,8 +902,10 @@ sentinel.init().then(() => {
   try {
     correlationEngine = new CorrelationEngine(db);
     correlationEngine.start();
-    // Fetch external data sources immediately
-    correlationEngine.ingestFromExternalSources().catch(() => {});
+    // Defer external data sources until after startup settles
+    setTimeout(() => {
+      correlationEngine?.ingestFromExternalSources().catch(() => {});
+    }, 15000);
     logger.info('[Correlation] Engine started — cross-correlating real data streams');
   } catch (err) {
     logger.error({ err: String(err) }, '[Correlation] Engine failed to start');
@@ -1410,7 +1389,13 @@ app.get('/api/admin/audit-logs', requireRole('admin'), (req: express.Request, re
 
 app.get('/api/admin/plugins', requireRole('admin'), (_req: express.Request, res: express.Response) => {
   res.json({
-    plugins: pluginManager.listPlugins().map((plugin) => ({ ...plugin, enabled: true })),
+    plugins: pluginManager.listPlugins(),
+  });
+});
+
+app.get('/api/admin/plugins/templates', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  res.json({
+    templates: pluginManager.getCuratedTemplates(),
   });
 });
 
@@ -1538,6 +1523,7 @@ app.post('/api/admin/plugins/install', requireRole('admin'), async (req: express
     try {
       const pluginId = await pluginManager.installPlugin(name, content);
       if (!pluginId) return res.status(500).json({ error: 'Plugin installed but not loaded — check server logs for errors' });
+      auditLog((req as any).userId || 'admin', 'plugin_install', `plugin:${pluginId}`, `source:content`, req.ip || '', req.headers['user-agent'] || '');
       return res.json({ ok: true, pluginId, source: 'content' });
     } catch (e) {
       return res.status(400).json({ error: String(e) });
@@ -1565,8 +1551,12 @@ app.post('/api/admin/plugins/install-zip', requireRole('admin'), async (req: exp
       try {
         const content = entry.getData().toString('utf-8');
         const pluginId = await pluginManager.installPlugin(entry.name, content);
-        if (pluginId) pluginIds.push(pluginId);
-        else errors.push(`${entry.name}: installed but not loaded`);
+        if (pluginId) {
+          pluginIds.push(pluginId);
+          auditLog((req as any).userId || 'admin', 'plugin_install', `plugin:${pluginId}`, 'source:zip', req.ip || '', req.headers['user-agent'] || '');
+        } else {
+          errors.push(`${entry.name}: installed but not loaded`);
+        }
       } catch (e) {
         errors.push(`${entry.name}: ${String(e)}`);
       }
@@ -1580,6 +1570,7 @@ app.post('/api/admin/plugins/install-zip', requireRole('admin'), async (req: exp
 app.delete('/api/admin/plugins/:id', requireRole('admin'), (req: express.Request, res: express.Response) => {
   const removed = pluginManager.removePlugin(req.params.id);
   if (!removed) return res.status(404).json({ error: 'Plugin not found or cannot be removed (builtin plugins are protected)' });
+  auditLog((req as any).userId || 'admin', 'plugin_remove', `plugin:${req.params.id}`, '', req.ip || '', req.headers['user-agent'] || '');
   res.json({ ok: true, removed: req.params.id });
 });
 
@@ -1587,168 +1578,120 @@ app.post('/api/admin/plugins/:id/toggle', requireRole('admin'), (req: express.Re
   const enabled = req.body?.enabled === true;
   const ok = pluginManager.setEnabled(req.params.id, enabled);
   if (!ok) return res.status(404).json({ error: 'Plugin not found' });
+  auditLog((req as any).userId || 'admin', 'plugin_toggle', `plugin:${req.params.id}`, `enabled:${enabled}`, req.ip || '', req.headers['user-agent'] || '');
   res.json({ ok: true, id: req.params.id, enabled });
 });
 
-// ── Local GGUF model download ──────────────────────────────────
-// Downloads the LFM 2.5 2.6B Q4_K_M GGUF model into ./models/ so the
-// local llama-server fallback works out of the box. Tracks progress so the
-// admin panel can show a live progress bar.
-const GGUF_DOWNLOAD_URL = process.env.GGUF_DOWNLOAD_URL || 'https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main/LFM2.5-2.6B-Q4_K_M.gguf';
-const GGUF_MODEL_NAME = GGUF_MODEL.replace('./models/', '');
-const GGUF_PARTIAL_PATH = `${GGUF_MODEL}.partial`;
-const ggufDownloadState: { running: boolean; received: number; total: number; done: boolean; error?: string; startedAt?: number; resuming?: boolean; resumeOffset: number; cancelled: boolean } = { running: false, received: 0, total: 0, done: false, resumeOffset: 0, cancelled: false };
-let ggufDownloadAbort: AbortController | null = null;
+// ── Professional Local AI Model Hub API ─────────────────────────
+app.get('/api/admin/local-ai/device', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  res.json(localAiManager.getDeviceSpecs());
+});
 
-async function downloadGGUFModel(): Promise<void> {
-  if (ggufDownloadState.running) return;
-  ggufDownloadState.running = true;
-  ggufDownloadState.done = false;
-  ggufDownloadState.error = undefined;
-  ggufDownloadState.cancelled = false;
-  ggufDownloadState.startedAt = Date.now();
-
-  const abort = new AbortController();
-  ggufDownloadAbort = abort;
-
-  try {
-    await fs.promises.mkdir('./models', { recursive: true });
-
-    // Resume support: if a .partial file already exists, pick up from where
-    // the last (interrupted) attempt stopped instead of starting over.
-    let resumeFrom = 0;
-    try {
-      if (fs.existsSync(GGUF_PARTIAL_PATH)) resumeFrom = fs.statSync(GGUF_PARTIAL_PATH).size;
-    } catch { /* ignore */ }
-    ggufDownloadState.resuming = resumeFrom > 0;
-    ggufDownloadState.resumeOffset = resumeFrom;
-    ggufDownloadState.received = resumeFrom;
-
-    const headers: Record<string, string> = {};
-    if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
-    const resp = await fetch(GGUF_DOWNLOAD_URL, { headers, signal: abort.signal });
-    if (!resp.ok || !resp.body) {
-      ggufDownloadState.error = `Download failed (HTTP ${resp.status})`;
-      ggufDownloadState.running = false;
-      return;
-    }
-    // If we asked for a partial (resume) but the server responded 200 with the
-    // FULL body (Range ignored), appending would double/corrupt the file.
-    // Require 206 Partial Content when resuming.
-    if (resumeFrom > 0 && resp.status !== 206) {
-      ggufDownloadState.error = `Server ignored Range request (HTTP ${resp.status}) — delete the .partial file and retry from scratch`;
-      ggufDownloadState.running = false;
-      return;
-    }
-
-    // Total size: HuggingFace returns the full size in the Content-Range header
-    // when resuming, otherwise Content-Length.
-    let total = Number(resp.headers.get('content-length') || 0);
-    if (resumeFrom > 0) {
-      const cr = resp.headers.get('content-range'); // e.g. "bytes 500000000-1674455039/1674455040"
-      const m = cr ? /\/\s*(\d+)\s*$/.exec(cr) : null;
-      if (m) total = Number(m[1]);
-      else total += resumeFrom;
-    }
-    ggufDownloadState.total = total;
-
-    // Stream to a .partial temp file so an interrupted download never leaves a
-    // corrupt file at the real model path. Rename to the final path on success.
-    const writer = fs.createWriteStream(GGUF_PARTIAL_PATH, { flags: resumeFrom > 0 ? 'a' : 'w' });
-
-    const reader = resp.body.getReader();
-    const pump = async (): Promise<void> => {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          writer.write(Buffer.from(value));
-          ggufDownloadState.received += value.length;
-        }
-      }
-    };
-    await pump();
-    await new Promise<void>((resolve, reject) => writer.end((err: Error | null) => (err ? reject(err) : resolve())));
-
-    await fs.promises.rename(GGUF_PARTIAL_PATH, GGUF_MODEL);
-    ggufDownloadState.done = true;
-    ggufDownloadState.resuming = false;
-    logger.info({ path: GGUF_MODEL, bytes: ggufDownloadState.received }, 'GGUF model download complete');
-  } catch (e) {
-    if (ggufDownloadState.cancelled) {
-      logger.info('GGUF model download cancelled by user');
-    } else {
-      ggufDownloadState.error = (e as Error).message;
-      logger.error({ err: e }, 'GGUF model download failed — partial file kept for resume');
-    }
-  } finally {
-    ggufDownloadState.running = false;
-    ggufDownloadAbort = null;
-  }
-}
-
-app.get('/api/admin/models/gguf-status', requireRole('admin'), (_req: express.Request, res: express.Response) => {
-  let exists = false;
-  let size = 0;
-  let partialExists = false;
-  let partialSize = 0;
-  try {
-    exists = fs.existsSync(GGUF_MODEL);
-    if (exists) size = fs.statSync(GGUF_MODEL).size;
-    partialExists = fs.existsSync(GGUF_PARTIAL_PATH);
-    if (partialExists) partialSize = fs.statSync(GGUF_PARTIAL_PATH).size;
-  } catch { /* ignore */ }
-  const elapsedMs = ggufDownloadState.startedAt ? Date.now() - ggufDownloadState.startedAt : 0;
-  const downloadedSinceStart = Math.max(0, ggufDownloadState.received - ggufDownloadState.resumeOffset);
-  const speedBytes = ggufDownloadState.running && elapsedMs > 0 ? (downloadedSinceStart / elapsedMs) * 1000 : 0;
-  const remaining = ggufDownloadState.total > 0 ? Math.max(0, ggufDownloadState.total - ggufDownloadState.received) : 0;
-  const etaSeconds = speedBytes > 0 && remaining > 0 ? Math.round(remaining / speedBytes) : 0;
+app.get('/api/admin/local-ai/catalog', requireRole('admin'), (_req: express.Request, res: express.Response) => {
   res.json({
-    installed: exists && size > 1_000_000_000,
-    size,
-    partialSize,
-    url: GGUF_DOWNLOAD_URL,
-    download: {
-      ...ggufDownloadState,
-      percent: ggufDownloadState.total > 0 ? Math.min(100, Math.round((ggufDownloadState.received / ggufDownloadState.total) * 100)) : 0,
-      speedBytes,
-      etaSeconds,
-    },
+    device: localAiManager.getDeviceSpecs(),
+    models: localAiManager.getCuratedCatalog(),
+  });
+});
+
+app.get('/api/admin/local-ai/installed', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  res.json({
+    models: localAiManager.listInstalledModels(),
+    activeModel: localAiManager.getActiveModelName(),
+    isRunning: localAiManager.isProcessRunning(),
+  });
+});
+
+app.get('/api/admin/local-ai/search', requireRole('admin'), async (req: express.Request, res: express.Response) => {
+  try {
+    const q = String(req.query.q || '');
+    const results = await localAiManager.searchHuggingFaceHub(q);
+    res.json({ results });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/admin/local-ai/repo-files', requireRole('admin'), async (req: express.Request, res: express.Response) => {
+  try {
+    const repo = String(req.query.repo || '');
+    if (!repo) return res.status(400).json({ error: 'repo parameter required' });
+    const files = await localAiManager.getRepoFiles(repo);
+    res.json({ repo, files });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/admin/local-ai/download-status', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  res.json(localAiManager.getDownloadStatus());
+});
+
+app.post('/api/admin/local-ai/download', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const { repoId, fileName, downloadUrl } = req.body || {};
+  if (!fileName || !downloadUrl) {
+    return res.status(400).json({ error: 'fileName and downloadUrl required' });
+  }
+  localAiManager.startDownload({ repoId: repoId || 'huggingface', fileName, downloadUrl }).catch((err) => {
+    logger.error({ err }, '[LocalAi] Download error');
+  });
+  res.json({ ok: true, message: `Download started for ${fileName}` });
+});
+
+app.post('/api/admin/local-ai/cancel', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  const result = localAiManager.cancelDownload();
+  res.json(result);
+});
+
+app.post('/api/admin/local-ai/activate', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const { filename } = req.body || {};
+  if (!filename) return res.status(400).json({ error: 'filename required' });
+  const result = localAiManager.setActiveModel(filename);
+  if (result.ok) {
+    void omninet.triggerImmediateHealthChecks();
+  }
+  res.json(result);
+});
+
+app.delete('/api/admin/local-ai/models/:filename', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const result = localAiManager.deleteModel(req.params.filename);
+  if (result.ok) {
+    void omninet.triggerImmediateHealthChecks();
+  }
+  res.json(result);
+});
+
+// Legacy backwards-compatible endpoints for older UI callers
+app.get('/api/admin/models/gguf-status', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  const installed = localAiManager.listInstalledModels();
+  const dlStatus = localAiManager.getDownloadStatus();
+  res.json({
+    installed: installed.length > 0,
+    size: installed[0]?.sizeBytes || 0,
+    models: installed,
+    download: dlStatus,
   });
 });
 
 app.post('/api/admin/models/gguf-download', requireRole('admin'), (_req: express.Request, res: express.Response) => {
-  if (fs.existsSync(GGUF_MODEL) && fs.statSync(GGUF_MODEL).size > 1_000_000_000) {
-    return res.json({ ok: true, alreadyInstalled: true });
-  }
-  void downloadGGUFModel();
-  res.json({ ok: true, started: true, message: 'Model download started' });
+  const defaultModel = localAiManager.getCuratedCatalog()[3] || localAiManager.getCuratedCatalog()[0];
+  localAiManager.startDownload({
+    repoId: defaultModel.repo,
+    fileName: defaultModel.file,
+    downloadUrl: defaultModel.downloadUrl,
+  }).catch((err) => logger.error({ err }, 'GGUF legacy download error'));
+  res.json({ ok: true, started: true, message: `Model download started: ${defaultModel.file}` });
 });
 
 app.delete('/api/admin/models/gguf', requireRole('admin'), (_req: express.Request, res: express.Response) => {
-  try {
-    // Abort any active download first
-    if (ggufDownloadState.running) {
-      ggufDownloadState.cancelled = true;
-      ggufDownloadAbort?.abort();
-    }
-    // Reset state
-    Object.assign(ggufDownloadState, { running: false, received: 0, total: 0, done: false, error: undefined, startedAt: undefined, resuming: false, resumeOffset: 0, cancelled: false });
-    ggufDownloadAbort = null;
-
-    let removed = false;
-    if (fs.existsSync(GGUF_MODEL)) {
-      fs.unlinkSync(GGUF_MODEL);
-      removed = true;
-    }
-    if (fs.existsSync(GGUF_PARTIAL_PATH)) {
-      fs.unlinkSync(GGUF_PARTIAL_PATH);
-      removed = true;
-    }
-    res.json({ ok: true, removed });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
+  localAiManager.cancelDownload();
+  const installed = localAiManager.listInstalledModels();
+  let removed = false;
+  for (const m of installed) {
+    localAiManager.deleteModel(m.filename);
+    removed = true;
   }
+  res.json({ ok: true, removed });
 });
 
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
@@ -12006,7 +11949,9 @@ app.get('/api/agent/models', authGuard, (_req: express.Request, res: express.Res
         if (model.includes('gpt-oss-20b')) return 'Groq — GPT-OSS 20B (Balanced)';
       }
       if (provider === 'local-gguf') {
-        return 'Local Offline — LFM 2.6B (On-Device)';
+        const activeName = localAiManager.getActiveModelName();
+        const clean = activeName ? activeName.replace(/\.gguf$/i, '') : 'LFM 2.6B';
+        return `Local Offline — ${clean} (On-Device)`;
       }
       return `${provider} — ${model}`;
     };
@@ -12014,8 +11959,9 @@ app.get('/api/agent/models', authGuard, (_req: express.Request, res: express.Res
     for (const p of providers) {
       const keyVal = p.apiKeyEnvVar ? (keyManager.get(p.apiKeyEnvVar) || process.env[p.apiKeyEnvVar]) : undefined;
       const hasKey = p.local || Boolean(keyVal);
-      const isWorking = hasKey && p.status !== 'down' && p.status !== 'degraded' && p.supportsStreaming !== false;
-      const isLocalAvailable = p.local && p.status !== 'down';
+      const isLocalActive = p.name === 'local-gguf' && Boolean(localAiManager.getActiveModelName());
+      const isWorking = (hasKey && p.status !== 'down' && p.status !== 'degraded' && p.supportsStreaming !== false) || isLocalActive;
+      const isLocalAvailable = (p.local && p.status !== 'down') || isLocalActive;
       
       // Strict filter: only models that actually work are shown to the user!
       if (!isWorking && !isLocalAvailable) continue;
@@ -12027,7 +11973,7 @@ app.get('/api/agent/models', authGuard, (_req: express.Request, res: express.Res
           model: m,
           label: formatModelLabel(p.name, m),
           available: true,
-          status: p.status,
+          status: isLocalActive ? 'healthy' : p.status,
           local: Boolean(p.local),
           tier: p.tier,
         });
@@ -14769,33 +14715,37 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   startMemoryLogging();
   startResourceMonitor();
   startSentinelEngine();
-  // Pre-warm slow caches so first user request doesn't pay the penalty
-  fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
-  fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache pre-warmed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents pre-warm failed'));
-  fetchSatellites().then(r => logger.info({ count: r.length }, 'Satellite TLE cache pre-warmed')).catch(e => logger.warn({ err: String(e) }, 'Satellite TLE pre-warm failed (will warm on first user request)'));
-  setInterval(() => {
-    fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache refreshed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents refresh failed'));
-  }, 3600000);
-  materializedViews.refreshInternal().then(() => logger.info('Materialized views refreshed')).catch(() => {});
-  // Start background jobs for proactive systems
-  monitorManager.startJobs();
-  forecastLedger.start();
-  schedulerManager.startJobs();
-  ambientDetector.startJobs();
-  reflexEngine.start();
-  reflexActionHandler.start();
-  forkManager.start();
-  entropyMixer.start();
-  discoveryEngine.start();
-  dreamEngine.start();
-  memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
-  // Start ML pipeline background tasks
-  startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
-  logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');
-
-  // Register background engines with the Kaggle PowerSaver so they are
-  // paused while a GPU simulation runs and resumed when it finishes.
+  // Register background engines with the Kaggle PowerSaver
   registerPowerEngines();
+
+  // Lazy / Idle background initialization: Defer heavy pre-warming and proactive
+  // background loops until 15s after startup settles to keep launch RAM (<100MB) and CPU (<1s)
+  setTimeout(() => {
+    fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
+    fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache pre-warmed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents pre-warm failed'));
+    fetchSatellites().then(r => logger.info({ count: r.length }, 'Satellite TLE cache pre-warmed')).catch(e => logger.warn({ err: String(e) }, 'Satellite TLE pre-warm failed'));
+    setInterval(() => {
+      fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache refreshed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents refresh failed'));
+    }, 3600000);
+    materializedViews.refreshInternal().then(() => logger.info('Materialized views refreshed')).catch(() => {});
+
+    // Start background jobs for proactive systems
+    monitorManager.startJobs();
+    forecastLedger.start();
+    schedulerManager.startJobs();
+    ambientDetector.startJobs();
+    reflexEngine.start();
+    reflexActionHandler.start();
+    forkManager.start();
+    entropyMixer.start();
+    discoveryEngine.start();
+    dreamEngine.start();
+    memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
+
+    // Start ML pipeline background tasks
+    startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
+    logger.info('Deferred background systems initialized smoothly');
+  }, 15000);
 });
 
 /**

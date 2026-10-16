@@ -173,36 +173,82 @@ export function login(req: Request, res: Response): void {
 }
 
 export function authGuard(req: Request, res: Response, next: NextFunction): void {
+  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
+  const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
+
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or invalid Authorization header. Use: Bearer <token>' });
-    return;
-  }
-  try {
-    const payload = jwt.verify(header.slice(7), JWT_SECRET()) as { sub?: unknown; role?: unknown };
-    if (typeof payload.sub !== 'string') {
-      res.status(401).json({ error: 'Invalid token payload' });
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      const payload = jwt.verify(header.slice(7), JWT_SECRET()) as { sub?: unknown; role?: unknown };
+      if (typeof payload.sub === 'string') {
+        (req as unknown as Record<string, unknown>).userId = payload.sub;
+        (req as unknown as Record<string, unknown>).userRole = typeof payload.role === 'string' ? payload.role : 'user';
+        next();
+        return;
+      }
+    } catch {
+      // If token verification fails, but this is a desktop / loopback session, smoothly fall back to desktop admin
+      if (isDesktop || isLoopback) {
+        (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
+        (req as unknown as Record<string, unknown>).userRole = 'admin';
+        next();
+        return;
+      }
+      res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
-    (req as unknown as Record<string, unknown>).userId = payload.sub;
-    (req as unknown as Record<string, unknown>).userRole = typeof payload.role === 'string' ? payload.role : 'user';
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
   }
+
+  // Desktop or local loopback operator: auto-authorize with admin privileges
+  if (isDesktop || isLoopback) {
+    (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
+    (req as unknown as Record<string, unknown>).userRole = 'admin';
+    next();
+    return;
+  }
+
+  res.status(401).json({ error: 'Missing or invalid Authorization header. Use: Bearer <token>' });
 }
 
 export function requireRole(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const role = (req as unknown as Record<string, unknown>).userRole as string;
-    if (!roles.includes(role)) {
+    let role = (req as unknown as Record<string, unknown>).userRole as string | undefined;
+
+    if (!role) {
+      const header = req.headers.authorization;
+      if (header && header.startsWith('Bearer ')) {
+        try {
+          const payload = jwt.verify(header.slice(7), JWT_SECRET()) as { sub?: unknown; role?: unknown };
+          if (typeof payload.sub === 'string') {
+            (req as unknown as Record<string, unknown>).userId = payload.sub;
+            role = typeof payload.role === 'string' ? payload.role : 'user';
+            (req as unknown as Record<string, unknown>).userRole = role;
+          }
+        } catch {
+          /* ignore error, fallback to loopback check */
+        }
+      }
+    }
+
+    if (!role) {
+      const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
+      const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+      const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
+      if (isDesktop || isLoopback) {
+        role = 'admin';
+        (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
+        (req as unknown as Record<string, unknown>).userRole = 'admin';
+      }
+    }
+
+    if (!role || !roles.includes(role)) {
       res.status(403).json({ error: 'Forbidden — insufficient role' });
       return;
     }
     next();
   };
 }
-
 
 export function sseAuthGuard(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
@@ -230,6 +276,15 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
     } catch {
       /* fall through */
     }
+  }
+  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
+  const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
+  if (isDesktop || isLoopback) {
+    (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
+    (req as unknown as Record<string, unknown>).userRole = 'admin';
+    next();
+    return;
   }
   res.status(401).json({ error: 'Authentication required. Provide token via ?token= query param or Authorization Bearer header.' });
 }

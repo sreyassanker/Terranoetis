@@ -3,8 +3,11 @@ import { useAuth, getToken, isDesktopApp } from '../context/AuthContext';
 import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu } from 'lucide-react';
 import { useUserPrefStore } from '../store/userPrefStore';
 import { formatISTTime, getAllTimezones } from '../lib/formatTime';
+import { LocalAiHub } from '../components/admin/LocalAiHub';
+import { MetricsDashboard } from '../components/admin/MetricsDashboard';
+import { PluginManager } from '../components/admin/PluginManager';
 
-type Tab = 'home' | 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
+type Tab = 'home' | 'local-ai' | 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
 
 interface HealthData {
   status: string;
@@ -98,52 +101,6 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   };
 
   const token = authToken || getToken();
-
-  // Local GGUF model download state
-  const [ggufStatus, setGgufStatus] = useState<{ installed: boolean; size: number; partialSize: number; download: { running: boolean; received: number; total: number; done: boolean; error?: string; percent: number; resuming?: boolean; speedBytes: number; etaSeconds: number } } | null>(null);
-  const [ggufDownloading, setGgufDownloading] = useState(false);
-
-const formatEta = (seconds: number): string => {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-};
-
-  const fetchGgufStatus = useCallback(async () => {
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    // Self-contained recursive poll: `poll` is a local const referenced only
-    // after it is declared, so there is no forward reference to the outer
-    // `fetchGgufStatus` binding (which the linter flags as accessed-before-declared).
-    const poll = async (): Promise<void> => {
-      try {
-        const resp = await fetch('/api/admin/models/gguf-status', { cache: 'no-store', headers });
-        if (!resp.ok) return;
-        const d = await resp.json();
-        setGgufStatus(d);
-        // If a download is running, keep polling until done.
-        if (d?.download?.running && !d?.download?.done) {
-          setTimeout(() => { void poll(); }, 2000);
-        }
-      } catch { /* silent */ }
-    };
-    await poll();
-  }, [token]);
-
-  const startGgufDownload = useCallback(async () => {
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    setGgufDownloading(true);
-    try {
-      const resp = await fetch('/api/admin/models/gguf-download', { method: 'POST', headers });
-      if (resp.ok) {
-        void fetchGgufStatus();
-      }
-    } catch { /* silent */ }
-    setGgufDownloading(false);
-  }, [token, fetchGgufStatus]);
-
-  useEffect(() => {
-    void fetchGgufStatus();
-  }, [fetchGgufStatus]);
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -391,15 +348,22 @@ const formatEta = (seconds: number): string => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 2, padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-          {(['home', 'metrics', 'audit', 'plugins', 'health', 'evolution'] as Tab[]).map(t => (
+        <div style={{ display: 'flex', gap: 2, padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', overflowX: 'auto' }}>
+          {(['home', 'local-ai', 'metrics', 'audit', 'plugins', 'health', 'evolution'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{
-                padding: '8px 16px', borderRadius: '6px 6px 0 0', border: 'none',
+                padding: '8px 14px', borderRadius: '6px 6px 0 0', border: 'none',
                 background: tab === t ? 'rgba(59,130,246,0.15)' : 'transparent',
                 color: tab === t ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 13, fontWeight: tab === t ? 600 : 400,
+                whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5,
               }}>
-              {t === 'home' ? <><Home size={13} style={{display:'inline',marginRight:4}} /> Home</> : t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : t === 'health' ? <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</> : <><Sparkles size={13} style={{display:'inline',marginRight:4}} /> Evolution</>}
+              {t === 'home' ? <><Home size={13} /> Home</> :
+               t === 'local-ai' ? <><Cpu size={13} style={{ color: tab === t ? '#38bdf8' : '#60a5fa' }} /> Local AI Models</> :
+               t === 'metrics' ? <><BarChart3 size={13} /> Metrics</> :
+               t === 'audit' ? <><ClipboardList size={13} /> Audit Logs</> :
+               t === 'plugins' ? <><Plug size={13} /> Plugins</> :
+               t === 'health' ? <><Heart size={13} /> Health</> :
+               <><Sparkles size={13} /> Evolution</>}
             </button>
           ))}
         </div>
@@ -483,105 +447,20 @@ const formatEta = (seconds: number): string => {
                 </div>
               </div>
 
-              {/* ── Local AI Model ── */}
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>
-                <Cpu size={13} style={{display:'inline',marginRight:4}} /> Local AI Model (GGUF)
-              </h3>
-              <div style={{
-                background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, marginBottom: 20,
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}>
-                {ggufStatus?.installed ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 11, color: '#22c55e' }}>✓ Installed</span>
-                    <span style={{ fontSize: 10, color: '#64748b' }}>{(ggufStatus.size / 1e9).toFixed(1)} GB</span>
-                    <button
-                      onClick={startGgufDownload}
-                      style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.1)', color: '#60a5fa', cursor: 'pointer', fontSize: 10 }}>
-                      Re-download
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {ggufStatus?.download?.running ? (
-                      <div>
-                        <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 6 }}>
-                          {ggufStatus.download.resuming ? '↻ Resuming…' : '⏳ Downloading…'} ({ggufStatus.download.percent}%)
-                        </div>
-                        <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{ width: `${ggufStatus.download.percent}%`, height: '100%', background: '#60a5fa', borderRadius: 3, transition: 'width 0.5s' }} />
-                        </div>
-                        <div style={{ fontSize: 9, color: '#64748b', marginTop: 4, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-                          <span>
-                            {ggufStatus.download.percent > 0
-                              ? `${(ggufStatus.download.received / 1e9).toFixed(1)} / ${(ggufStatus.download.total / 1e9).toFixed(1)} GB`
-                              : 'Starting…'}
-                          </span>
-                          <span>
-                            {ggufStatus.download.speedBytes > 0
-                              ? `${(ggufStatus.download.speedBytes / 1e6).toFixed(1)} MB/s`
-                              : ''}
-                            {ggufStatus.download.etaSeconds > 0
-                              ? ` · ~${formatEta(ggufStatus.download.etaSeconds)} left`
-                              : ''}
-                          </span>
-                        </div>
-                      </div>
-                    ) : ggufStatus?.partialSize && ggufStatus.partialSize > 0 ? (
-                      <div>
-                        <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 6 }}>
-                          ⚠ Interrupted — {(ggufStatus.partialSize / 1e9).toFixed(1)} GB downloaded so far (partial file kept for resume)
-                        </div>
-                        <button
-                          onClick={startGgufDownload}
-                          disabled={ggufDownloading}
-                          style={{
-                            padding: '8px 16px', borderRadius: 6, border: 'none',
-                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
-                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
-                          }}>
-                          {ggufDownloading ? 'Starting…' : '↻ Resume Download'}
-                        </button>
-                      </div>
-                    ) : ggufStatus?.download?.error ? (
-                      <div>
-                        <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 6 }}>✗ Download failed: {ggufStatus.download.error}</div>
-                        <button
-                          onClick={startGgufDownload}
-                          disabled={ggufDownloading}
-                          style={{
-                            padding: '8px 16px', borderRadius: 6, border: 'none',
-                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
-                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
-                          }}>
-                          {ggufDownloading ? 'Starting…' : 'Retry Download'}
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
-                          Download the LFM 2.5 2.6B Q4_K_M GGUF model (~1.6 GB) so the local AI fallback works.
-                        </div>
-                        <button
-                          onClick={startGgufDownload}
-                          disabled={ggufDownloading}
-                          style={{
-                            padding: '8px 16px', borderRadius: 6, border: 'none',
-                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
-                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
-                          }}>
-                          {ggufDownloading ? 'Starting…' : '⬇ Download Model'}
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
+              {/* ── Local AI Model Hub ── */}
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Cpu size={14} style={{ color: '#60a5fa' }} />
+                  <span>Local AI Models & Hugging Face Hub</span>
+                </h3>
+                <LocalAiHub token={token} />
               </div>
 
               {/* ── Quick access to all sections ── */}
               <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Dashboard Sections</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
                 {([
+                  { key: 'local-ai' as Tab, icon: <Cpu size={18} />, title: 'Local AI Models', desc: 'On-device GGUF models, Hugging Face Hub, Metal GPU' },
                   { key: 'metrics' as Tab, icon: <BarChart3 size={18} />, title: 'Metrics', desc: metrics ? `${Object.keys(metrics).length} Prometheus metrics active` : 'Collecting Prometheus telemetry…' },
                   { key: 'audit' as Tab, icon: <ClipboardList size={18} />, title: 'Audit Logs', desc: `${auditLogs.length} recorded audit events` },
                   { key: 'plugins' as Tab, icon: <Plug size={18} />, title: 'Plugins', desc: `${plugins.length} active plugins · install / remove` },
@@ -603,20 +482,37 @@ const formatEta = (seconds: number): string => {
             </div>
           )}
 
+          {tab === 'local-ai' && (
+            <div>
+              <div style={{ marginBottom: 16 }}>
+                <h2 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Cpu size={18} style={{ color: '#38bdf8' }} />
+                  <span>On-Device Local AI &amp; Hugging Face Hub</span>
+                </h2>
+                <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                  Discover, download, and run privacy-preserving local GGUF models directly on your hardware with Metal GPU acceleration.
+                </p>
+              </div>
+              <LocalAiHub token={token} />
+            </div>
+          )}
+
           {tab === 'metrics' && (
             <div>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Prometheus Metrics</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
-                {metrics ? Object.entries(metrics).slice(0, 50).map(([key, val]) => (
-                  <div key={key} style={{
-                    background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 14px',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                  }}>
-                    <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', wordBreak: 'break-all' }}>{key}</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: '#60a5fa', marginTop: 4 }}>{val}</div>
-                  </div>
-                )) : <div style={{ color: '#64748b', padding: 20 }}>Loading metrics...</div>}
+              <div style={{ marginBottom: 16 }}>
+                <h2 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <BarChart3 size={18} style={{ color: '#38bdf8' }} />
+                  <span>Telemetry &amp; Prometheus Metrics</span>
+                </h2>
+                <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                  Live runtime performance, V8 memory allocation, event loop latency distribution, and open metrics exposition.
+                </p>
               </div>
+              <MetricsDashboard
+                token={token}
+                initialMetrics={metrics || undefined}
+                onMetricsUpdate={(m) => setMetrics(m)}
+              />
             </div>
           )}
 
@@ -642,191 +538,16 @@ const formatEta = (seconds: number): string => {
 
           {tab === 'plugins' && (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <h3 style={{ margin: 0, fontSize: 14, color: '#94a3b8' }}>Plugin Manager</h3>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    onClick={() => setInstallForm(f => ({ ...f, mode: 'url' }))}
-                    style={{
-                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                      background: installForm.mode === 'url' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                      color: installForm.mode === 'url' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >URL</button>
-                  <button
-                    onClick={() => setInstallForm(f => ({ ...f, mode: 'github' }))}
-                    style={{
-                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                      background: installForm.mode === 'github' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                      color: installForm.mode === 'github' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >GitHub</button>
-                  <button
-                    onClick={() => setInstallForm(f => ({ ...f, mode: 'content' }))}
-                    style={{
-                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                      background: installForm.mode === 'content' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                      color: installForm.mode === 'content' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >Code</button>
-                  <button
-                    onClick={() => setInstallForm(f => ({ ...f, mode: 'zip' }))}
-                    style={{
-                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                      background: installForm.mode === 'zip' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                      color: installForm.mode === 'zip' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >Zip</button>
-                </div>
+              <div style={{ marginBottom: 16 }}>
+                <h2 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Plug size={18} style={{ color: '#38bdf8' }} />
+                  <span>Geospatial Extensions &amp; Plugin Ecosystem</span>
+                </h2>
+                <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                  Manage modular domain extensions, test neural tool handlers in the live sandbox playground, and deploy custom intelligence algorithms.
+                </p>
               </div>
-
-              {/* Install form */}
-              <div style={{
-                background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 12, marginBottom: 12,
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}>
-                {installForm.mode === 'url' ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                      type="url"
-                      placeholder="https://example.com/my-plugin.ts"
-                      value={installForm.url}
-                      onChange={e => setInstallForm(f => ({ ...f, url: e.target.value }))}
-                      style={{
-                        flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
-                      }}
-                    />
-                    <button
-                      onClick={installPlugin}
-                      disabled={!installForm.url}
-                      style={{
-                        padding: '6px 14px', borderRadius: 4, border: 'none',
-                        background: installForm.url ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
-                        color: '#fff', cursor: installForm.url ? 'pointer' : 'not-allowed', fontSize: 12,
-                      }}
-                    >Install</button>
-                  </div>
-                ) : installForm.mode === 'github' ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                      type="url"
-                      placeholder="https://github.com/user/repo or user/repo"
-                      value={installForm.url}
-                      onChange={e => setInstallForm(f => ({ ...f, url: e.target.value }))}
-                      style={{
-                        flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
-                      }}
-                    />
-                    <button
-                      onClick={installPlugin}
-                      disabled={!installForm.url}
-                      style={{
-                        padding: '6px 14px', borderRadius: 4, border: 'none',
-                        background: installForm.url ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
-                        color: '#fff', cursor: installForm.url ? 'pointer' : 'not-allowed', fontSize: 12,
-                      }}
-                    >Install</button>
-                  </div>
-                ) : installForm.mode === 'zip' ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                      type="file" accept=".zip"
-                      onChange={e => setInstallForm(f => ({ ...f, zipFile: e.target.files?.[0] || null }))}
-                      style={{
-                        flex: 1, padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12,
-                      }}
-                    />
-                    <button
-                      onClick={installPlugin}
-                      disabled={!installForm.zipFile}
-                      style={{
-                        padding: '6px 14px', borderRadius: 4, border: 'none',
-                        background: installForm.zipFile ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
-                        color: '#fff', cursor: installForm.zipFile ? 'pointer' : 'not-allowed', fontSize: 12,
-                      }}
-                    >Upload & Install</button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <input
-                      type="text"
-                      placeholder="plugin-name.ts"
-                      value={installForm.name}
-                      onChange={e => setInstallForm(f => ({ ...f, name: e.target.value }))}
-                      style={{
-                        padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
-                      }}
-                    />
-                    <textarea
-                      placeholder="Plugin source code (TypeScript/JavaScript)..."
-                      value={installForm.content}
-                      onChange={e => setInstallForm(f => ({ ...f, content: e.target.value }))}
-                      style={{
-                        width: '100%', height: 120, padding: '8px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace',
-                        outline: 'none', resize: 'vertical',
-                      }}
-                    />
-                    <button
-                      onClick={installPlugin}
-                      disabled={!installForm.name || !installForm.content}
-                      style={{
-                        alignSelf: 'flex-end', padding: '6px 14px', borderRadius: 4, border: 'none',
-                        background: installForm.name && installForm.content ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
-                        color: '#fff', cursor: installForm.name && installForm.content ? 'pointer' : 'not-allowed', fontSize: 12,
-                      }}
-                    >Install</button>
-                  </div>
-                )}
-                {installStatus && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: installStatus.startsWith('Error') ? '#ef4444' : '#22c55e' }}>
-                    {installStatus}
-                  </div>
-                )}
-              </div>
-
-              {/* Plugin list */}
-              {plugins.length === 0 ? (
-                <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
-                  No plugins loaded.
-                </div>
-              ) : (
-                plugins.map(p => (
-                  <div key={p.id || p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <strong style={{ color: '#e2e8f0' }}>{p.name}</strong>
-                      <div style={{ color: '#64748b', fontSize: 10 }}>{p.version} · {p.toolCount} tools</div>
-                      {p.id.startsWith('file:') && (
-                        <div style={{ color: '#64748b', fontSize: 9, marginTop: 2 }}>ID: {p.id}</div>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: p.enabled ? '#22c55e' : '#ef4444' }}>{p.enabled ? 'Enabled' : 'Disabled'}</div>
-                    <button
-                      onClick={() => togglePlugin(p.id, !p.enabled)}
-                      title={p.enabled ? 'Disable plugin' : 'Enable plugin'}
-                      style={{
-                        padding: '4px 8px', borderRadius: 4,
-                        border: `1px solid ${p.enabled ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.4)'}`,
-                        background: 'transparent', color: p.enabled ? '#ef4444' : '#22c55e', cursor: 'pointer', fontSize: 10,
-                      }}
-                    >{p.enabled ? 'Disable' : 'Enable'}</button>
-                    {p.id.startsWith('file:') && (
-                      <button
-                        onClick={() => removePlugin(p.id)}
-                        style={{
-                          padding: '4px 8px', borderRadius: 4, border: '1px solid rgba(239,68,68,0.3)',
-                          background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 10,
-                        }}
-                        title="Remove plugin"
-                      >Remove</button>
-                    )}
-                  </div>
-                ))
-              )}
+              <PluginManager token={token} onPluginsChange={fetchAdminData} />
             </div>
           )}
 
