@@ -977,7 +977,7 @@ module.exports.init = function(api) {
                 type="url"
                 value={installUrl}
                 onChange={e => setInstallUrl(e.target.value)}
-                placeholder="https://example.com/satellite_weather.ts"
+                placeholder="https://raw.githubusercontent.com/sreyassanker/Terranoetis/main/extensions/aurora_oval.ts"
                 style={{
                   width: '100%',
                   boxSizing: 'border-box',
@@ -1002,7 +1002,7 @@ module.exports.init = function(api) {
                 type="url"
                 value={installUrl}
                 onChange={e => setInstallUrl(e.target.value)}
-                placeholder="https://github.com/username/terranoetis-extension"
+                placeholder="https://github.com/sreyassanker/Terranoetis or user/repo"
                 style={{
                   width: '100%',
                   boxSizing: 'border-box',
