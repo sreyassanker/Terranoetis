@@ -131,7 +131,7 @@ terranoetis/
 │   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing)
 │
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
-├── server/plugins/               # Plugin drop-in dir (auto-loads *.ts; installed plugins gitignored, example.ts tracked; system: pluginManager.ts)
+├── server/plugins/               # Modular extension drop-in directory (auto-loads *.ts / *.js; managed by pluginManager.ts)
 ├── docs/
 │   ├── site/                     # The GitHub Pages website — everything below deploys to sreyassanker.github.io/Terranoetis
 │   │   ├── index.html            # Product landing page (generated)
