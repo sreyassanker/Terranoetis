@@ -173,7 +173,7 @@ export class RoadTrafficDetector {
       return result;
     } catch (err) {
       logger.error({ err, corridorId }, '[RoadTraffic] Analysis failed');
-      return null;
+      throw err;
     }
   }
 
@@ -186,6 +186,9 @@ export class RoadTrafficDetector {
   getStatus() {
     return {
       running: this.running,
+      operational: false,
+      cogReaderAvailable: false,
+      message: 'Sentinel-2 STAC scene discovery active; pixel reflectance extraction requires an external GDAL/COG worker.',
       corridorCount: VALIDATION_CORRIDORS.length,
       totalDetections: this.detections.length,
       trendDataPoints: this.trends.length,
@@ -228,22 +231,8 @@ export class RoadTrafficDetector {
       throw new Error('Required bands not found in scene assets');
     }
 
-    // For simplicity, return placeholder arrays — full implementation would read COGs
-    // This demonstrates the architecture; production would use a Sentinel-2 COG reader.
-    const width = 224;
-    const height = 224;
-    const size = width * height;
-
-    logger.info({ sceneId: scene.id, bands: ['B02', 'B03', 'B04', 'B08'] }, '[RoadTraffic] Sentinel-2 scene found');
-
-    return {
-      blue: new Float32Array(size),
-      green: new Float32Array(size),
-      red: new Float32Array(size),
-      nir: new Float32Array(size),
-      width,
-      height,
-    };
+    logger.info({ sceneId: scene.id, bands: ['B02', 'B03', 'B04', 'B08'] }, '[RoadTraffic] Sentinel-2 scene found, awaiting COG raster decoder');
+    throw new Error(`Sentinel-2 scene '${scene.id}' located via STAC, but direct Cloud-Optimized GeoTIFF (COG) byte decoding requires an external GeoTIFF worker. Synthetic pixel buffers are disabled.`);
   }
 
   // ═══════════════════════════════════════════════════════════════════

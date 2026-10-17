@@ -418,7 +418,8 @@ def main():
             )
 
         result = simulate_tsunami(params)
-        out = '/kaggle/working'; os.makedirs(out, exist_ok=True)
+        out = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
+        os.makedirs(out, exist_ok=True)
         np.save(f'{out}/water_height.npy', result['final']['water_height'])
         np.save(f'{out}/bathymetry.npy', result['final']['bathymetry'])
         if result['snapshots']:
@@ -440,7 +441,9 @@ def main():
         print(f"\n{'='*60}\nSIMULATION COMPLETE\n{'='*60}")
     except Exception as e:
         print(f"\n[ERROR] {e}"); traceback.print_exc()
-        with open('/kaggle/working/error.log', 'w') as f: traceback.print_exc(file=f)
+        out_dir = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, 'error.log'), 'w') as f: traceback.print_exc(file=f)
         raise
 
 if __name__ == '__main__':

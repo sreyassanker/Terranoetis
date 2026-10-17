@@ -6,6 +6,7 @@ import { pubsub } from './pubsub';
 import { logger } from './observability/logger';
 import { _JWT_SECRET as getJwtSecret } from './middleware/auth';
 import { connectVoiceProvider } from './voiceRealtime';
+import { forkManager } from './fork/manager';
 
 const HEARTBEAT_INTERVAL = 30000;
 const HEARTBEAT_TIMEOUT = 35000;
@@ -66,7 +67,12 @@ function isValidChannelName(ch: unknown): ch is string {
 function canSubscribe(userId: string, channel: string): boolean {
   if (PUBLIC_CHANNELS.has(channel)) return true;
   if (channel.startsWith(`ws:${userId}`)) return true;
-  if (channel.startsWith('fork:')) return true;
+  if (channel.startsWith('fork:')) {
+    const forkId = channel.slice(5);
+    if (forkId === 'all') return true;
+    const fork = forkManager.getFork(forkId);
+    return !fork || fork.createdBy === userId;
+  }
   // Block anything else — channels must be added to the allowlist or follow the `ws:userId` pattern
   return false;
 }
@@ -241,6 +247,13 @@ export function createWsServer(server: HttpServer): WebSocketServer {
         case 'subscribe_fork': {
           const forkId = msg.forkId;
           if (!forkId || !/^[a-zA-Z0-9_.-]{1,64}$/.test(forkId)) break;
+          const fork = forkManager.getFork(forkId);
+          if (fork && fork.createdBy !== userId) {
+            try {
+              ws.send(JSON.stringify({ type: 'FORK_ERROR', error: 'Forbidden: you do not own this fork', forkId }));
+            } catch { /* ignore */ }
+            break;
+          }
           const channelName = `fork:${forkId}`;
           if (client.channels.has(channelName)) break;
           client.channels.add(channelName);

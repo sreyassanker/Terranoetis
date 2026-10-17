@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS vec_store (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_vec_store_type_id ON vec_store(entity_type, entity_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vec_store_type_id ON vec_store(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_vec_store_user_id ON vec_store(user_id);
 
 -- Procedural memory: successful tool call patterns
@@ -716,3 +716,19 @@ CREATE TABLE IF NOT EXISTS risk_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_zone ON risk_snapshots(zone_id);
 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_created ON risk_snapshots(created_at DESC);
+
+-- AI Router Provider Stats
+CREATE TABLE IF NOT EXISTS provider_stats (
+  provider_name TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'healthy',
+  last_checked INTEGER NOT NULL DEFAULT 0,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  consecutive_successes INTEGER NOT NULL DEFAULT 0,
+  tokens INTEGER NOT NULL DEFAULT 60,
+  last_token_refill INTEGER NOT NULL DEFAULT 0,
+  total_requests INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  estimated_cost REAL NOT NULL DEFAULT 0,
+  last_latency INTEGER NOT NULL DEFAULT 1000,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

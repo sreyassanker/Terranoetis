@@ -6,6 +6,7 @@ import { system2, type System2Result, type ReasoningStep } from './system2';
 import { ExecutionOrchestrator, type FormattedTraceNode } from './executionOrchestrator';
 import { MCTSEngine } from './mctsEngine';
 import { TreeOfThoughts } from './treeOfThoughts';
+import { ReasoningTree } from './reasoningTree';
 
 
 // ── Types ───────────────────────────────────────────────────────
@@ -219,9 +220,19 @@ export class CognitiveOrchestrator {
     if (this.initialized) return;
     await system1.init();
     this.ensureTables();
+    const rootState = {
+      query: '',
+      toolsCalled: [],
+      results: [],
+      confidence: 1,
+      hypotheses: [],
+    };
+    const defaultTree = new ReasoningTree('root', rootState);
+    const mcts = new MCTSEngine(defaultTree, {}, this.toolRegistry, this.llmRouter);
+    const tot = new TreeOfThoughts(this.llmRouter, this.toolRegistry);
     this.executionOrchestrator = new ExecutionOrchestrator(
-      null as unknown as MCTSEngine,
-      null as unknown as TreeOfThoughts,
+      mcts,
+      tot,
       this.llmRouter,
       this.toolRegistry,
     );

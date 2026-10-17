@@ -76,8 +76,9 @@ foundationModelsRouter.post('/road-traffic/analyze', async (req: Request, res: R
     const { corridorId } = req.body;
     if (!corridorId) return res.status(400).json({ error: 'corridorId required' });
     const result = await roadTrafficDetector.analyzeCorridor(corridorId);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
+  } catch (err) {
+    res.status(503).json({ error: String(err), available: false });
+  }
 });
 
 foundationModelsRouter.get('/road-traffic/trends/:corridorId', (req: Request, res: Response) => {

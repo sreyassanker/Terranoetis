@@ -850,12 +850,13 @@ export const PART7: Record<number, ComputeFn> = {
       ]
     };
   },
-  144: ({ px, py, Hxy }) => {
+  144: ({ px, py, pxy, Hxy }) => {
     // Shannon Information Entropy (Shannon 1948)
-    // For a binary variable: H(X) = −p·log₂(p) − (1−p)·log₂(1−p)
+    // For binary variables X, Y in {0,1}:
+    // H(X) = −p·log₂(p) − (1−p)·log₂(1−p)
+    // Joint entropy H(X,Y) = −Σ p(x,y)·log₂ p(x,y)
     // Mutual information: I(X;Y) = H(X) + H(Y) − H(X,Y)
-    // Hxy is the joint entropy H(X,Y), not a probability
-    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(Hxy) || px <= 0 || px >= 1 || py <= 0 || py >= 1) {
+    if (!Number.isFinite(px) || !Number.isFinite(py) || px <= 0 || px >= 1 || py <= 0 || py >= 1 || (Hxy !== undefined && !Number.isFinite(Hxy))) {
       return { result: NaN, unit: 'bits', secondary: [
         { key: 'entropy_y', value: Number.NaN, unit: 'bits', label: 'Entropy H(Y) (NaN)' },
         { key: 'joint_entropy', value: Number.NaN, unit: 'bits', label: 'Joint Entropy H(X,Y) (NaN)' },
@@ -863,15 +864,40 @@ export const PART7: Record<number, ComputeFn> = {
       ], steps: ['Error: px, py must be in (0, 1)'] };
     }
 
-    // Binary entropy: H(p) = −p·log₂(p) − (1−p)·log₂(1−p)
+    // Binary marginal entropies: H(p) = −p·log₂(p) − (1−p)·log₂(1−p)
     const Hx = -(px * Math.log2(px) + (1 - px) * Math.log2(1 - px));
     const Hy = -(py * Math.log2(py) + (1 - py) * Math.log2(1 - py));
 
-    // Hxy is the joint entropy H(X,Y) in bits (directly provided)
-    const Hjoint = Hxy;
+    let Hjoint: number;
+    let validPxy: number | undefined;
+
+    if (Hxy !== undefined && Number.isFinite(Hxy)) {
+      // Direct joint entropy in bits passed (e.g. from data assimilation benchmarks)
+      Hjoint = Hxy;
+    } else {
+      // Bounds on joint probability p(X=1, Y=1): max(0, px + py - 1) <= p(x,y) <= min(px, py)
+      const pxyVal = pxy !== undefined && Number.isFinite(pxy) ? pxy : px * py;
+      const minPxy = Math.max(0, px + py - 1);
+      const maxPxy = Math.min(px, py);
+      validPxy = Math.min(Math.max(pxyVal, minPxy), maxPxy);
+
+      // 4 discrete states: p11 = p(1,1), p10 = p(1,0), p01 = p(0,1), p00 = p(0,0)
+      const p11 = validPxy;
+      const p10 = Math.max(0, px - validPxy);
+      const p01 = Math.max(0, py - validPxy);
+      const p00 = Math.max(0, 1 - px - py + validPxy);
+
+      Hjoint = 0;
+      for (const p of [p11, p10, p01, p00]) {
+        if (p > 1e-12) {
+          Hjoint -= p * Math.log2(p);
+        }
+      }
+    }
 
     // Mutual information: I(X;Y) = H(X) + H(Y) − H(X,Y)
-    const MI = Hx + Hy - Hjoint;
+    const MI = Math.max(0, Hx + Hy - Hjoint);
+    const normMI = (Hx > 0 && Hy > 0) ? MI / Math.sqrt(Hx * Hy) : 0;
 
     return {
       result: Hx, unit: 'bits',
@@ -879,27 +905,26 @@ export const PART7: Record<number, ComputeFn> = {
         { key: 'entropy_y', value: Hy, unit: 'bits', label: 'Entropy H(Y)' },
         { key: 'joint_entropy', value: Hjoint, unit: 'bits', label: 'Joint Entropy H(X,Y)' },
         { key: 'mutual_information', value: MI, unit: 'bits', label: 'Mutual Information I(X;Y)' },
+        { key: 'information_coefficient', value: normMI, unit: '—', label: 'Information Coefficient IC' },
       ],
       steps: [
         '── Shannon Information Entropy (Shannon 1948) ──',
-        `  p(x) = ${px.toFixed(4)}, p(y) = ${py.toFixed(4)}`,
-        `  Joint entropy H(X,Y) = ${Hjoint.toFixed(4)} bits (provided)`,
+        validPxy !== undefined
+          ? `  p(X=1) = ${px.toFixed(4)}, p(Y=1) = ${py.toFixed(4)}, p(X=1,Y=1) = ${validPxy.toFixed(4)}`
+          : `  p(X=1) = ${px.toFixed(4)}, p(Y=1) = ${py.toFixed(4)}, H(X,Y) = ${Hjoint.toFixed(4)} bits (provided)`,
         '',
-        'Step 1 — Binary entropy H(X):',
-        `  H(X) = −p·log₂(p) − (1−p)·log₂(1−p)`,
-        `  H(X) = −${px.toFixed(4)}·log₂(${px.toFixed(4)}) − ${(1-px).toFixed(4)}·log₂(${(1-px).toFixed(4)})`,
-        `  H(X) = ${Hx.toFixed(4)} bits ${Hx === 1 ? '(maximum for binary)' : Hx < 0.1 ? '(near-deterministic)' : ''}`,
+        'Step 1 — Marginal entropies H(X), H(Y):',
+        `  H(X) = −p·log₂(p) − (1−p)·log₂(1−p) = ${Hx.toFixed(4)} bits`,
+        `  H(Y) = −p·log₂(p) − (1−p)·log₂(1−p) = ${Hy.toFixed(4)} bits`,
         '',
-        'Step 2 — Binary entropy H(Y):',
-        `  H(Y) = −${py.toFixed(4)}·log₂(${py.toFixed(4)}) − ${(1-py).toFixed(4)}·log₂(${(1-py).toFixed(4)})`,
-        `  H(Y) = ${Hy.toFixed(4)} bits`,
+        'Step 2 — Joint distribution and joint entropy H(X,Y):',
+        `  H(X,Y) = ${Hjoint.toFixed(4)} bits`,
         '',
-        'Step 3 — Mutual information:',
-        `  I(X;Y) = H(X) + H(Y) − H(X,Y)`,
-        `  I(X;Y) = ${Hx.toFixed(4)} + ${Hy.toFixed(4)} − ${Hjoint.toFixed(4)}`,
-        `  I(X;Y) = ${MI.toFixed(4)} bits ${MI === 0 ? '(independent)' : MI > 0 ? '(dependent)' : '(inconsistent: H(X,Y) > H(X)+H(Y))'}`,
+        'Step 3 — Mutual information I(X;Y):',
+        `  I(X;Y) = H(X) + H(Y) − H(X,Y) = ${Hx.toFixed(4)} + ${Hy.toFixed(4)} − ${Hjoint.toFixed(4)} = ${MI.toFixed(4)} bits`,
+        `  Normalized IC = I(X;Y)/√(H(X)H(Y)) = ${normMI.toFixed(4)}`,
         '',
-        `  └ I(X;Y) ≥ 0 always; I = 0 iff X,Y independent; I = min(H(X),H(Y)) iff one determines the other` ,
+        `  └ Satisfies Kolmogorov probability axioms and Shannon limit: 0 ≤ I(X;Y) ≤ min(H(X), H(Y))`,
       ]
     };
   },

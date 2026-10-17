@@ -263,7 +263,15 @@ export const PART4: Record<number, ComputeFn> = {
       ]
     };
   },
-  86: ({ As, tanB }) => {
+  86: (inputs) => {
+    const As = Number(inputs.As ?? (inputs as Record<string, unknown>).A_s ?? (inputs as Record<string, unknown>)['Aₛ']);
+    const tanB = Number(inputs.tanB ?? (inputs as Record<string, unknown>).tan_b ?? (inputs as Record<string, unknown>)['tan β']);
+    if (!Number.isFinite(As) || !Number.isFinite(tanB) || As <= 0) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: ['── Stream Power Index (Moore et al., 1991) ──', 'Invalid input: Specific catchment area A_s must be positive and finite. Result: NaN.'],
+      };
+    }
     const slopeRad = tanB > 0 ? tanB : 1e-10;
     const SPI = Math.log(As * slopeRad);
     const slopeDeg = Math.atan(slopeRad) * 180 / Math.PI;
@@ -285,7 +293,15 @@ export const PART4: Record<number, ComputeFn> = {
       ]
     };
   },
-  87: ({ As, tanB }) => {
+  87: (inputs) => {
+    const As = Number(inputs.As ?? (inputs as Record<string, unknown>).A_s ?? (inputs as Record<string, unknown>)['Aₛ']);
+    const tanB = Number(inputs.tanB ?? (inputs as Record<string, unknown>).tan_b ?? (inputs as Record<string, unknown>)['tan β']);
+    if (!Number.isFinite(As) || !Number.isFinite(tanB) || As <= 0) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: ['── Topographic Wetness Index (Beven & Kirkby, 1979; TOPMODEL) ──', 'Invalid input: Specific catchment area A_s must be positive and finite. Result: NaN.'],
+      };
+    }
     const slopeRad = tanB > 0 ? tanB : 1e-10;
     const TWI = Math.log(As) - Math.log(slopeRad);
     const slopeDeg = Math.atan(slopeRad) * 180 / Math.PI;
@@ -573,7 +589,16 @@ export const PART4: Record<number, ComputeFn> = {
     },
 
   // ── Domain 14: Cryosphere & Volcanology ──
-  91: ({ accum, DDF, Tpos, days: _days }) => {
+  91: (inputs) => {
+    const accum = Number(inputs.accum ?? (inputs as Record<string, unknown>).Accum ?? (inputs as Record<string, unknown>).accumulation);
+    const DDF = Number(inputs.DDF ?? (inputs as Record<string, unknown>).ddf);
+    const Tpos = Number(inputs.Tpos ?? (inputs as Record<string, unknown>).T_pos ?? (inputs as Record<string, unknown>).tpos);
+    if (!Number.isFinite(accum) || !Number.isFinite(DDF) || !Number.isFinite(Tpos)) {
+      return {
+        result: Number.NaN, unit: 'm w.e.',
+        steps: ['── Glacier Surface Mass Balance — PDD Model (Braithwaite & Olesen 1989) ──', 'Invalid input: accum, DDF, and T_pos must be finite numbers. Result: NaN.'],
+      };
+    }
     // Braithwaite & Olesen (1989) PDD model:
     // Ablation = DDF × T_pos  (T_pos is already the sum of positive degree-days)
     const ablation = DDF * Tpos;

@@ -86,40 +86,43 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   71: { 'γ': 'gamma', 'ε': 'eps', 'N²': 'N2', '<(∇θ′)²>': 'gradVar', 'κ': 'kappa', '∂θ̄/∂z': 'dTdz' },
   72: { 'Δρ': 'drho', 'ΔV': 'dV', 'ρ₀': 'rho0' },
   73: { 'U₁₀': 'U', 'ω': 'omega', 'U10': 'U' },
-  74: { 'H₀': 'H0', 'T₀': 'T0', 'β_f': 'betaF', 'βf': 'betaF' },
+  74: { 'H₀': 'H0', 'T₀': 'T0', 'H_0': 'H0', 'T_0': 'T0', 'β_f': 'betaF', 'βf': 'betaF', 'beta_f': 'betaF' },
   75: { 'L*': 'L', 'h*': 'hstar' },
   76: { 'd_b': 'db' },
   77: { 'H_sb': 'Hsb', 'θ_b': 'thetaB', 'theta_b': 'thetaB' },
   79: { 'ω': 'omega', 'a': 'ka' },
-  80: { 'α': 'alpha', 'g': 'g2', 'f_m': 'fm', 'γ': 'gamma' },
+  80: { 'α': 'alpha', 'g': 'g2', 'f_m': 'fm', 'f_p': 'fpm', 'fpm': 'fpm', 'γ': 'gamma' },
+  83: { 'g': 'g', 'N²': 'N2', 'N2': 'N2', '∂u/∂z': 'dudz', 'dudz': 'dudz', 'S²': 'S2', 'S2': 'S2' },
   84: { "c'": 'cprime', 'γz': 'gammaz', 'cosβ': 'cosB', "φ'": 'tanphi', 'sinβ': 'sinB', 'cos²β': 'cosB2', 'cos^2β': 'cosB2' },
   85: { 'μ': 'mu', 'σₙ': 'sigmaN', 'σ_n': 'sigmaN', 'ξ': 'xi' },
-  86: { 'Aₛ': 'As', 'tan β': 'tanB' },
-  87: { 'Aₛ': 'As', 'tan β': 'tanB' },
+  86: { 'Aₛ': 'As', 'A_s': 'As', 'As': 'As', 'tan β': 'tanB', 'tan_b': 'tanB', 'tanB': 'tanB', 'tanbeta': 'tanB' },
+  87: { 'Aₛ': 'As', 'A_s': 'As', 'As': 'As', 'tan β': 'tanB', 'tan_b': 'tanB', 'tanB': 'tanB', 'tanbeta': 'tanB' },
   88: { 'K_m': 'Km', 'e_w': 'ew', 'e_a': 'ea', 'u₉': 'u' },
-  90: { 'Q₀': 'Q0' },
-  91: { 'T_pos': 'Tpos' },
-  93: { 'ρᵢ': 'rhoI', 'ρ_i': 'rhoI', 'ρ_f': 'rhoF' },
-  95: { 'Q̇': 'Qdot', 'ρ_air': 'rhoAir', 'α': 'alpha' },
+  90: { 'Q₀': 'Q0', 'Q_0': 'Q0', 'Q0': 'Q0' },
+  91: { 'Accum': 'accum', 'accumulation': 'accum', 'T_pos': 'Tpos', 'DDF': 'DDF' },
+  92: { 'T_s': 'Ts', 'T_a': 'Ta', 'u': 'u' },
+  93: { 'ρᵢ': 'rhoI', 'ρ_i': 'rhoI', 'rho_i': 'rhoI', 'ρ_f': 'rhoF', 'rho_f': 'rhoF' },
+  95: { 'Q̇': 'Qdot', 'Q_dot': 'Qdot', 'Qdot': 'Qdot', 'ρ_air': 'rhoAir', 'rho_air': 'rhoAir', 'α': 'alpha' },
   96: { '∇²T': 'divDT' },
   97: { 'ΔF': 'dF', 'λ₀': 'lambda0' },
   98: { '∂R/∂T': 'dRdT' },
   99: { 'β': 'beta', 'k_x': 'kx', 'k_y': 'ky' },
   100: { '∂q/∂y': 'dpdy', '∂u/∂y': 'dudy' },
   101: { '∂u/∂z': 'dudy' },
-  102: { 'ψ': 'psi', '∂²ψ/∂p²': 'dpp' },
-  103: { 'u_bar': 'ubar', 'u_prime': 'uprime' },
+  102: { 'ψ': 'psi', '∂²ψ/∂p²': 'dpp', 'd2psi_dp2': 'dpp' },
+  103: { 'ū': 'ubar', 'ū': 'ubar', 'u_bar': 'ubar', 'u_prime': 'uprime', "u'": 'uprime', 'up': 'uprime' },
   104: { 'K_m': 'Km' },
   105: { 'θ̄_v': 'thetaVbar', "w'θ'_v₀": 'wthetaV', 'z_i': 'zi' },
   106: { '|∇θ|': 'dtheta', 'β': 'cos2b', 'δ': 'delta', '|∂u/∂s|': 'dudy' },
   107: { 'ζ': 'zeta', '∇·V': 'div' },
   109: { 'N₀': 'N0', 'Λ': 'Lambda' },
-  111: { 'x_p': 'xp', 'y_p': 'yp', "s'": 'sp', 's′': 'sp', 'GAST': 'gast', 'dX': 'dx', 'dY': 'dy', 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz' },
+  111: { 'x_p': 'xp', 'y_p': 'yp', "s'": 'sp', 's′': 'sp', 'GAST': 'gast', 'dX': 'dx', 'dY': 'dy', 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz', 'xp': 'xp', 'yp': 'yp' },
   112: { 'h₂': 'hn', 'hₙ': 'hn', 'k₂': 'kn', 'V₂': 'Vn', 'Vₙ': 'Vn', 'φ': 'lat', 'R_e': 'Re' },
   113: { 'C_nm': 'Cnm', 'S_nm': 'Snm', 'P_nm': 'Pnm', 'λ': 'lam', 'φ': 'phi', 'R_e': 'Re', '∂P/∂φ': 'dPnm' },
-  114: { 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz', 'Rx': 'wx', 'Ry': 'wy', 'Rz': 'wz' },
+  114: { 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz', 'Rx': 'wx', 'Ry': 'wy', 'Rz': 'wz', 'wx': 'wx', 'wy': 'wy', 'wz': 'wz' },
   116: { 'nᵢ': 'ni', 'mᵢ': 'mi', 'T': 'T', 'z₀': 'z0' },
   117: { 'N_e': 'Ne', 'N_mF2': 'NmF2', 'h_mF2': 'hmF2' },
+  118: { 'J': 'J', 'E': 'E' },
   119: { '⟨I⟩': 'Imean', 'σ_I': 'Istd' },
   120: { 'P_dyn': 'Pdyn', 'B_z': 'Bz' },
   121: { 'P_dyn': 'Pdyn' },
@@ -134,18 +137,20 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   130: { 'θ': 'Sc' },
   131: { 'h₁': 'h1', 'h₂': 'h2', 'r₁': 'r1', 'r₂': 'r2' },
   134: { 'f_c': 'fc', 'f₀': 'f0' },
-  136: { 'D(P)': 'Parr' },
+  136: { 'D(P)': 'D_P', 'DP': 'D_P' },
   137: { 'I_Hi': 'IHi', 'I_Lo': 'ILo', 'BP_Hi': 'BPHi', 'BP_Lo': 'BPLo', 'C_p': 'Cp' },
   138: { 'X̄': 'Xbar', 'K_p': 'Kp', 'σ_x': 'sigmaX' },
   139: { 'X_{i-1}': 'Xim1', 'Z': 'Zi', 'α': 'alpha' },
   140: { 'K₀': 'K0', 'V_res': 'Vres', 'h_b': 'hb' },
   141: { 'x_f': 'xf', 'P_f': 'Pf' },
   142: { 'x_b': 'xb' },
-  144: { 'p(x)': 'px', 'p(y)': 'py', 'p(x,y)': 'Hxy' },
+  143: { 'x_b': 'xb', 'xb': 'xb', 'H': 'H', 'R': 'R', 'B': 'B' },
+  144: { 'p(x)': 'px', 'p(y)': 'py', 'p(x,y)': 'pxy', 'pxy': 'pxy' },
   145: { 'd_km': 'dKm', 'f_GHz': 'fGHz' },
   146: { 'A': 'alpha1', 'φ_m': 'phi_m' },
   147: { 'f₀': 'f0', 'v_rel': 'vrel' },
   148: { 'r₁': 'r1', 'r₂': 'r2' },
+  149: { 'm1': 'x', 'm2': 'y', 'x': 'x', 'y': 'y', 'm_1': 'x', 'm_2': 'y' },
   150: { 'p(x)': 'px', 'p(y)': 'py', 'p(x,y)': 'pxy' },
 };
 
@@ -153,10 +158,13 @@ export function normalizeInputs(id: number, inputs: Record<string, number>): Rec
   const aliases = PARAM_ALIASES[id];
   const out: Record<string, number> = {};
   for (const [key, rawValue] of Object.entries(inputs)) {
-    const mapped = aliases ? (aliases[key] ?? key) : key;
-    // Defensive numeric coercion: JSON transports inputs as strings (e.g.
-    // "25" for T_max). Coerce a string that parses to a finite number; leave
-    // objects, arrays, non-numeric strings (station refs, units), null/undefined.
+    let mapped = aliases ? (aliases[key] ?? key) : key;
+    if (aliases && !aliases[key]) {
+      const stripped = key.replace(/_/g, '');
+      if (aliases[stripped]) {
+        mapped = aliases[stripped];
+      }
+    }
     const value: unknown = rawValue;
     if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
       out[mapped] = Number(value) as number;

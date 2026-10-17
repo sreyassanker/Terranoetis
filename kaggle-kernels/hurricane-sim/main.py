@@ -523,10 +523,11 @@ def simulate_hurricane(params):
         # (SLOSH/ADCIRC convention — land roughness blocks the stress).
         tau_mag = RHO_AIR * C_DRAG * wind_speed * wind_speed
         wx = np.where(r_m > 0, u_east / np.maximum(wind_speed, 1e-6), 0.0)
-        wy = np.where(r_m > 0, u_north / np.maximum(wind_speed, 1e-6), 0.0)
+        # In grid row space, index increases Southward; Southward unit wind is -u_north.
+        ws = np.where(r_m > 0, -u_north / np.maximum(wind_speed, 1e-6), 0.0)
         H_stress = np.maximum(H, 1.0)
         a_wx = np.where(wet & water, tau_mag * wx / (RHO_WATER * H_stress), 0.0)
-        a_wy = np.where(wet & water, tau_mag * wy / (RHO_WATER * H_stress), 0.0)
+        a_ws = np.where(wet & water, tau_mag * ws / (RHO_WATER * H_stress), 0.0)
         p_pa = pressure * 100.0
         dpdx = (np.roll(p_pa, -1, 1) - np.roll(p_pa, 1, 1)) / (2.0 * dx_cell)
         dpdy = (np.roll(p_pa, -1, 0) - np.roll(p_pa, 1, 0)) / (2.0 * dx_cell)
@@ -534,7 +535,7 @@ def simulate_hurricane(params):
         a_py = np.where(wet & water, -dpdy / RHO_WATER, 0.0)
 
         fx = a_wx + a_px
-        fy = a_wy + a_py
+        fy = a_ws + a_py
 
         # East faces (gs, gs−1): between columns j and j+1.
         gE = (eta[:, 1:] - eta[:, :-1]) / dx_cell

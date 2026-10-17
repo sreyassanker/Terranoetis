@@ -525,6 +525,7 @@ export class ArrowFieldPrimitive {
     this.depthTexture = depthTexture;
 
     this.appearance = this.buildAppearance(this.colormap);
+    this.material = this.appearance.material;
 
     this.primitive = new Cesium.Primitive({
       geometryInstances: new Cesium.GeometryInstance({ geometry }),

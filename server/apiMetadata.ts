@@ -14,7 +14,7 @@ export interface ApiConfig {
   envKeys?: string[]; // For APIs requiring multiple keys
   free: boolean;
   rateLimit: string;
-  status: 'public' | 'authenticated' | 'premium';
+  status: 'public' | 'authenticated' | 'premium' | 'planned';
 }
 
 export const API_METADATA: ApiConfig[] = [

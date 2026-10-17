@@ -13,7 +13,7 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 function getSecret(): string {
   let secret = process.env.JWT_SECRET;
   const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
-  if (!secret || secret.length < 32) {
+  if (!secret) {
     if (isDesktop || !IS_PROD) {
       secret = generateSecret(48);
       process.env.JWT_SECRET = secret;
@@ -22,13 +22,14 @@ function getSecret(): string {
     }
     throw new Error('JWT_SECRET must be at least 32 chars in production');
   }
+  if (IS_PROD && secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 chars in production');
+  }
   return secret;
 }
 
-let cachedSecret: string | null = null;
 function JWT_SECRET(): string {
-  if (!cachedSecret) cachedSecret = getSecret();
-  return cachedSecret;
+  return process.env.JWT_SECRET || getSecret();
 }
 
 interface UserRow {
@@ -212,10 +213,6 @@ export function registerUser(req: Request, res: Response): void {
 }
 
 export function authGuard(req: Request, res: Response, next: NextFunction): void {
-  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
-  const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-  const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
-
   const header = req.headers.authorization;
   if (header && header.startsWith('Bearer ')) {
     try {
@@ -227,24 +224,9 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
         return;
       }
     } catch {
-      // If token verification fails, but this is a desktop / loopback session, smoothly fall back to desktop admin
-      if (isDesktop || isLoopback) {
-        (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
-        (req as unknown as Record<string, unknown>).userRole = 'admin';
-        next();
-        return;
-      }
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
-  }
-
-  // Desktop or local loopback operator: auto-authorize with admin privileges
-  if (isDesktop || isLoopback) {
-    (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
-    (req as unknown as Record<string, unknown>).userRole = 'admin';
-    next();
-    return;
   }
 
   res.status(401).json({ error: 'Missing or invalid Authorization header. Use: Bearer <token>' });
@@ -265,19 +247,8 @@ export function requireRole(...roles: string[]) {
             (req as unknown as Record<string, unknown>).userRole = role;
           }
         } catch {
-          /* ignore error, fallback to loopback check */
+          /* ignore error */
         }
-      }
-    }
-
-    if (!role) {
-      const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
-      const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-      const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
-      if (isDesktop || isLoopback) {
-        role = 'admin';
-        (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
-        (req as unknown as Record<string, unknown>).userRole = 'admin';
       }
     }
 
@@ -315,15 +286,6 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
     } catch {
       /* fall through */
     }
-  }
-  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
-  const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-  const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
-  if (isDesktop || isLoopback) {
-    (req as unknown as Record<string, unknown>).userId = 'desktop-operator';
-    (req as unknown as Record<string, unknown>).userRole = 'admin';
-    next();
-    return;
   }
   res.status(401).json({ error: 'Authentication required. Provide token via ?token= query param or Authorization Bearer header.' });
 }

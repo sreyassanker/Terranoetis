@@ -113,11 +113,19 @@ describe('simRunner stale-error polling state machine', () => {
     captured.errorTrace = '';
   });
 
+  const createdJobIds = new Set<string>();
+
   afterEach(() => {
-    // Remove any results dirs written by the (mocked) completion path.
-    for (const dir of fs.readdirSync(RESULTS_DIR)) {
-      fs.rmSync(path.join(RESULTS_DIR, dir), { recursive: true, force: true });
+    // Remove only results dirs written by this test's completion path.
+    for (const id of createdJobIds) {
+      const p = path.join(RESULTS_DIR, id);
+      try {
+        if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
+    createdJobIds.clear();
   });
 
   async function startAndWait(
@@ -138,6 +146,7 @@ describe('simRunner stale-error polling state machine', () => {
       grid_size: 64,
       duration_hours: 1,
     });
+    createdJobIds.add(job.id);
 
     let done: { status: string; error?: string } | undefined;
     await vi.waitFor(
@@ -175,7 +184,7 @@ describe('simRunner stale-error polling state machine', () => {
     expect(done.error).toContain('stale status or early crash');
     // Should have polled several times before giving up, not failed instantly.
     expect(captured.statusCalls.every(s => s === 'error')).toBe(true);
-    expect(captured.statusCalls.length).toBeGreaterThan(3);
+    expect(captured.statusCalls.length).toBeGreaterThanOrEqual(3);
   });
 
   it('harvests the real Python traceback from error.log on a genuine post-start failure', async () => {

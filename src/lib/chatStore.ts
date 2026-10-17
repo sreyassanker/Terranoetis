@@ -4,14 +4,23 @@ export * from '../shared/chat';
 
 import type { ChatListItem, ChatMessage, ChatSession } from '../shared/chat';
 
+function authHeaders(extra?: Record<string, string>): HeadersInit {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  const headers: Record<string, string> = { ...extra };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function listChats(): Promise<ChatListItem[]> {
-  const resp = await fetch('/api/chats');
+  const resp = await fetch('/api/chats', { headers: authHeaders() });
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function getChat(id: string): Promise<ChatSession | null> {
-  const resp = await fetch(`/api/chats/${encodeURIComponent(id)}`);
+  const resp = await fetch(`/api/chats/${encodeURIComponent(id)}`, { headers: authHeaders() });
   if (!resp.ok) return null;
   return resp.json();
 }
@@ -19,14 +28,17 @@ export async function getChat(id: string): Promise<ChatSession | null> {
 export async function saveChat(session: Partial<ChatSession> & { id: string }): Promise<boolean> {
   const resp = await fetch('/api/chats', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(session),
   });
   return resp.ok;
 }
 
 export async function deleteChat(id: string): Promise<boolean> {
-  const resp = await fetch(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const resp = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
   return resp.ok;
 }
 
