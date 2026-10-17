@@ -145,6 +145,18 @@ function runMigrations(database: Database.Database): void {
     logger.info('[DB] Migrated to schema v3 (env-only API keys, vault purged)');
   }
 
+  // v4: Ensure idx_vec_store_type_id is UNIQUE so semantic cache ON CONFLICT(entity_type, entity_id) succeeds
+  if (currentVersion < 4) {
+    try {
+      database.exec('DROP INDEX IF EXISTS idx_vec_store_type_id;');
+      database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_vec_store_type_id ON vec_store(entity_type, entity_id);');
+      logger.info('[DB] Created unique index idx_vec_store_type_id on vec_store(entity_type, entity_id)');
+    } catch (e) {
+      logger.warn({ err: e }, '[DB] Failed to create unique index on vec_store');
+    }
+    database.pragma('user_version = 4');
+  }
+
   // Tables added after v1 may be missing in existing databases.
   // Re-run any CREATE TABLE IF NOT EXISTS statements for tables that don't exist yet.
   const existingTables = new Set(

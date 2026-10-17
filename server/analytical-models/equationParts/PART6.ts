@@ -541,7 +541,15 @@ export const PART6: Record<number, ComputeFn> = {
       ],
     };
   },
-  118: ({ J, E }) => {
+  118: (inputs) => {
+    const J = Number(inputs.J ?? (inputs as Record<string, unknown>).j);
+    const E = Number(inputs.E ?? (inputs as Record<string, unknown>).e);
+    if (!Number.isFinite(J) || !Number.isFinite(E)) {
+      return {
+        result: Number.NaN, unit: 'W/m³',
+        steps: ['── Joule Heating in the Ionosphere (Cowley, 1982; Richmond, 1995) ──', 'Invalid input: Current density J and Electric field E must be finite numbers. Result: NaN.'],
+      };
+    }
     const Q = J * E;
     const sigma = E !== 0 ? J / E : 0;
     return {

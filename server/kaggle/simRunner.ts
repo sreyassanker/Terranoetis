@@ -170,7 +170,14 @@ function runLocalSimulation(job: SimulationJob, kernelDir: string): Promise<void
       updateJobStatus(job, 'running', 'Running locally (2D kernel, CPU)…');
       const child = spawn('python3', ['main.py'], {
         cwd: tmpDir,
-        env: { ...process.env, TERRANOETIS_OUT_DIR: resultDir, PYTHONUNBUFFERED: '1' },
+        env: {
+          PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+          PYTHONPATH: process.env.PYTHONPATH || '',
+          HOME: process.env.HOME || tmpDir,
+          TMPDIR: process.env.TMPDIR || '/tmp',
+          TERRANOETIS_OUT_DIR: resultDir,
+          PYTHONUNBUFFERED: '1',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       localChildren.set(job.id, child);

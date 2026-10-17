@@ -638,20 +638,21 @@ export const PART3: Record<number, ComputeFn> = {
     };
   },
   // ── Domain 11: Coastal & Wave ──
-  74: ({ H0, T0, betaF, g, __hAuto, __tAuto, __betaAuto, __waveDate }) => {
-    // Stockdon et al. (2006), Coastal Engineering 53(7):573-588.
-    // Eq (1): deep-water wavelength L₀ = gT₀²/2π. Iribarren number
-    // ξ₀ = β_f/√(H₀/L₀) selects the regime:
-    //   ξ₀ < 0.3  (dissipative): Eq (16) η̄_d = 0.016(H₀L₀)^{1/2},
-    //                Eq (17) S_d = 0.046(H₀L₀)^{1/2}, Eq (18)
-    //                R₂ = 0.043(H₀L₀)^{1/2} — NO slope dependence.
-    //   ξ₀ ≥ 0.3  (intermediate/reflective, all sites):
-    //                Eq (10) η̄ = 0.35·β_f·(H₀L₀)^{1/2},
-    //                Eq (11) S_inc = 0.75·β_f·(H₀L₀)^{1/2},
-    //                Eq (12) S_IG = 0.06·(H₀L₀)^{1/2},
-    //                combined swash S = √(S_inc² + S_IG²),
-    //                Eq (19) R₂ = 1.1·(η̄ + S/2) with
-    //                0.563 ≈ 0.75² and 0.004 ≈ 0.06².
+  74: (inputs) => {
+    const H0 = Number(inputs.H0 ?? (inputs as Record<string, unknown>).H_0 ?? (inputs as Record<string, unknown>)['H₀']);
+    const T0 = Number(inputs.T0 ?? (inputs as Record<string, unknown>).T_0 ?? (inputs as Record<string, unknown>)['T₀']);
+    const betaF = Number(inputs.betaF ?? (inputs as Record<string, unknown>).beta_f ?? (inputs as Record<string, unknown>)['β_f'] ?? (inputs as Record<string, unknown>)['βf']);
+    const g = Number(inputs.g ?? 9.81);
+    const __hAuto = (inputs as Record<string, unknown>).__hAuto;
+    const __tAuto = (inputs as Record<string, unknown>).__tAuto;
+    const __betaAuto = (inputs as Record<string, unknown>).__betaAuto;
+    const __waveDate = (inputs as Record<string, unknown>).__waveDate;
+    if (!Number.isFinite(H0) || !Number.isFinite(T0) || !Number.isFinite(betaF) || H0 <= 0 || T0 <= 0) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: ['── Wave Runup on Beaches (Stockdon et al., 2006) ──', 'Invalid input: H0, T0, and betaF must be positive numbers. Result: NaN.'],
+      };
+    }
     const L0 = g * T0 * T0 / (2 * Math.PI);
     const h0l0 = Math.sqrt(H0 * L0);
     const iribarren = betaF > 0 ? betaF / Math.sqrt(H0 / L0) : Number.NaN;

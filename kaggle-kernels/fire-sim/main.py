@@ -257,7 +257,7 @@ def rothermel_ros(fuel_model, load_mult, slope_deg, aspect_rad,
 
     # --- Live fuel moisture of extinction (Rothermel 1972, eq. 88)
     ratio_dead_live = W / np.maximum(LW, 1e-12)
-    mx_live = 2.9 * ratio_dead_live * (1.0 - mx_dead / np.maximum(m_dead, 1e-6)) - 0.226
+    mx_live = 2.9 * ratio_dead_live * (1.0 - m_dead / np.maximum(mx_dead, 1e-6)) - 0.226
     mx_live = np.maximum(mx_live, mx_dead)
 
     # --- Moisture damping coefficients
@@ -454,7 +454,23 @@ def simulate_fire(params):
     aspect_raw = params.get('aspect_rad')
     if elev_raw is not None:
         elev = np.asarray(elev_raw, dtype=np.float64)
-        if elev.shape == (gs, gs):
+        if elev.ndim == 2 and elev.shape[0] >= 2 and elev.shape[1] >= 2:
+            if elev.shape != (gs, gs):
+                old_h, old_w = elev.shape
+                y_coords = np.linspace(0, old_h - 1, gs)
+                x_coords = np.linspace(0, old_w - 1, gs)
+                y0 = np.floor(y_coords).astype(int)
+                y1 = np.clip(y0 + 1, 0, old_h - 1)
+                x0 = np.floor(x_coords).astype(int)
+                x1 = np.clip(x0 + 1, 0, old_w - 1)
+                fy = (y_coords - y0)[:, None]
+                fx = (x_coords - x0)[None, :]
+                elev = (
+                    elev[y0[:, None], x0[None, :]] * (1.0 - fy) * (1.0 - fx) +
+                    elev[y0[:, None], x1[None, :]] * (1.0 - fy) * fx +
+                    elev[y1[:, None], x0[None, :]] * fy * (1.0 - fx) +
+                    elev[y1[:, None], x1[None, :]] * fy * fx
+                )
             terrain_source = 'cesium_globe'
             gy, gx = np.gradient(elev, cell_m)
             slope_deg = np.clip(np.degrees(np.arctan(np.hypot(gx, gy))), 0.0, 45.0)

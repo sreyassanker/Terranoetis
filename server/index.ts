@@ -1745,7 +1745,7 @@ app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
   });
 });
 
-app.get('/api/config/vault', (_req: express.Request, res: express.Response) => {
+app.get('/api/config/vault', authGuard, (_req: express.Request, res: express.Response) => {
   try {
     const statuses = keyManager.getAllStatuses();
     res.json({ keys: statuses });
@@ -1754,7 +1754,7 @@ app.get('/api/config/vault', (_req: express.Request, res: express.Response) => {
   }
 });
 
-app.post('/api/config/vault', (req: express.Request, res: express.Response) => {
+app.post('/api/config/vault', authGuard, requireRole('admin'), (req: express.Request, res: express.Response) => {
   try {
     const { keys, deleteKeys } = req.body || {};
     if (!keys || typeof keys !== 'object') {
@@ -1774,7 +1774,7 @@ app.post('/api/config/vault', (req: express.Request, res: express.Response) => {
   }
 });
 
-app.delete('/api/config/vault/:key', (req: express.Request, res: express.Response) => {
+app.delete('/api/config/vault/:key', authGuard, requireRole('admin'), (req: express.Request, res: express.Response) => {
   try {
     const key = req.params.key;
     const deleted = keyManager.deleteKey(key);
@@ -1785,7 +1785,7 @@ app.delete('/api/config/vault/:key', (req: express.Request, res: express.Respons
   }
 });
 
-app.post('/api/config/vault/validate', async (req: express.Request, res: express.Response) => {
+app.post('/api/config/vault/validate', authGuard, requireRole('admin'), async (req: express.Request, res: express.Response) => {
   try {
     const { keyName, keyValue, contextKeys } = req.body || {};
     if (!keyName || typeof keyName !== 'string') {
@@ -6861,19 +6861,6 @@ function tleChecksum(line: string): string {
   return String(sum % 10);
 }
 
-function generateTle(noradId: string, inc: number, raan: number, ecc: number, argPer: number, meanAnomaly: number, meanMotion: number, epoch?: string): { tle1: string; tle2: string } {
-  const id = noradId.padStart(5, ' ');
-  const epochStr = (epoch ?? '00001.00000000').slice(0, 14).padEnd(14, '0');
-  const l1 = `1 ${id}U 00001A   ${epochStr}  0.00000000  0  0  999`;
-  const incS = inc.toFixed(4).padStart(8, ' ');
-  const raanS = raan.toFixed(4).padStart(8, ' ');
-  const eccS = Math.round(ecc * 1e7).toString().padStart(7, '0');
-  const argS = argPer.toFixed(4).padStart(8, ' ');
-  const meanS = meanAnomaly.toFixed(4).padStart(8, ' ');
-  const mmS = meanMotion.toFixed(8).padStart(11, ' ');
-  const l2 = `2 ${id} ${incS} ${raanS} ${eccS} ${argS} ${meanS} ${mmS} 0`;
-  return { tle1: l1 + tleChecksum(l1), tle2: l2 + tleChecksum(l2) };
-}
 
 async function fetchSatellites(): Promise<any[]> {
   const cacheKey = 'merged_satellites';
@@ -6969,13 +6956,8 @@ async function fetchSatellites(): Promise<any[]> {
         const uPeriod = u.period; // minutes
         const uMeanMotion = uPeriod ? 1440 / uPeriod : 15; // rev/day
         const uAltitude = u.apogee ? Math.round((u.apogee + (u.perigee ?? u.apogee)) / 2 * 1000) : null;
-        let tle: { tle1: string; tle2: string } | null = null;
-        try {
-          tle = generateTle(noradId || '00000', uInclination, 0, uEccentricity, 0, 0, uMeanMotion);
-        // eslint-disable-next-line no-empty
-        } catch {}
         const entry = {
-          id: noradId || `ucs_${u.name ?? Math.random()}`,
+          id: noradId || `ucs_${u.name ?? u.OBJECT_NAME ?? 'unknown'}`,
           name: u.name ?? u.OBJECT_NAME ?? 'Unknown',
           lat: null,
           lon: null,
@@ -6985,9 +6967,9 @@ async function fetchSatellites(): Promise<any[]> {
           epoch: null,
           value: 50,
           source: 'UCS',
-          hasTle: !!tle,
-          tle1: tle?.tle1 ?? null,
-          tle2: tle?.tle2 ?? null,
+          hasTle: false,
+          tle1: null,
+          tle2: null,
           country: u.country ?? null,
           purpose: u.purpose ?? null,
           orbitClass: u.orbit_class ?? null,
@@ -7017,18 +6999,11 @@ async function fetchSatellites(): Promise<any[]> {
       const sMean = st?.MEAN_ANOMALY ?? 0;
       const sMm = st?.MEAN_MOTION ?? 15;
       const sEpoch = st?.EPOCH ? st.EPOCH.replace(/[^0-9.]/g, '').slice(0, 14) : undefined;
-      let stTle: { tle1: string; tle2: string } | null = null;
-      try {
-        stTle = generateTle(noradId || '00000', sInc, sRaan, sEcc, sArg, sMean, sMm, sEpoch);
-      // eslint-disable-next-line no-empty
-      } catch {}
-
       const existing = noradId ? resultsById.get(noradId) : null;
       if (existing) {
         if (s.velocity_kms != null) existing.velocity = s.velocity_kms;
         if (s.latitude != null && s.longitude != null) { existing.lat = +s.latitude.toFixed(4); existing.lon = +s.longitude.toFixed(4); }
         if (s.height_km != null) existing.altitude = Math.round(s.height_km * 1000);
-        if (stTle) { existing.tle1 = stTle.tle1; existing.tle2 = stTle.tle2; existing.hasTle = true; }
         existing.source = 'CelesTrak';
         continue;
       }
@@ -7043,9 +7018,9 @@ async function fetchSatellites(): Promise<any[]> {
         epoch: sEpoch ?? null,
         value: 60,
         source: 'Starlink',
-        hasTle: !!stTle,
-        tle1: stTle?.tle1 ?? null,
-        tle2: stTle?.tle2 ?? null,
+        hasTle: false,
+        tle1: null,
+        tle2: null,
         velocity: s.velocity_kms ?? null,
         version: s.version ?? null,
       };
@@ -7996,22 +7971,60 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   // Aviation (distinct real feeds)
   '2_adsb_lol': async () => {
     try {
-      const resp = await fetch('https://api.adsb.lol/v2/point/48/10/250', { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
-        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.call ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
-      }));
+      // Query sample regions across continents (Western Europe, North America, East Asia)
+      const sampleRegions = [
+        { lat: 48, lon: 10, dist: 250 },
+        { lat: 40, lon: -74, dist: 250 },
+        { lat: 35, lon: 139, dist: 250 },
+      ];
+      const results = await Promise.allSettled(
+        sampleRegions.map(r =>
+          fetch(`https://api.adsb.lol/v2/point/${r.lat}/${r.lon}/${r.dist}`, { signal: AbortSignal.timeout(10000) })
+            .then(res => res.ok ? res.json() : { aircraft: [] })
+        )
+      );
+      const all: any[] = [];
+      const seen = new Set<string>();
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        for (const a of res.value.aircraft ?? []) {
+          const id = a.hex || a.call || `${a.lat}_${a.lon}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          all.push({
+            lat: a.lat ?? null, lon: a.lon ?? null, name: a.call ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
+          });
+        }
+      }
+      return all.slice(0, 2000);
     } catch { return []; }
   },
   '2_adsb_fi': async () => {
     try {
-      const resp = await fetch('https://opendata.adsb.fi/api/v3/lat/48/lon/10/dist/250', { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
-        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.hex ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, source: 'adsb.fi',
-      }));
+      const sampleRegions = [
+        { lat: 48, lon: 10, dist: 250 },
+        { lat: 51, lon: 0, dist: 250 },
+      ];
+      const results = await Promise.allSettled(
+        sampleRegions.map(r =>
+          fetch(`https://opendata.adsb.fi/api/v3/lat/${r.lat}/lon/${r.lon}/dist/${r.dist}`, { signal: AbortSignal.timeout(10000) })
+            .then(res => res.ok ? res.json() : { aircraft: [] })
+        )
+      );
+      const all: any[] = [];
+      const seen = new Set<string>();
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        for (const a of res.value.aircraft ?? []) {
+          const id = a.hex || a.flight || `${a.lat}_${a.lon}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          all.push({
+            lat: a.lat ?? null, lon: a.lon ?? null, name: a.hex ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, source: 'adsb.fi',
+          });
+        }
+      }
+      return all.slice(0, 2000);
     } catch { return []; }
   },
   '2_openflights': async () => {
@@ -8022,7 +8035,7 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
       const lines = text.split('\n').filter(l => l.trim());
       return lines.slice(0, 5000).map((line: string) => {
         const parts = line.split(',');
-        return { name: `${parts[0] ?? ''} → ${parts[2] ?? ''}`, code: parts[0], dest: parts[2], airline: parts[1], source: 'OpenFlights', lat: 0, lon: 0 };
+        return { name: `${parts[0] ?? ''} → ${parts[2] ?? ''}`, code: parts[0], dest: parts[2], airline: parts[1], source: 'OpenFlights', lat: null, lon: null };
       });
     } catch { return []; }
   },
@@ -8050,23 +8063,47 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   'flight_tracks': async () => {
     try {
-      const resp = await fetch('https://api.adsb.lol/v2/point/48/10/250', { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
-        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.call ?? a.flight ?? 'Flight', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
-      }));
+      const sampleRegions = [
+        { lat: 48, lon: 10, dist: 250 },
+        { lat: 40, lon: -74, dist: 250 },
+      ];
+      const results = await Promise.allSettled(
+        sampleRegions.map(r =>
+          fetch(`https://api.adsb.lol/v2/point/${r.lat}/${r.lon}/${r.dist}`, { signal: AbortSignal.timeout(10000) })
+            .then(res => res.ok ? res.json() : { aircraft: [] })
+        )
+      );
+      const all: any[] = [];
+      const seen = new Set<string>();
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        for (const a of res.value.aircraft ?? []) {
+          const id = a.hex || a.call || `${a.lat}_${a.lon}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          all.push({
+            lat: a.lat ?? null, lon: a.lon ?? null, name: a.call ?? a.flight ?? 'Flight', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
+          });
+        }
+      }
+      return all.slice(0, 2000);
     } catch { return []; }
   },
   'ais_vessels': async () => {
     try {
-      const resp = await fetch('https://api.aisstream.io/v1/stream?apiKey=public', { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return (data.message ?? []).map((m: any) => {
-        const p = m.position || {};
-        return { lat: p.latitude ?? 0, lon: p.longitude ?? 0, name: m.shipname ?? 'Vessel', speed: p.sog, heading: p.cog, source: 'AISStream' };
-      });
+      const tracker = getAisTracker();
+      if (!tracker) return [];
+      const vessels = tracker.getAllVessels();
+      return vessels.slice(0, 5000).map((v) => ({
+        lat: v.lat,
+        lon: v.lon,
+        name: v.name || `MMSI-${v.mmsi}`,
+        mmsi: v.mmsi,
+        speed: v.sog,
+        heading: v.heading,
+        shipType: v.shipType,
+        source: 'AISStream',
+      }));
     } catch { return []; }
   },
   'sanctions_pressure': async () => {
@@ -8078,7 +8115,7 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
       const lines = text.split('\n').filter(l => l.trim()).slice(0, 2000);
       return lines.map((line: string) => {
         const parts = line.split(',');
-        return { name: (parts[1] || '').replace(/"/g, ''), type: (parts[2] || '').replace(/"/g, ''), country: (parts[4] || '').replace(/"/g, ''), program: (parts[3] || '').replace(/"/g, ''), lat: 0, lon: 0, source: 'OFAC' };
+        return { name: (parts[1] || '').replace(/"/g, ''), type: (parts[2] || '').replace(/"/g, ''), country: (parts[4] || '').replace(/"/g, ''), program: (parts[3] || '').replace(/"/g, ''), lat: null, lon: null, source: 'OFAC' };
       });
     } catch { return []; }
   },
@@ -14268,7 +14305,7 @@ app.get('/api/causal-graph', (_req: express.Request, res: express.Response) => {
    CHAT SESSION STORAGE — persistent chat history as JSON files
    ═════════════════════════════════════════════════════════════════ */
 
-app.get('/api/chats', (req: express.Request, res: express.Response) => {
+app.get('/api/chats', authGuard, (req: express.Request, res: express.Response) => {
   try {
     const db = getDb();
     const uid = (req as any).userId;
@@ -14286,7 +14323,7 @@ app.get('/api/chats', (req: express.Request, res: express.Response) => {
   }
 });
 
-app.get('/api/chats/:id', (req: express.Request, res: express.Response) => {
+app.get('/api/chats/:id', authGuard, (req: express.Request, res: express.Response) => {
   try {
     const db = getDb();
     const row = db.prepare('SELECT * FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, (req as any).userId) as Record<string, unknown> | undefined;
@@ -14306,7 +14343,7 @@ app.get('/api/chats/:id', (req: express.Request, res: express.Response) => {
   }
 });
 
-app.post('/api/chats', validate(chatCreateSchema), (req: express.Request, res: express.Response) => {
+app.post('/api/chats', authGuard, validate(chatCreateSchema), (req: express.Request, res: express.Response) => {
   try {
     const { id, title, messages, environmentId, workspaceId } = req.body;
     const db = getDb();
@@ -14343,7 +14380,7 @@ app.post('/api/chats', validate(chatCreateSchema), (req: express.Request, res: e
   }
 });
 
-app.delete('/api/chats/:id', requireOwnership('chats'), (req: express.Request, res: express.Response) => {
+app.delete('/api/chats/:id', authGuard, requireOwnership('chats'), (req: express.Request, res: express.Response) => {
   try {
     const db = getDb();
     const result = db.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(req.params.id, (req as any).userId);

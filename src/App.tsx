@@ -1361,6 +1361,7 @@ export default function App() {
   const entropyHaloRef = useRef<EntropyHalo | null>(null);
   const oracleChainRef = useRef<OracleChainRenderer | null>(null);
   const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
+  const cleanupCesiumRef = useRef<() => void>(() => {});
   const unlockInteractionRef = useRef<(() => void) | null>(null);
   const feedErrorsRef = useRef<string[]>([]);
   const feedSummaryShownRef = useRef(false);
@@ -2842,7 +2843,7 @@ export default function App() {
       document.removeEventListener('click', handleDocClick);
       v.scene.postRender.removeEventListener(syncWeatherCardPositions);
       v.scene.postRender.removeEventListener(onPostRender);
-      cleanupCesium();
+      cleanupCesiumRef.current?.();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -10502,7 +10503,10 @@ case 'openPanel':
       const handleClick = (e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
         handler.destroy();
         const cartesian = v.scene.globe.pick(v.camera.getPickRay(e.position)!, v.scene);
-        if (!cartesian) return;
+        if (!cartesian) {
+          setStudyDrawing(false);
+          return;
+        }
         const carto = Cesium.Cartographic.fromCartesian(cartesian);
         const lon = Cesium.Math.toDegrees(carto.longitude);
         const lat = Cesium.Math.toDegrees(carto.latitude);
@@ -10837,6 +10841,7 @@ case 'openPanel':
     }
     lastKnownLocationRef.current = null;
   }, []);
+  cleanupCesiumRef.current = cleanupCesium;
 
   /* ═════════════════════════════════════════════════════════════════
      RENDER

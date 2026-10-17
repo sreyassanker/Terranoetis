@@ -351,7 +351,15 @@ export const PART5: Record<number, ComputeFn> = {
        ]
      };
    },
-  103: ({ ubar, uprime }) => {
+  103: (inputs) => {
+    const ubar = Number(inputs.ubar ?? (inputs as Record<string, unknown>).u_bar ?? (inputs as Record<string, unknown>)['ū'] ?? (inputs as Record<string, unknown>)['ū']);
+    const uprime = Number(inputs.uprime ?? (inputs as Record<string, unknown>).u_prime ?? (inputs as Record<string, unknown>)["u'"]);
+    if (!Number.isFinite(ubar) || !Number.isFinite(uprime)) {
+      return {
+        result: Number.NaN, unit: 'm/s',
+        steps: ['── Reynolds Decomposition (Reynolds, 1895) ──', 'Invalid input: Mean flow and perturbation velocity must be finite numbers. Result: NaN.'],
+      };
+    }
     const u = ubar + uprime;
     const ratio = ubar !== 0 ? uprime / ubar : 0;
     return {

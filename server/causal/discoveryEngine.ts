@@ -92,13 +92,13 @@ export class DiscoveryEngine {
   }
 
   private async findCandidatePairs(events: Array<Record<string, unknown>>): Promise<Array<{ source: string; target: string; correlation: number; avgLagHours: number; count: number }>> {
-    const eventTypes = [...new Set(events.map(e => (e.type as string) || 'unknown'))] as string[];
+    const eventTypes = [...new Set(events.map(e => (e.intent_type as string) || (e.type as string) || 'unknown'))] as string[];
     const data: Record<string, number[]> = {};
 
     for (const type of eventTypes) {
       data[type] = events
-        .filter(e => (e.type as string) === type)
-        .map(e => (e.magnitude as number) || (e.severity as number) || 1);
+        .filter(e => ((e.intent_type as string) || (e.type as string)) === type)
+        .map(e => (e.magnitude as number) || (e.severity as number) || (e.latency_ms as number) || (e.tokens_used as number) || 1);
     }
 
     const maxLen = Math.max(...Object.values(data).map(arr => arr.length));

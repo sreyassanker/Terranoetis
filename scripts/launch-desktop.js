@@ -34,7 +34,16 @@ prep.on('close', async (code) => {
   }
 
   console.log('[desktop-launcher] 🛰️ Starting backend intelligence server (port 3001)...');
-  const server = spawn('npm', ['run', 'dev:server'], { cwd: ROOT, stdio: 'inherit' });
+  const server = spawn('npm', ['run', 'dev:server'], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      PARENT_PID: String(process.pid),
+      TERRANOETIS_DESKTOP: '1',
+      DESKTOP_APP: '1',
+    },
+  });
 
   function cleanup() {
     console.log('\n[desktop-launcher] 🛑 Shutting down backend server...');

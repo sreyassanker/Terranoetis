@@ -459,12 +459,9 @@ export function KaggleScalarOverlay({
           viewer,
           frame: geoFrame,
           outGs: gs,
-          // Sample terrain at the full overlay resolution so the lava base
-          // equals globe.getHeight at every cell (bilinearUpsample becomes an
-          // identity pass). A coarse 72-point sample over a steep volcano leaves
-          // the surface floating slightly above the real relief.
           coarseLimit: Math.min(gs, 256),
           debugName: `${config.typeKey}-${jobId}`,
+          signal: controller.signal,
         },
         buildStack,
       );

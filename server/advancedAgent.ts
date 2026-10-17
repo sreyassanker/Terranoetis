@@ -23,6 +23,7 @@ import { evidenceChain } from './explainability/evidenceChain';
 import { dynamicTools } from './toolsV2/toolGenerator';
 import { memoryManagerV2 } from './memoryV2/memoryManagerV2';
 import { logger } from './observability/logger';
+import { ToolCallParser } from './agent';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -372,6 +373,43 @@ Complete ONLY your assigned task. Respond directly. If you need to call a tool, 
       accumulated += token;
       onUpdate({ role: step.agent, stepId: step.id, status: 'partial', text: 'streaming', partial: token, timestamp: Date.now() });
     }
+
+    // AGENT-TOOL-01: Parse and execute any tool calls emitted by the sub-agent
+    const calls = ToolCallParser.parse(accumulated);
+    if (calls.length > 0 && !signal?.aborted) {
+      onUpdate({ role: step.agent, stepId: step.id, status: 'thinking', text: `${step.agent} executing ${calls.length} tool call(s)...`, timestamp: Date.now() });
+      const toolResults: Array<{ name: string; result: unknown }> = [];
+      for (const call of calls) {
+        if (signal?.aborted) break;
+        try {
+          const res = await dynamicTools.execute(call.name, call.args, signal);
+          toolResults.push({ name: call.name, result: res });
+        } catch (err) {
+          toolResults.push({ name: call.name, result: { error: err instanceof Error ? err.message : String(err) } });
+        }
+      }
+
+      const followUpPrompt = `${fullPrompt}
+
+Sub-agent output so far:
+${accumulated}
+
+Tool execution results:
+${JSON.stringify(toolResults, null, 2)}
+
+Incorporate these tool execution results and provide your final response for this task.`;
+
+      let followUpAccumulated = '';
+      for await (const token of omninet.generateStream(followUpPrompt, { signal, temperature: 0.4, maxTokens: 1500 })) {
+        if (signal?.aborted) break;
+        followUpAccumulated += token;
+        onUpdate({ role: step.agent, stepId: step.id, status: 'partial', text: 'streaming', partial: token, timestamp: Date.now() });
+      }
+      if (followUpAccumulated) {
+        accumulated = followUpAccumulated;
+      }
+    }
+
     onUpdate({ role: step.agent, stepId: step.id, status: 'completed', text: `${step.agent} completed`, timestamp: Date.now() });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

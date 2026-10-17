@@ -30,6 +30,8 @@ export interface SampleOptions {
   coarseLimit?: number;
   /** Name for debug logging. */
   debugName?: string;
+  /** Optional cancellation signal to detach tileLoadedEvent listener on unmount. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -87,7 +89,7 @@ export function sampleDomainTerrain(
   // If every sample missed (tiles not streamed yet), we return a flat array
   // immediately and subscribe to tile loads to refine later. Without this,
   // overlays built right after a camera move are permanently flat.
-  if (misses > 0 && onRefined) {
+  if (misses > 0 && onRefined && !opts.signal?.aborted) {
     const globeLoose = globe as unknown as { tileLoadedEvent: Cesium.Event };
     let remove: (() => void) | null = null;
     let attempts = 0;
@@ -96,8 +98,13 @@ export function sampleDomainTerrain(
     // fire before the vent tile itself has loaded, leaving the surface at 0 m.
     const MAX_ATTEMPTS = 16;
     const arm = () => {
+      if (opts.signal?.aborted) return;
       globeLoose.tileLoadedEvent.addEventListener(listener);
-      remove = () => globeLoose.tileLoadedEvent.removeEventListener(listener);
+      remove = () => {
+        try {
+          globeLoose.tileLoadedEvent.removeEventListener(listener);
+        } catch { /* ignore */ }
+      };
     };
     const listener = () => {
       // Unsubscribe before resync to debounce tile-load bursts.
@@ -105,13 +112,24 @@ export function sampleDomainTerrain(
         remove();
         remove = null;
       }
+      if (opts.signal?.aborted) return;
       attempts++;
       // Re-sample with current terrain. `onRefined` is intentionally omitted
       // here so this recursive call does NOT arm another listener.
       const refined = sampleDomainTerrain({ ...opts });
       onRefined(refined);
-      if (attempts < MAX_ATTEMPTS) arm();
+      if (attempts < MAX_ATTEMPTS && !opts.signal?.aborted) arm();
     };
+
+    if (opts.signal) {
+      opts.signal.addEventListener('abort', () => {
+        if (remove) {
+          remove();
+          remove = null;
+        }
+      }, { once: true });
+    }
+
     arm();
   }
 

@@ -134,6 +134,7 @@ export class Omninet {
 
   init(): void {
     if (this.initialized) return;
+    this.ensureTable();
     this.providers = PROVIDER_CONFIGS.map(config => {
       const saved = this.loadState(config.name);
       // Never carry a stale 'down' from a previous run into a fresh boot —
@@ -145,22 +146,21 @@ export class Omninet {
       return {
         config,
         status,
-        lastChecked: (saved?.lastChecked as number) || 0,
-        failureCount: (saved?.failureCount as number) || 0,
-        consecutiveSuccesses: (saved?.consecutiveSuccesses as number) || 0,
+        lastChecked: (saved?.last_checked as number) ?? (saved?.lastChecked as number) ?? 0,
+        failureCount: (saved?.failure_count as number) ?? (saved?.failureCount as number) ?? 0,
+        consecutiveSuccesses: (saved?.consecutive_successes as number) ?? (saved?.consecutiveSuccesses as number) ?? 0,
         circuitState: 'closed',
         circuitFailures: 0,
         circuitOpenedAt: 0,
         tokens: (saved?.tokens as number) ?? config.rateLimit,
         lastTokenRefill: Date.now(), // start each boot with a full token window
-        totalRequests: (saved?.totalRequests as number) || 0,
-        totalTokens: (saved?.totalTokens as number) || 0,
-        estimatedCost: (saved?.estimatedCost as number) || 0,
-        lastLatency: (saved?.lastLatency as number) || 1000,
+        totalRequests: (saved?.total_requests as number) ?? (saved?.totalRequests as number) ?? 0,
+        totalTokens: (saved?.total_tokens as number) ?? (saved?.totalTokens as number) ?? 0,
+        estimatedCost: (saved?.estimated_cost as number) ?? (saved?.estimatedCost as number) ?? 0,
+        lastLatency: (saved?.last_latency as number) ?? (saved?.lastLatency as number) ?? 1000,
       };
     });
     this.initialized = true;
-    this.ensureTable();
     this.startHealthChecks();
     void this.triggerImmediateHealthChecks().catch((err) => {
       logger.warn({ err }, 'Omninet initial health check error');
@@ -981,7 +981,52 @@ export class Omninet {
             options.onToolCalls(geminiCalls);
             return;
           }
-          if (yieldedChars === 0) throw new Error(`Gemini ${model} streamed no content (reasoning-only response)`);
+        } else if (config.type === 'claude') {
+          const cApiKey = this.resolveApiKey(config) || process.env.ANTHROPIC_API_KEY || '';
+          if (!cApiKey) throw new Error('Claude: missing ANTHROPIC_API_KEY');
+          const resp = await fetch(`${config.baseUrl}/messages`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': cApiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            signal: options?.signal || AbortSignal.timeout(60000),
+            body: JSON.stringify({
+              model,
+              max_tokens: options?.maxTokens ?? 2048,
+              stream: true,
+              messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, 30000) }],
+            }),
+          });
+          if (!resp.ok) throw new Error(`Claude HTTP ${resp.status}`);
+          started = true;
+          const reader = resp.body?.getReader();
+          if (!reader) throw new Error('No response body');
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let yieldedChars = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const chunk = JSON.parse(line.slice(6));
+                  if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+                    reportUsed();
+                    yield chunk.delta.text;
+                    yieldedChars += chunk.delta.text.length;
+                    yieldedAny += chunk.delta.text.length;
+                  }
+                } catch { /* ignore parse errors */ }
+              }
+            }
+          }
+          if (yieldedChars === 0) throw new Error(`Claude ${model} streamed no content`);
         } else {
           const result = await this.executeProviderCall(config, model, prompt, options);
           started = true;

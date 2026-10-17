@@ -185,12 +185,12 @@ def step_shallow_water(
     hu_new = hu - dt * _divergence_from_flux(fx_hu, fy_hu, dx, dy)
     hv_new = hv - dt * _divergence_from_flux(fx_hv, fy_hv, dx, dy)
 
-    # Bathymetry source terms.
+    # Bathymetry source terms (well-balanced hydrostatic equilibrium).
     slope_x = (np.roll(bathymetry, -1, axis=1) - np.roll(bathymetry, 1, axis=1)) / (2.0 * dx)
     slope_y = (np.roll(bathymetry, -1, axis=0) - np.roll(bathymetry, 1, axis=0)) / (2.0 * dy)
     depth_safe = np.maximum(depth_new, 1e-8)
-    hu_new -= dt * g * depth_safe * slope_x
-    hv_new -= dt * g * depth_safe * slope_y
+    hu_new += dt * g * depth_safe * slope_x
+    hv_new += dt * g * depth_safe * slope_y
 
     h_new = depth_new - bathymetry
     h_new = np.where(np.isfinite(h_new), h_new, 0.0)

@@ -230,16 +230,21 @@ export class PluginManager {
   }
 
   async installPlugin(filename: string, content: string): Promise<string | null> {
-    if (!filename.endsWith('.ts') && !filename.endsWith('.js')) {
+    const safeFilename = path.basename(filename);
+    if (!safeFilename.endsWith('.ts') && !safeFilename.endsWith('.js')) {
       throw new Error('Plugin file must be a .ts or .js file');
     }
-    if (!fs.existsSync(PLUGINS_DIR)) {
-      fs.mkdirSync(PLUGINS_DIR, { recursive: true });
+    const resolvedPluginsDir = path.resolve(PLUGINS_DIR);
+    if (!fs.existsSync(resolvedPluginsDir)) {
+      fs.mkdirSync(resolvedPluginsDir, { recursive: true });
     }
-    const pluginPath = path.join(PLUGINS_DIR, filename);
+    const pluginPath = path.resolve(resolvedPluginsDir, safeFilename);
+    if (!pluginPath.startsWith(resolvedPluginsDir + path.sep)) {
+      throw new Error('Invalid plugin path');
+    }
     fs.writeFileSync(pluginPath, content, 'utf-8');
 
-    const pluginId = `file:${filename}`;
+    const pluginId = `file:${safeFilename}`;
     this.plugins.delete(pluginId);
     await this.scanFiles();
 
@@ -284,10 +289,14 @@ export class PluginManager {
       this.dataHandlers.delete(ds.name);
     }
 
-    const filename = resolvedId.replace(/^file:/, '');
-    const pluginPath = path.join(PLUGINS_DIR, filename);
+    const rawFilename = resolvedId.replace(/^file:/, '');
+    const filename = path.basename(rawFilename);
+    const resolvedPluginsDir = path.resolve(PLUGINS_DIR);
+    const pluginPath = path.resolve(resolvedPluginsDir, filename);
     try {
-      if (fs.existsSync(pluginPath)) fs.unlinkSync(pluginPath);
+      if (pluginPath.startsWith(resolvedPluginsDir + path.sep) && fs.existsSync(pluginPath)) {
+        fs.unlinkSync(pluginPath);
+      }
     } catch {
       /* ignore */
     }
@@ -659,7 +668,8 @@ export class PluginManager {
       sandboxClearTimeout: clearTimeout,
       URL,
       URLSearchParams,
-      Buffer,
+      btoa: (str: string) => Buffer.from(str, 'binary').toString('base64'),
+      atob: (b64: string) => Buffer.from(b64, 'base64').toString('binary'),
       Math,
       JSON,
       Date,
@@ -674,6 +684,7 @@ export class PluginManager {
       clearTimeout: undefined as unknown,
       require: undefined as unknown,
       process: undefined as unknown,
+      Buffer: undefined as unknown,
       global: undefined as unknown,
     };
 

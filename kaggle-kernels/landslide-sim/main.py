@@ -870,7 +870,7 @@ def main():
                   'friction_angle': 35, 'cohesion': 500, 'lat': 36.1699, 'lon': -115.8090}
     try:
         result = simulate_landslide(params)
-        out = '/kaggle/working'
+        out = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
         os.makedirs(out, exist_ok=True)
         np.save(f'{out}/landslide_depth.npy', result['final']['landslide_depth'])
         np.save(f'{out}/landslide_velocity.npy', result['final']['landslide_velocity'])
@@ -906,7 +906,9 @@ def main():
         print(f"\n{'='*60}\nSIMULATION COMPLETE\n{'='*60}")
     except Exception as e:
         print(f"\n[ERROR] {e}"); traceback.print_exc()
-        with open('/kaggle/working/error.log', 'w') as f:
+        out_dir = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, 'error.log'), 'w') as f:
             traceback.print_exc(file=f)
         raise
 

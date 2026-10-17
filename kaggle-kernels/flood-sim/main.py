@@ -783,7 +783,7 @@ def main():
             )
 
         result = run_flood_simulation(params)
-        out = '/kaggle/working'
+        out = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
         os.makedirs(out, exist_ok=True)
 
         np.save(f'{out}/water_depth_final.npy', result['final']['water_depth'])
@@ -838,7 +838,9 @@ def main():
     except Exception as e:
         print(f"\n[ERROR] {e}")
         traceback.print_exc()
-        with open('/kaggle/working/error.log', 'w') as f:
+        out_dir = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, 'error.log'), 'w') as f:
             traceback.print_exc(file=f)
         raise
 
