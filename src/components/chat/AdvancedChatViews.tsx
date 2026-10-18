@@ -15,8 +15,9 @@ import type { PlanCard as PlanCardType, SubAgentActivity, ArtifactData, ToolEven
 import { approveTool, fetchTrace } from '@/lib/advancedChat';
 import {
   Play, CheckCircle, XCircle, Loader, ChevronDown, ChevronRight,
-  Shield, Brain, Copy, Eye, Cpu,
+  Shield, Brain, Copy, Eye, Cpu, ShieldCheck, ShieldAlert, Link2, CheckCircle2, Lock,
 } from 'lucide-react';
+import { authHeaders } from '@/context/AuthContext';
 
 // ─── #5: Plan Card ─────────────────────────────────────────────────────────
 
@@ -298,54 +299,6 @@ export function ToolApprovalView({ event, onApprove, onDeny }: {
   );
 }
 
-// ─── #11: Model tier selector ───────────────────────────────────────────────
-
-export function ModelTierSelector({ tiers, current, onSelect }: {
-  tiers: Array<{ id: string; label: string; description: string; costPerQuery: number; latencyMs: number }>;
-  current: string;
-  onSelect: (tier: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const active = tiers.find(t => t.id === current) ?? tiers[0];
-  return (
-    <div style={{ borderTop: '1px solid var(--border)', padding: '2px 8px' }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        title="Model tier — click to show costs"
-        aria-expanded={expanded}
-        style={{
-          fontSize: 10, padding: '3px 6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-          background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-dim)', borderRadius: 4,
-        }}
-      >
-        <Cpu size={11} />
-        {active?.label ?? 'Model'}
-        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-      </button>
-      {expanded && (
-        <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
-          {tiers.map(t => (
-            <button
-              key={t.id}
-              onClick={() => onSelect(t.id)}
-              title={t.description}
-              style={{
-                flex: 1, fontSize: 10, padding: '3px 4px', cursor: 'pointer',
-                background: current === t.id ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${current === t.id ? 'rgba(96,165,250,0.4)' : 'var(--border)'}`,
-                color: current === t.id ? '#60a5fa' : 'var(--text-dim)',
-                borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-              }}
-            >
-              <span style={{ fontWeight: 600 }}>{t.label}</span>
-              <span style={{ fontSize: 10, opacity: 0.7 }}>${t.costPerQuery.toFixed(4)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── #15: Trace expander ───────────────────────────────────────────────────
 
@@ -358,16 +311,89 @@ interface TraceData {
   steps?: Array<{ type: string; description: string; durationMs?: number }>;
 }
 
+interface EvidenceSource {
+  sourceType: string;
+  sourceName: string;
+  endpoint?: string;
+  responseTimeMs?: number;
+  httpStatus?: number;
+}
+
+interface EvidenceLink {
+  claim: string;
+  confidence: number;
+  sources: EvidenceSource[];
+  hash: string;
+  previousHash: string;
+  timestamp: number;
+}
+
+interface EvidenceChainData {
+  chain: EvidenceLink[];
+  integrity: { valid: boolean; length: number };
+}
+
 export function TraceExpander({ traceId }: { traceId: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [subTab, setSubTab] = useState<'steps' | 'evidence'>('steps');
   const [trace, setTrace] = useState<TraceData | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Evidence chain states
+  const [evidenceData, setEvidenceData] = useState<EvidenceChainData | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<string | null>(null);
+
+  const fetchEvidence = async (interactionId: string) => {
+    setEvidenceLoading(true);
+    try {
+      const resp = await fetch(`/api/explain/evidence/${encodeURIComponent(interactionId)}`, {
+        headers: { ...authHeaders() },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setEvidenceData(data);
+      } else {
+        setEvidenceData(null);
+      }
+    } catch {
+      setEvidenceData(null);
+    } finally {
+      setEvidenceLoading(false);
+    }
+  };
+
+  const handleVerify = async (interactionId: string) => {
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const resp = await fetch(`/api/explain/evidence/${encodeURIComponent(interactionId)}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      });
+      const res = await resp.json();
+      if (res.valid) {
+        setVerifyResult(`✓ Cryptographic chain verified intact (${res.length || evidenceData?.chain?.length || 0} links)`);
+      } else {
+        setVerifyResult(`⚠ Broken chain detected at link ${res.brokenAt}`);
+      }
+    } catch (err: unknown) {
+      setVerifyResult(`Verification error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const handleExpand = async () => {
     if (!expanded && !trace) {
       setLoading(true);
       try {
         const t = await fetchTrace(traceId);
         setTrace(t);
+        if (t?.interactionId) {
+          fetchEvidence(t.interactionId);
+        }
       } catch {
         setTrace(null);
       } finally {
@@ -376,22 +402,53 @@ export function TraceExpander({ traceId }: { traceId: string }) {
     }
     setExpanded(!expanded);
   };
+
   return (
     <div style={{ marginTop: 4 }}>
       <button onClick={handleExpand} style={{ fontSize: 10, color: 'var(--text-dim)', background: 'none', border: '1px solid transparent', cursor: 'pointer', padding: '2px 6px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
         {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        <Eye size={10} /> Trace
+        <Eye size={10} /> Trace & Evidence
       </button>
+
       {expanded && (
-        <div style={{ marginTop: 4, padding: 6, background: 'rgba(0,0,0,0.2)', borderRadius: 4, fontSize: 10, color: 'var(--text-dim)', maxHeight: 180, overflow: 'auto' }}>
+        <div style={{ marginTop: 4, padding: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10, color: 'var(--text-dim)', maxHeight: 240, overflow: 'auto' }}>
+          {/* Sub-tabs */}
+          <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', paddingBottom: 4, marginBottom: 6 }}>
+            <button
+              onClick={() => setSubTab('steps')}
+              style={{
+                fontSize: 9, padding: '2px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                background: subTab === 'steps' ? 'rgba(59,130,246,0.2)' : 'transparent',
+                color: subTab === 'steps' ? '#60a5fa' : 'var(--text-dim)',
+              }}
+            >
+              Execution Steps
+            </button>
+            <button
+              onClick={() => {
+                setSubTab('evidence');
+                if (!evidenceData && trace?.interactionId) fetchEvidence(trace.interactionId);
+              }}
+              style={{
+                fontSize: 9, padding: '2px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                background: subTab === 'evidence' ? 'rgba(52,211,153,0.2)' : 'transparent',
+                color: subTab === 'evidence' ? '#34d399' : 'var(--text-dim)',
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+              }}
+            >
+              <Shield size={10} /> Evidence Chain
+            </button>
+          </div>
+
           {loading && <div><Loader size={10} className="spin" /> Loading trace...</div>}
-          {!loading && trace && (
+
+          {!loading && trace && subTab === 'steps' && (
             <div>
               <div style={{ marginBottom: 4, color: 'var(--text)' }}>Interaction: <code>{trace.interactionId?.slice(0, 12)}</code></div>
               <div style={{ marginBottom: 4 }}>Model: {trace.modelUsed} · Intent: {trace.intentType} · {((trace.confidence ?? 0) * 100).toFixed(0)}% confidence</div>
               <div style={{ marginBottom: 4 }}>Duration: {trace.totalDurationMs}ms</div>
               {Array.isArray(trace.steps) && trace.steps.map((s, i) => (
-                <div key={i} style={{ display: 'flex', gap: 4, padding: '2px 0', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                <div key={i} style={{ display: 'flex', gap: 4, padding: '3px 0', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
                   <span style={{ color: '#60a5fa', minWidth: 70 }}>{s.type}</span>
                   <span>{s.description}</span>
                   {s.durationMs && <span style={{ marginLeft: 'auto', color: '#64748b' }}>{s.durationMs}ms</span>}
@@ -399,6 +456,72 @@ export function TraceExpander({ traceId }: { traceId: string }) {
               ))}
             </div>
           )}
+
+          {!loading && subTab === 'evidence' && (
+            <div>
+              {evidenceLoading && <div><Loader size={10} className="spin" /> Loading evidence chain...</div>}
+              
+              {!evidenceLoading && evidenceData && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: evidenceData.integrity?.valid ? '#34d399' : '#f59e0b', fontWeight: 600 }}>
+                      {evidenceData.integrity?.valid ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
+                      <span>{evidenceData.integrity?.valid ? 'Valid SHA-256 Evidence Chain' : 'Integrity Flagged'}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>({evidenceData.chain?.length || 0} links)</span>
+                    </div>
+
+                    {trace?.interactionId && (
+                      <button
+                        onClick={() => handleVerify(trace.interactionId!)}
+                        disabled={verifying}
+                        style={{
+                          fontSize: 8, padding: '2px 6px', background: 'rgba(52,211,153,0.15)',
+                          border: '1px solid rgba(52,211,153,0.3)', borderRadius: 4, color: '#34d399', cursor: 'pointer',
+                        }}
+                      >
+                        {verifying ? 'Verifying...' : 'Verify Chain'}
+                      </button>
+                    )}
+                  </div>
+
+                  {verifyResult && (
+                    <div style={{ fontSize: 9, color: verifyResult.startsWith('✓') ? '#34d399' : '#ef4444', marginBottom: 6 }}>
+                      {verifyResult}
+                    </div>
+                  )}
+
+                  {Array.isArray(evidenceData.chain) && evidenceData.chain.map((link, idx) => (
+                    <div key={idx} style={{
+                      padding: 6, marginBottom: 4, borderRadius: 4,
+                      background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                    }}>
+                      <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 9, marginBottom: 2 }}>
+                        "{link.claim}"
+                      </div>
+                      <div style={{ fontSize: 8, color: 'var(--text-dim)', marginBottom: 4 }}>
+                        Confidence: {(link.confidence * 100).toFixed(0)}% · Hash: <code>{link.hash?.slice(0, 10)}...</code>
+                      </div>
+                      {link.sources?.map((src, sIdx) => (
+                        <div key={sIdx} style={{ fontSize: 8, color: '#93c5fd', display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <Link2 size={8} />
+                          <span>{src.sourceName}</span>
+                          {src.httpStatus && <span style={{ color: '#34d399' }}>HTTP {src.httpStatus}</span>}
+                          {src.responseTimeMs && <span style={{ color: 'var(--text-muted)' }}>({src.responseTimeMs}ms)</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!evidenceLoading && !evidenceData && (
+                <div style={{ textAlign: 'center', padding: 12, color: 'var(--text-dim)' }}>
+                  No cryptographic evidence chain recorded for this response.
+                </div>
+              )}
+            </div>
+          )}
+
           {!loading && !trace && <div>Trace not found.</div>}
         </div>
       )}

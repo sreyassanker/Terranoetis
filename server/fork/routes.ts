@@ -36,6 +36,11 @@ forkRouter.get('/list', (_req, res) => {
       simulatedTimeMs: f.simulatedTimeMs,
       maxSimulationHours: f.maxSimulationHours,
       createdAt: f.createdAt,
+      bufferRadiusM: f.bufferRadiusM,
+      lat: f.lat,
+      lon: f.lon,
+      disruptionType: f.disruptionType,
+      disruptionDetails: f.disruptionDetails,
     }));
     res.json({ forks, count: forks.length });
   } catch (err) {

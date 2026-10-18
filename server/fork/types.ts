@@ -10,6 +10,10 @@ export interface ForkDefinition {
   simulatedTimeMs: number;
   maxSimulationHours: number;
   bufferRadiusM: number;
+  lat: number;
+  lon: number;
+  disruptionType?: string;
+  disruptionDetails?: string;
 }
 
 export interface ForkDelta {
@@ -34,6 +38,8 @@ export interface ForkCreateRequest {
   deltas: ForkDelta[];
   maxSimulationHours?: number;
   bufferRadiusM?: number;
+  disruptionType?: string;
+  disruptionDetails?: string;
 }
 
 export interface ForkStreamMessage {

@@ -285,14 +285,25 @@ export function classifyRgb(
   const { h, s, v } = rgbToHsv(rgb);
   let pick: string | null = null;
 
-  if (v > 0.88 && s < 0.18) pick = 'Snow / Ice';
+  if (v > 0.88 && s < 0.18) pick = 'Snow / Ice / Glacier';
   else if (v < 0.16) pick = 'Shadow / Dark';
-  else if (s > 0.08 && h >= 185 && h <= 260) pick = 'Water';
-  else if (s > 0.08 && h >= 70 && h <= 170) pick = 'Vegetation';
-  else if (s < 0.14 && v < 0.8) pick = 'Urban / Built-up';
-  else if (s > 0.12 && h >= 20 && h <= 65) pick = 'Bare Land / Soil';
-  else if (s < 0.3) pick = 'Urban / Built-up';
-  else pick = 'Vegetation';
+  else if (s > 0.08 && h >= 185 && h <= 260) {
+    pick = (h >= 210 && h <= 255 && rgb[0] <= 35) ? 'Deep Ocean Water' : 'Inland Water / Estuary';
+  } else if (s > 0.08 && h >= 70 && h <= 170) {
+    pick = v < 0.4 ? 'Closed Forest' : 'Open Forest / Tree Cover';
+  } else if (s > 0.25 && h >= 45 && h < 70) {
+    pick = 'Crop / Agriculture';
+  } else if (s > 0.12 && h >= 20 && h <= 45) {
+    pick = 'Bare Soil / Beach Sand';
+  } else if (s < 0.14 && v >= 0.5 && v < 0.85) {
+    pick = 'Transportation / Runway / Vessel';
+  } else if (s < 0.18 && v < 0.45) {
+    pick = 'Open Barren / Mountain Rock';
+  } else if (s < 0.35) {
+    pick = 'Built Up, Residentials';
+  } else {
+    pick = 'Open Forest / Tree Cover';
+  }
 
   const found = classes.find(c => c.name === pick);
   if (found) return found;

@@ -10,7 +10,6 @@ export {
   SubAgentActivityView,
   ArtifactView,
   ToolApprovalView,
-  ModelTierSelector,
   TraceExpander,
   VoiceModeIndicator,
   InlineTableView,

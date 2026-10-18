@@ -3345,8 +3345,6 @@ import { searchStacItems, listStacCollections } from './foundation-models/stacSe
 import { geojsonToCsv, geojsonToStreamingJson, estimateParquetSize, getGeoParquetMetadata } from './utils/geoParquet';
 import { parseMgrs } from './utils/mgrs';
 import { detectIonosphericAnomalies, getIonosphericConditions } from './utils/guardian';
-import { getOceanConditions } from './utils/cmems';
-import { getWaveForecast, getWaveWarnings, getSeaState } from './utils/wavewatch';
 
 // ── ACLED Conflict Events ──
 app.get('/api/acled/recent', async (req: express.Request, res: express.Response) => {
@@ -3448,15 +3446,10 @@ import { getFloodConditions, getFloodAlerts, estimateInundation } from './utils/
 
 
 import { getHistoricalDaily, calculateClimateStats, detectExtremes } from './utils/era5';
-import { getCoralReefStatus, getActiveBleachingAlerts, getSstData } from './utils/coralReefWatch';
 import { initObservability, traceAsync, recordMetric, incrementCounter, getRecentTraces, getMetricsSummary } from './observability/openTelemetry';
 import { initSentry } from './observability/sentry';
 
 // ── ERA5 Climate Reanalysis ──
-
-// ── NOAA Coral Reef Watch ──
-
-
 
 // ── OpenTelemetry Observability ──
 app.get('/api/observability/traces', (_req: express.Request, res: express.Response) => {
@@ -3478,10 +3471,6 @@ app.get('/api/observability/metrics', (_req: express.Request, res: express.Respo
 });
 
 import { getSatclipEmbedding, findSimilarLocations, getLocationContext as satclipGetLocationContext } from './utils/satclip';
-import { assembleContext, spatialQuery, addEntity, addRelation } from './utils/geoGraphRAG';
-import { streamFeatures, streamWithBbox } from './utils/flatGeobuf';
-import { getWaterTimeSeries, getFloodWatch } from './utils/operaSurfaceWater';
-import { searchHlsScenes, getTimeSeries } from './utils/landsatSentinelHls';
 
 
 // ── SatCLIP Location Embeddings ──

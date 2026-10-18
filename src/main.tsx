@@ -5,10 +5,6 @@ import { BrowserRouter, HashRouter, Routes, Route } from 'react-router';
 import { Toaster, toast } from 'sonner';
 import './index.css';
 import App from './App';
-import GlobePage from './pages/v2/GlobePage';
-import CanvasPage from './pages/v2/CanvasPage';
-import ScenariosPage from './pages/v2/ScenariosPage';
-import ToursPage from './pages/v2/ToursPage';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -53,10 +49,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <RouterComponent>
         <Routes>
           <Route path="/" element={<App />} />
-          <Route path="/v2/globe" element={<GlobePage />} />
-          <Route path="/v2/canvas" element={<CanvasPage />} />
-          <Route path="/v2/scenarios" element={<ScenariosPage />} />
-          <Route path="/v2/tours" element={<ToursPage />} />
         </Routes>
       </RouterComponent>
     </AuthProvider>

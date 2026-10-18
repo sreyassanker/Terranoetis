@@ -66,9 +66,13 @@ export function flyToStudyAreaTopDown(viewer: Cesium.Viewer, item: StudyAreaItem
 
 export function computeStudyAreaBbox(item: StudyAreaItem): { latMin: number; latMax: number; lonMin: number; lonMax: number } | null {
   let rect: Cesium.Rectangle | undefined;
-  if (item.positions && item.positions.length >= 2) {
+  if (item.entity?.rectangle?.coordinates) {
+    const r = item.entity.rectangle.coordinates.getValue(Cesium.JulianDate.now());
+    if (r) rect = r;
+  }
+  if (!rect && item.positions && item.positions.length >= 2) {
     rect = Cesium.Rectangle.fromCartesianArray(item.positions, Cesium.Ellipsoid.WGS84);
-  } else if (item.geojson) {
+  } else if (!rect && item.geojson) {
     rect = computeGeoJSONBbox(item.geojson);
   }
   // Single-point study area: expand to a small ±0.05° bbox so tools

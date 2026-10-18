@@ -14,15 +14,86 @@ export interface LandCoverClass {
 }
 
 export const LAND_COVER_CLASSES: readonly LandCoverClass[] = [
-  { id: 1, name: 'Water', color: '#2E86DE', rgb: [46, 134, 222], description: 'Rivers, lakes, ocean, flooded extent' },
-  { id: 2, name: 'Vegetation', color: '#2FA94F', rgb: [47, 169, 79], description: 'Forest, crops, grassland' },
-  { id: 3, name: 'Urban / Built-up', color: '#C0392B', rgb: [192, 57, 43], description: 'Buildings, roads, settlements' },
-  { id: 4, name: 'Bare Land / Soil', color: '#D9A441', rgb: [217, 164, 65], description: 'Dry soil, sand, rock, cropland fallow' },
-  { id: 5, name: 'Snow / Ice', color: '#EFF4FB', rgb: [239, 244, 251], description: 'Snow cover, ice, clouds' },
-  { id: 6, name: 'Shadow / Dark', color: '#3B4A5A', rgb: [59, 74, 90], description: 'Cloud shadow, dark water, low albedo' },
+  {
+    id: 1,
+    name: 'Deep Ocean Water',
+    color: '#0077B6',
+    rgb: [0, 119, 182],
+    description: 'Deep ocean, open sea, low reflectance bathymetry',
+  },
+  {
+    id: 2,
+    name: 'Inland Water / Estuary',
+    color: '#00AFEF',
+    rgb: [0, 175, 239],
+    description: 'Lakes, rivers, reservoirs, coastal estuaries (Section 4.0 Standard)',
+  },
+  {
+    id: 3,
+    name: 'Closed Forest',
+    color: '#537374',
+    rgb: [83, 115, 116],
+    description: 'Dense canopy forest, evergreen woods (Section 4.0 Standard)',
+  },
+  {
+    id: 4,
+    name: 'Open Forest / Tree Cover',
+    color: '#00A859',
+    rgb: [0, 168, 89],
+    description: 'Agroforestry, woodlands, palm canopy (Section 4.0 Standard)',
+  },
+  {
+    id: 5,
+    name: 'Crop / Agriculture',
+    color: '#FFF212',
+    rgb: [255, 242, 18],
+    description: 'Annual & perennial crops, cultivated fields (Section 4.0 Standard)',
+  },
+  {
+    id: 6,
+    name: 'Built Up, Residentials',
+    color: '#ED2F59',
+    rgb: [237, 47, 89],
+    description: 'Settlements, houses, commercial buildings (Section 4.0 Standard)',
+  },
+  {
+    id: 7,
+    name: 'Transportation / Runway / Vessel',
+    color: '#BEBEBE',
+    rgb: [190, 190, 190],
+    description: 'Runways, taxiways, piers, docking areas, vessels (Section 3.0 Standard)',
+  },
+  {
+    id: 8,
+    name: 'Open Barren / Mountain Rock',
+    color: '#71577F',
+    rgb: [113, 87, 127],
+    description: 'Mountain rock, alpine scree, exposed massifs (Section 4.0 Standard)',
+  },
+  {
+    id: 9,
+    name: 'Bare Soil / Beach Sand',
+    color: '#CE8F64',
+    rgb: [206, 143, 100],
+    description: 'Dry soil, beach sand, cleared land, desert (Section 4.0 Standard)',
+  },
+  {
+    id: 10,
+    name: 'Snow / Ice / Glacier',
+    color: '#FFFFFF',
+    rgb: [255, 255, 255],
+    description: 'Glaciers, alpine snow, permanent snowpack (Global RS Standard)',
+  },
+  {
+    id: 11,
+    name: 'Shadow / Dark',
+    color: '#212529',
+    rgb: [33, 37, 41],
+    description: 'Cloud shadow, deep terrain shade, low albedo (Global RS Standard)',
+  },
 ] as const;
 
-export const DEFAULT_K = 4;
+export const DEFAULT_K = 6;
 
 /** Full colour ramp covering every known class. */
 export const LAND_COVER_DEFAULT_PALETTE: readonly string[] = LAND_COVER_CLASSES.map(c => c.color);

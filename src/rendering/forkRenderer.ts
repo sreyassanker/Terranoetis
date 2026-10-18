@@ -18,6 +18,7 @@ export interface ForkVisualState {
   shellPrimitive: Cesium.Primitive | null;
   wireframePrimitive: Cesium.Primitive | null;
   rimEntity: Cesium.Entity | null;
+  apexEntity?: Cesium.Entity | null;
   bufferRadiusM: number;
   lat: number;
   lon: number;
@@ -163,6 +164,23 @@ export class ForkRenderer {
     });
     this.viewer.scene.primitives.add(wireframePrimitive);
 
+    // 4) Apex 3D floating badge above the dome
+    const domeHeight = this.domeHeightForRadius(baseRadius);
+    const apexEntity = this.viewer.entities.add({
+      id: `fork_apex_${forkId}`,
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, domeHeight + 10000),
+      label: {
+        text: `PARALLEL: ${name.toUpperCase()} · 0.0% DIVERGENCE`,
+        font: 'bold 11px "Inter", "JetBrains Mono", sans-serif',
+        fillColor: Cesium.Color.fromCssColorString('#fbbf24'),
+        showBackground: true,
+        backgroundColor: new Cesium.Color(0.06, 0.08, 0.12, 0.88),
+        backgroundPadding: new Cesium.Cartesian2(8, 5),
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+
     this.viewer.scene.requestRender();
 
     const forkState: ForkVisualState = {
@@ -171,10 +189,11 @@ export class ForkRenderer {
       divergenceScore: 0.0,
       simulatedTimeMs: 0,
       status: 'running',
-      entities: [rimEntity],
+      entities: [rimEntity, apexEntity],
       shellPrimitive,
       wireframePrimitive,
       rimEntity,
+      apexEntity,
       bufferRadiusM: baseRadius,
       lat,
       lon,
@@ -583,6 +602,17 @@ export class ForkRenderer {
       if (wireAttrs && wireAttrs.color) {
         Cesium.ColorGeometryInstanceAttribute.toValue(wireColor, wireAttrs.color);
       }
+    }
+
+    if (fork.apexEntity?.label) {
+      const pct = (divergenceScore * 100).toFixed(1);
+      fork.apexEntity.label.text = new Cesium.ConstantProperty(`PARALLEL: ${fork.name.toUpperCase()} · ${pct}% DIVERGENCE`);
+      const labelColor = divergenceScore > 0.7
+        ? Cesium.Color.fromCssColorString('#ef4444')
+        : divergenceScore > 0.3
+        ? Cesium.Color.fromCssColorString('#f59e0b')
+        : Cesium.Color.fromCssColorString('#fbbf24');
+      fork.apexEntity.label.fillColor = new Cesium.ConstantProperty(labelColor);
     }
 
     this.updateGhosts(forkId, divergenceScore);

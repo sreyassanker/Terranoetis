@@ -151,36 +151,33 @@ describe('rgbToHsv', () => {
 describe('classifyRgb', () => {
   const byId = (id: number) => LAND_COVER_CLASSES.find(c => c.id === id)!;
 
-  it('classifies deep blue as Water', () => {
-    expect(classifyRgb([10, 40, 180], LAND_COVER_CLASSES).id).toBe(byId(1).id); // Water
+  it('classifies deep blue as Deep Ocean Water', () => {
+    expect(classifyRgb([10, 40, 180], LAND_COVER_CLASSES).id).toBe(byId(1).id); // Deep Ocean Water
   });
 
-  it('classifies saturated green as Vegetation', () => {
-    expect(classifyRgb([40, 160, 50], LAND_COVER_CLASSES).id).toBe(byId(2).id); // Vegetation
+  it('classifies saturated green as Tree Cover', () => {
+    expect(classifyRgb([40, 160, 50], LAND_COVER_CLASSES).id).toBe(byId(4).id); // Open Forest / Tree Cover
   });
 
-  it('classifies tan / brown as Bare Land', () => {
-    expect(classifyRgb([200, 160, 90], LAND_COVER_CLASSES).id).toBe(byId(4).id); // Bare Land / Soil
+  it('classifies tan / brown as Bare Soil / Sand', () => {
+    expect(classifyRgb([200, 160, 90], LAND_COVER_CLASSES).id).toBe(byId(9).id); // Bare Soil / Beach Sand
   });
 
   it('classifies bright white as Snow / Ice', () => {
-    expect(classifyRgb([245, 248, 252], LAND_COVER_CLASSES).id).toBe(byId(5).id); // Snow / Ice
+    expect(classifyRgb([245, 248, 252], LAND_COVER_CLASSES).id).toBe(byId(10).id); // Snow / Ice / Glacier
   });
 
   it('classifies very dark pixels as Shadow / Dark', () => {
-    expect(classifyRgb([15, 18, 22], LAND_COVER_CLASSES).id).toBe(byId(6).id); // Shadow / Dark
+    expect(classifyRgb([15, 18, 22], LAND_COVER_CLASSES).id).toBe(byId(11).id); // Shadow / Dark
   });
 
-  it('classifies neutral gray as Urban / Built-up', () => {
-    expect(classifyRgb([140, 140, 140], LAND_COVER_CLASSES).id).toBe(byId(3).id); // Urban
+  it('classifies neutral gray pavement as Transportation', () => {
+    expect(classifyRgb([140, 140, 140], LAND_COVER_CLASSES).id).toBe(byId(7).id); // Transportation / Runway / Vessel
   });
 
   it('falls back to nearest reference color when a rule picks a class not in the active set', () => {
-    // Only Water + Vegetation are active; a white pixel should resolve to whichever is closer (Water's
-    // [30,99,212] vs Vegetation's [46,158,68] don't win vs the actual RGB, so the rule fires first: v>0.88 → 'Snow / Ice',
-    // which is absent → nearest-RGB fallback should pick one of the two available classes).
-    const subset = [byId(1), byId(2)];
+    const subset = [byId(1), byId(4)];
     const out = classifyRgb([245, 248, 252], subset);
-    expect([1, 2]).toContain(out.id);
+    expect([1, 4]).toContain(out.id);
   });
 });

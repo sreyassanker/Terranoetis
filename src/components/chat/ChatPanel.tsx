@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Bot, History, Plus, RotateCcw, Trash2, Send, Square, Paperclip,
   Image as ImageIcon, FileSpreadsheet, Volume2, Link, FileDown,
-  CheckCircle, Mic, ChevronDown, ChevronUp, Check, X, Sparkles, Eraser
+  CheckCircle, Mic, ChevronDown, ChevronUp, Check, X, Sparkles, Eraser,
+  Crosshair, GitFork
 } from 'lucide-react';
 
 import Panel from '@/components/ui/Panel';
@@ -98,6 +99,9 @@ export function ChatPanel({
   } = useChatPanelState();
 
   const streamingRenderer = useStreamingRenderer();
+  const activeFork = useChatStore(s => s.activeFork);
+  const setActiveFork = useChatStore(s => s.setActiveFork);
+  const setStudyAreaBbox = useChatStore(s => s.setStudyAreaBbox);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
@@ -461,6 +465,125 @@ export function ChatPanel({
 
             <HumanOverrideBanner />
 
+            {activeFork && (
+              <div
+                className="ai-active-fork-banner"
+                style={{
+                  margin: '8px 12px 6px',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(249, 115, 22, 0.08))',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <GitFork size={13} color="#b45309" />
+                    <span style={{ fontWeight: 800, fontSize: '11px', color: '#b45309', letterSpacing: '0.04em' }}>
+                      PARALLEL REALITY FOCUS
+                    </span>
+                    <span style={{
+                      fontSize: '9px',
+                      background: 'rgba(245, 158, 11, 0.25)',
+                      color: '#b45309',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                    }}>
+                      {activeFork.disruptionType || 'Simulation'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => { setActiveFork(null); setStudyAreaBbox(null); }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#92400e',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      padding: '2px 4px',
+                      borderRadius: 4,
+                      fontWeight: 600,
+                    }}
+                    title="Unlock Copilot from this dome and return to global scope"
+                  >
+                    <X size={12} /> Clear Focus
+                  </button>
+                </div>
+
+                <div style={{ fontSize: '11px', color: '#451a03', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{activeFork.name}</span>
+                  <span style={{ color: '#78350f', fontSize: '10px' }}>
+                    {activeFork.lat.toFixed(2)}°, {activeFork.lon.toFixed(2)}° · {(activeFork.radiusM / 1000).toFixed(0)} km buffer
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => focusLocation(activeFork.lat, activeFork.lon, { height: Math.max(80000, activeFork.radiusM * 2.8) })}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      color: '#b45309',
+                      padding: '3px 8px',
+                      borderRadius: '5px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Crosshair size={11} /> Fly to Dome
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendAI(`Assess the immediate hazard risk and critical infrastructure impact inside parallel reality "${activeFork.name}" (${(activeFork.radiusM / 1000).toFixed(0)}km buffer around ${activeFork.lat.toFixed(2)}°, ${activeFork.lon.toFixed(2)}°).`)}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      color: '#b45309',
+                      padding: '3px 8px',
+                      borderRadius: '5px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⚡ Assess Dome Hazards
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendAI(`What maritime vessels, flights, and population centers are disrupted within this ${activeFork.name} simulation?`)}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      color: '#b45309',
+                      padding: '3px 8px',
+                      borderRadius: '5px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    🚢 Disrupted Assets
+                  </button>
+                </div>
+              </div>
+            )}
+
             {activeLayers.length > 0 && (
               <div className="ai-active-layers">
                 <span className="ai-active-layers-label">Active layers</span>
@@ -493,13 +616,20 @@ export function ChatPanel({
                   <span>Earth Intelligence Copilot</span>
                 </div>
                 <div className="chat-welcome-sub">
-                  Query 103 live scientific data layers, global flight radar, satellite orbits, or upload datasets for instant spatial synthesis.
+                  {activeFork
+                    ? `Copilot spatial intelligence is locked to parallel reality "${activeFork.name}" (${(activeFork.radiusM / 1000).toFixed(0)} km buffer). All queries analyze the counterfactual simulation inside this dome.`
+                    : 'Query 103 live scientific data layers, global flight radar, satellite orbits, or upload datasets for instant spatial synthesis.'}
                 </div>
                 <div className="ai-suggestion-chips">
-                  {(adaptiveSuggestions.length > 0 ? adaptiveSuggestions : [
+                  {(activeFork ? [
+                    `Assess ${activeFork.name} Hazards`,
+                    'Disrupted Maritime & Aviation Assets',
+                    'Critical Infrastructure Exposure',
+                    'Compare Divergence with Ground Truth',
+                  ] : (adaptiveSuggestions.length > 0 ? adaptiveSuggestions : [
                     'Show earthquake data', 'Show flight tracks', 'Aircraft near Delhi',
                     'Analyze quake stats', 'Active wildfires', 'Storm tracking',
-                  ]).map(chip => (
+                  ])).map(chip => (
                     <button key={chip} className="ai-chip" onClick={() => sendAI(chip)}>{chip}</button>
                   ))}
                 </div>

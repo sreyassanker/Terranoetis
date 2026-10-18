@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type Cesium from 'cesium';
-import { Map } from 'lucide-react';
+import { Map, Satellite, Droplets, Flame, Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   generateAreaId, loadGeoJsonToGlobe, removeStudyAreaFromGlobe,
@@ -8,10 +8,12 @@ import {
   parseFileToGeoJSON,
   flyToStudyAreaTopDown,
   updateStudyAreaStyle,
+  computeStudyAreaBbox,
 } from '@/rendering/studyArea';
 import Panel from '@/components/ui/Panel';
+import { authHeaders } from '@/context/AuthContext';
 
-type TabId = 'upload' | 'draw' | 'manage' | 'export';
+type TabId = 'upload' | 'draw' | 'manage' | 'analyze' | 'export';
 
 interface StudyAreaPanelProps {
   viewer: Cesium.Viewer | null;
@@ -37,6 +39,59 @@ export default React.memo(function StudyAreaPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [drawShape, setDrawShape] = useState<'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT' | null>(null);
+
+  // Satellite Raster Analysis states
+  const [analyzing, setAnalyzing] = useState(false);
+  const [activeAnalysisType, setActiveAnalysisType] = useState<'observation' | 'flood' | 'fire' | 'vision' | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  const activeArea = areas.find(a => a.id === activeStudyAreaId) || areas[0];
+  const activeBbox = activeArea ? computeStudyAreaBbox(activeArea) : null;
+  const centerLat = activeBbox ? (activeBbox.latMin + activeBbox.latMax) / 2 : null;
+  const centerLon = activeBbox ? (activeBbox.lonMin + activeBbox.lonMax) / 2 : null;
+
+  const runAnalysis = async (type: 'observation' | 'flood' | 'fire' | 'vision') => {
+    if (centerLat === null || centerLon === null) {
+      setAnalysisError('Please select or draw a valid study area with coordinates');
+      return;
+    }
+
+    setAnalyzing(true);
+    setActiveAnalysisType(type);
+    setAnalysisError(null);
+    setAnalysisResult(null);
+
+    try {
+      let endpoint = '/api/multimodal/satellite/analyze';
+      let body: Record<string, unknown> = { lat: centerLat, lon: centerLon, radiusKm: 10 };
+
+      if (type === 'flood') {
+        endpoint = '/api/multimodal/satellite/flood-extent';
+        body = { lat: centerLat, lon: centerLon };
+      } else if (type === 'fire') {
+        endpoint = '/api/multimodal/satellite/fire-scars';
+        body = { lat: centerLat, lon: centerLon };
+      } else if (type === 'vision') {
+        endpoint = '/api/multimodal/satellite/interpret';
+        body = { lat: centerLat, lon: centerLon };
+      }
+
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      setAnalysisResult(data);
+    } catch (err: unknown) {
+      setAnalysisError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,6 +168,7 @@ export default React.memo(function StudyAreaPanel({
     { id: 'upload', label: 'Upload' },
     { id: 'draw', label: 'Draw' },
     { id: 'manage', label: 'List' },
+    { id: 'analyze', label: 'Analyze' },
     { id: 'export', label: 'Export' },
   ];
 
@@ -242,6 +298,179 @@ export default React.memo(function StudyAreaPanel({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'analyze' && (
+          <div className="study-section">
+            <div className="study-section-title">Satellite Raster Analysis</div>
+
+            {!activeArea ? (
+              <div className="study-empty">
+                No active study area. Upload or draw a study area to run multimodal satellite analysis.
+              </div>
+            ) : (
+              <div>
+                <div style={{
+                  padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--border)', marginBottom: 8, fontSize: 10,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{activeArea.name}</span>
+                    <span style={{ color: 'var(--accent)' }}>Active</span>
+                  </div>
+                  {centerLat !== null && centerLon !== null && (
+                    <div style={{ color: 'var(--text-dim)', fontSize: 9 }}>
+                      Center: {centerLat.toFixed(4)}°, {centerLon.toFixed(4)}°
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+                  <button
+                    className="study-btn"
+                    disabled={analyzing}
+                    onClick={() => runAnalysis('observation')}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      padding: '8px 4px', fontSize: 9, cursor: 'pointer',
+                      background: activeAnalysisType === 'observation' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
+                    }}
+                  >
+                    <Satellite size={14} color="#38bdf8" />
+                    <span>Sentinel-2 NDVI</span>
+                  </button>
+
+                  <button
+                    className="study-btn"
+                    disabled={analyzing}
+                    onClick={() => runAnalysis('flood')}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      padding: '8px 4px', fontSize: 9, cursor: 'pointer',
+                      background: activeAnalysisType === 'flood' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
+                    }}
+                  >
+                    <Droplets size={14} color="#60a5fa" />
+                    <span>Flood Extent</span>
+                  </button>
+
+                  <button
+                    className="study-btn"
+                    disabled={analyzing}
+                    onClick={() => runAnalysis('fire')}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      padding: '8px 4px', fontSize: 9, cursor: 'pointer',
+                      background: activeAnalysisType === 'fire' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
+                    }}
+                  >
+                    <Flame size={14} color="#f97316" />
+                    <span>Burn Scars</span>
+                  </button>
+
+                  <button
+                    className="study-btn"
+                    disabled={analyzing}
+                    onClick={() => runAnalysis('vision')}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      padding: '8px 4px', fontSize: 9, cursor: 'pointer',
+                      background: activeAnalysisType === 'vision' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
+                    }}
+                  >
+                    <Sparkles size={14} color="#c084fc" />
+                    <span>AI Vision Scene</span>
+                  </button>
+                </div>
+
+                {analyzing && (
+                  <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 12, fontSize: 10 }}>
+                    <Loader2 size={16} className="spin" style={{ margin: '0 auto 6px' }} />
+                    Querying Copernicus Sentinel-2 / Vision processing...
+                  </div>
+                )}
+
+                {analysisError && (
+                  <div style={{ color: '#ef4444', fontSize: 9, padding: 6, background: 'rgba(239,68,68,0.1)', borderRadius: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <AlertCircle size={12} /> {analysisError}
+                  </div>
+                )}
+
+                {analysisResult && !analyzing && (
+                  <div style={{
+                    padding: 8, borderRadius: 6, background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid var(--border)', fontSize: 9, color: 'var(--text-dim)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#34d399', fontWeight: 600, marginBottom: 4 }}>
+                      <CheckCircle2 size={12} /> Analysis Complete
+                    </div>
+
+                    {analysisResult.interpretation && (
+                      <div style={{ color: 'var(--text)', lineHeight: 1.4, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
+                        {analysisResult.interpretation}
+                      </div>
+                    )}
+
+                    {analysisResult.ndvi !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>NDVI Mean:</span>
+                        <span style={{ color: '#38bdf8', fontWeight: 600 }}>{analysisResult.ndvi.toFixed(3)}</span>
+                      </div>
+                    )}
+
+                    {analysisResult.cloudCover !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>Cloud Cover:</span>
+                        <span>{analysisResult.cloudCover}%</span>
+                      </div>
+                    )}
+
+                    {analysisResult.waterFraction !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>Water Fraction:</span>
+                        <span style={{ color: '#60a5fa', fontWeight: 600 }}>{(analysisResult.waterFraction * 100).toFixed(1)}%</span>
+                      </div>
+                    )}
+
+                    {analysisResult.flooded !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>Inundation Status:</span>
+                        <span style={{ color: analysisResult.flooded ? '#ef4444' : '#10b981', fontWeight: 600 }}>
+                          {analysisResult.flooded ? 'Active Flood Detected' : 'Normal Surface Water'}
+                        </span>
+                      </div>
+                    )}
+
+                    {analysisResult.scarDetected !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>Burn Scar Detected:</span>
+                        <span style={{ color: analysisResult.scarDetected ? '#ef4444' : '#10b981', fontWeight: 600 }}>
+                          {analysisResult.scarDetected ? 'Yes' : 'None Detected'}
+                        </span>
+                      </div>
+                    )}
+
+                    {analysisResult.severity && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <span>Burn Severity:</span>
+                        <span style={{ textTransform: 'capitalize' }}>{analysisResult.severity}</span>
+                      </div>
+                    )}
+
+                    {analysisResult.source && (
+                      <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--border)', fontSize: 8, color: 'var(--text-muted)' }}>
+                        Sensor: {analysisResult.source}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

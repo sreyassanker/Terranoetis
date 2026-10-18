@@ -23,7 +23,7 @@ import {
   computeFloodRouting,
 } from '@/rendering/physicsSurrogates';
 import { computeFusedSurface } from '@/rendering/gisFusion';
-import { Wrench } from 'lucide-react';
+import { Wrench, Download } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 
 /* ═════════════════════════════════════════════════════════════════
@@ -810,8 +810,29 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
 
   const categories = [...new Set(AVAILABLE_TOOLS.map(t => t.category))];
 
+  const handleExportDot = async () => {
+    try {
+      const resp = await fetch('/api/causal-graph/dot', {
+        headers: { ...authHeaders() },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const dotContent = await resp.text();
+      const blob = new Blob([dotContent], { type: 'text/vnd.graphviz' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'causal_risk_graph.dot';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      console.error('Failed to export causal graph DOT:', err);
+    }
+  };
+
   const headerExtra = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 0 }}>
       {bbox && (
         <span style={{ fontSize: 8, color: '#5eead4' }}>
           [{bbox.latMin.toFixed(1)},{bbox.lonMin.toFixed(1)} → {bbox.latMax.toFixed(1)},{bbox.lonMax.toFixed(1)}]
@@ -825,6 +846,17 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
           {tab === 'chain' ? 'Chain' : 'What-If'}
         </button>
       ))}
+      <button
+        onClick={handleExportDot}
+        title="Export Causal Graph to Graphviz (.dot)"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', fontSize: 10,
+          fontWeight: 600, cursor: 'pointer', background: 'rgba(139,92,246,0.2)',
+          border: '1px solid rgba(139,92,246,0.3)', borderRadius: 4, color: '#c4b5fd',
+        }}
+      >
+        <Download size={10} /> .DOT
+      </button>
     </div>
   );
 

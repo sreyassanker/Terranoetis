@@ -47,14 +47,9 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [healthColor, setHealthColor] = useState<string>('#22c55e');
-  const [evoStatus, setEvoStatus] = useState<{ active?: boolean; proposals?: number; pendingProposals?: number } | null>(null);
   const [archProposals, setArchProposals] = useState<Array<Record<string, unknown>>>([]);
   const [intentProposals, setIntentProposals] = useState<Array<Record<string, unknown>>>([]);
   const [ecoProposals, setEcoProposals] = useState<Array<Record<string, unknown>>>([]);
-  const [installForm, setInstallForm] = useState<{ url: string; name: string; content: string; zipFile: File | null; mode: 'url' | 'content' | 'github' | 'zip' }>({
-    url: '', name: '', content: '', zipFile: null, mode: 'url',
-  });
-  const [installStatus, setInstallStatus] = useState<string | null>(null);
   const { pref, setPref } = useUserPrefStore();
   const [locQuery, setLocQuery] = useState('');
   const [locSearching, setLocSearching] = useState(false);
@@ -142,113 +137,6 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     }
   }, [token]);
 
-  const installPlugin = useCallback(async () => {
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    setInstallStatus('Installing...');
-
-    try {
-      if (installForm.mode === 'zip') {
-        const zipFile = installForm.zipFile;
-        if (!zipFile) { setInstallStatus('Error: No zip file selected'); return; }
-        const b64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(',')[1]);
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(zipFile);
-        });
-        const resp = await fetch('/api/admin/plugins/install-zip', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
-          body: JSON.stringify({ zipB64: b64 }),
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
-          setInstallStatus(`Error: ${err.error || resp.statusText}`);
-          return;
-        }
-        const data = await resp.json();
-        const count = data.pluginIds?.length || 0;
-        const errCount = data.errors?.length || 0;
-        setInstallStatus(`Installed ${count} plugin(s)${errCount ? ` (${errCount} errors)` : ''}`);
-      } else if (installForm.mode === 'github') {
-        // Normalise shorthand: "user/repo" → "https://github.com/user/repo"
-        let ghUrl = installForm.url.trim();
-        if (!ghUrl.startsWith('http://') && !ghUrl.startsWith('https://')) {
-          ghUrl = `https://github.com/${ghUrl.replace(/^\/+/, '')}`;
-        }
-        const resp = await fetch('/api/admin/plugins/install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
-          body: JSON.stringify({ url: ghUrl }),
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
-          setInstallStatus(`Error: ${err.error || resp.statusText}`);
-          return;
-        }
-        const data = await resp.json();
-        const count = data.pluginIds?.length || 0;
-        const errCount = data.errors?.length || 0;
-        setInstallStatus(`GitHub: installed ${count} plugin(s)${errCount ? ` (${errCount} errors)` : ''}`);
-      } else {
-        let body: Record<string, unknown>;
-        if (installForm.mode === 'url') {
-          body = { url: installForm.url };
-        } else {
-          body = { name: installForm.name, content: installForm.content };
-        }
-        const resp = await fetch('/api/admin/plugins/install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
-          body: JSON.stringify(body),
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
-          setInstallStatus(`Error: ${err.error || resp.statusText}`);
-          return;
-        }
-        const data = await resp.json();
-        setInstallStatus(`Installed: ${data.pluginId || 'success'}`);
-      }
-
-      setInstallForm({ url: '', name: '', content: '', zipFile: null, mode: 'url' });
-      void fetchAdminData();
-      setTimeout(() => setInstallStatus(null), 5000);
-    } catch (e) {
-      setInstallStatus(`Error: ${String(e)}`);
-    }
-  }, [token, installForm, fetchAdminData]);
-
-  const removePlugin = useCallback(async (id: string) => {
-    if (!confirm(`Remove plugin "${id}"? This cannot be undone.`)) return;
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers,
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: 'Remove failed' }));
-      alert(`Error: ${err.error || resp.statusText}`);
-      return;
-    }
-    void fetchAdminData();
-  }, [token, fetchAdminData]);
-
-  const togglePlugin = useCallback(async (id: string, enabled: boolean) => {
-    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(headers || {}) },
-      body: JSON.stringify({ enabled }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: 'Toggle failed' }));
-      alert(`Error: ${err.error || resp.statusText}`);
-      return;
-    }
-    void fetchAdminData();
-  }, [token, fetchAdminData]);
-
   const fetchHealth = useCallback(async () => {
     try {
       const resp = await fetch('/api/health', { cache: 'no-store' });
@@ -262,25 +150,11 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
 
   const fetchEvolution = useCallback(async () => {
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const [statusRes, archRes, intentRes, ecoRes] = await Promise.allSettled([
-      fetch('/api/self-evolution/status', { headers }),
+    const [archRes, intentRes, ecoRes] = await Promise.allSettled([
       fetch('/api/meta/architecture-proposals', { headers }),
       fetch('/api/meta/intent-proposals', { headers }),
       fetch('/api/self-evolution/proposals', { headers }),
     ]);
-    if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
-      const d = await statusRes.value.json();
-      // The /api/self-evolution/status endpoint returns { banditStats, drifts,
-      // git, perf, proposals, pendingProposals } — it does not include an
-      // `active` flag, so derive one from pending proposal activity.
-      const proposals = typeof d?.proposals === 'number' ? d.proposals : 0;
-      const pendingProposals = typeof d?.pendingProposals === 'number' ? d.pendingProposals : 0;
-      setEvoStatus({
-        active: pendingProposals > 0 || proposals > 0,
-        proposals,
-        pendingProposals,
-      });
-    }
     if (archRes.status === 'fulfilled' && archRes.value.ok) {
       const d = await archRes.value.json();
       // Endpoint returns { pending, approved, top }

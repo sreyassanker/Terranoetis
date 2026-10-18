@@ -50,6 +50,10 @@ export class ForkManager {
       simulatedTimeMs: 0,
       maxSimulationHours: request.maxSimulationHours ?? 72,
       bufferRadiusM,
+      lat: request.lat,
+      lon: request.lon,
+      disruptionType: request.disruptionType,
+      disruptionDetails: request.disruptionDetails,
     };
 
     const state: ForkState = {

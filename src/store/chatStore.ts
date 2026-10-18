@@ -364,6 +364,28 @@ interface ChatState {
   pendingStudyAreaQuery: string | null;
   setPendingStudyAreaQuery: (query: string | null) => void;
 
+  // Active Parallel Reality Fork context (locks AI copilot to the simulation dome)
+  activeFork: {
+    forkId: string;
+    name: string;
+    lat: number;
+    lon: number;
+    radiusM: number;
+    disruptionType?: string;
+    divergenceScore?: number;
+    simulatedTimeMs?: number;
+  } | null;
+  setActiveFork: (fork: {
+    forkId: string;
+    name: string;
+    lat: number;
+    lon: number;
+    radiusM: number;
+    disruptionType?: string;
+    divergenceScore?: number;
+    simulatedTimeMs?: number;
+  } | null) => void;
+
   // Share
   showShareDialog: boolean;
   setShowShareDialog: (value: boolean) => void;
@@ -927,6 +949,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setStudyAreaBbox: (bbox, source = 'manual') => set({ studyAreaBbox: bbox, studyAreaSource: bbox ? source : null }),
   pendingStudyAreaQuery: null,
   setPendingStudyAreaQuery: (query) => set({ pendingStudyAreaQuery: query }),
+
+  // Active Parallel Reality Fork
+  activeFork: null,
+  setActiveFork: (fork) => set({ activeFork: fork }),
 
   // Share
   showShareDialog: false,

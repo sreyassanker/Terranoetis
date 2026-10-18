@@ -12,7 +12,6 @@ import {
   type LandCoverClass,
 } from '@/data/landCoverClasses';
 import {
-  detectClassMap,
   classMapToGrid,
   spectralClassMap,
   type ClassMap,
@@ -51,7 +50,7 @@ export interface CaptureOptions {
   size?: number;
   bbox?: Bbox | null;
   polygon?: Array<Array<[number, number]>>;
-  useDetr?: boolean;
+  opacity?: number;
   signal?: AbortSignal;
 }
 
@@ -138,21 +137,76 @@ function waitForTiles(viewer: Cesium.Viewer, timeoutMs = 7000): Promise<void> {
 
 export function captureViewerFrame(viewer: Cesium.Viewer): { imageUrl: string; width: number; height: number } {
   const canvas = viewer.canvas as HTMLCanvasElement;
-  viewer.scene.render();
-  let imageUrl = canvas.toDataURL('image/png');
 
-  if (isBlankDataUrl(imageUrl)) {
-    const copy = document.createElement('canvas');
-    copy.width = canvas.width;
-    copy.height = canvas.height;
-    const ctx = copy.getContext('2d');
-    if (ctx) {
-      viewer.scene.render();
-      ctx.drawImage(canvas, 0, 0);
-      imageUrl = copy.toDataURL('image/png');
+  // Temporarily hide overlays, boundaries, primitives, and tool gizmos so we capture 100% pure satellite imagery
+  const lcLayer = landCoverLayers.get(viewer);
+  const prevLcShow = lcLayer ? lcLayer.show : false;
+  if (lcLayer) lcLayer.show = false;
+
+  const hiddenEntities: Cesium.Entity[] = [];
+  const entities = viewer.entities.values;
+  for (let i = 0; i < entities.length; i++) {
+    const ent = entities[i];
+    if (ent.show !== false) {
+      ent.show = false;
+      hiddenEntities.push(ent);
     }
-    copy.width = 0;
-    copy.height = 0;
+  }
+
+  const hiddenGroundPrimitives: any[] = [];
+  const groundPrimitives = viewer.scene.groundPrimitives;
+  for (let i = 0; i < groundPrimitives.length; i++) {
+    const prim = groundPrimitives.get(i);
+    if (prim && prim.show !== false) {
+      prim.show = false;
+      hiddenGroundPrimitives.push(prim);
+    }
+  }
+
+  const hiddenPrimitives: any[] = [];
+  const primitives = viewer.scene.primitives;
+  for (let i = 0; i < primitives.length; i++) {
+    const prim = primitives.get(i);
+    if (prim && prim.show !== false) {
+      prim.show = false;
+      hiddenPrimitives.push(prim);
+    }
+  }
+
+  const hiddenDataSources: Cesium.DataSource[] = [];
+  for (let i = 0; i < viewer.dataSources.length; i++) {
+    const ds = viewer.dataSources.get(i);
+    if (ds && ds.show !== false) {
+      ds.show = false;
+      hiddenDataSources.push(ds);
+    }
+  }
+
+  let imageUrl: string;
+  try {
+    viewer.scene.render();
+    imageUrl = canvas.toDataURL('image/png');
+
+    if (isBlankDataUrl(imageUrl)) {
+      const copy = document.createElement('canvas');
+      copy.width = canvas.width;
+      copy.height = canvas.height;
+      const ctx = copy.getContext('2d');
+      if (ctx) {
+        viewer.scene.render();
+        ctx.drawImage(canvas, 0, 0);
+        imageUrl = copy.toDataURL('image/png');
+      }
+      copy.width = 0;
+      copy.height = 0;
+    }
+  } finally {
+    if (lcLayer) lcLayer.show = prevLcShow;
+    for (let i = 0; i < hiddenEntities.length; i++) hiddenEntities[i].show = true;
+    for (let i = 0; i < hiddenGroundPrimitives.length; i++) hiddenGroundPrimitives[i].show = true;
+    for (let i = 0; i < hiddenPrimitives.length; i++) hiddenPrimitives[i].show = true;
+    for (let i = 0; i < hiddenDataSources.length; i++) hiddenDataSources[i].show = true;
+    viewer.scene.requestRender();
   }
 
   return { imageUrl, width: canvas.width, height: canvas.height };
@@ -173,31 +227,6 @@ export function getViewBbox(viewer: Cesium.Viewer): Bbox | null {
   return { latMin: south, latMax: north, lonMin: west, lonMax: east };
 }
 
-/* ── Transformers Loading ── */
-interface TfModule {
-  pipeline: (task: string, model: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  env: {
-    allowLocalModels: boolean;
-    useBrowserCache: boolean;
-    localModelPath: string;
-  };
-}
-
-let tfPromise: Promise<TfModule> | null = null;
-
-function loadTf(): Promise<TfModule> {
-  if (!tfPromise) {
-    tfPromise = (async () => {
-      const m = (await import('@xenova/transformers')) as unknown as TfModule;
-      m.env.localModelPath = '/models/';
-      m.env.allowLocalModels = true;
-      m.env.useBrowserCache = false;
-      return m;
-    })();
-  }
-  return tfPromise;
-}
-
 /* ── Imagery Layer Overlay Management ── */
 const landCoverLayers = new WeakMap<Cesium.Viewer, Cesium.ImageryLayer>();
 
@@ -206,6 +235,7 @@ export function showLandCoverSurface(
   grid: LandCoverGrid,
   bbox: Bbox,
   classes: readonly LandCoverClass[] = LAND_COVER_CLASSES,
+  alpha = 0.6,
 ): void {
   clearLandCoverSurface(viewer);
   const canvas = classGridToCanvas(grid, classes);
@@ -220,12 +250,25 @@ export function showLandCoverSurface(
   });
 
   const layer = viewer.scene.imageryLayers.addImageryProvider(provider);
-  layer.alpha = 0.6;
+  layer.alpha = Math.max(0, Math.min(1, alpha));
   (layer as unknown as { name: string }).name = 'land_cover_surface';
   landCoverLayers.set(viewer, layer);
 
   canvas.width = 0;
   canvas.height = 0;
+}
+
+export function setLandCoverAlpha(viewer: Cesium.Viewer, alpha: number): void {
+  const layer = landCoverLayers.get(viewer);
+  if (layer && !viewer.isDestroyed()) {
+    layer.alpha = Math.max(0, Math.min(1, alpha));
+    viewer.scene.requestRender();
+  }
+}
+
+export function getLandCoverAlpha(viewer: Cesium.Viewer): number {
+  const layer = landCoverLayers.get(viewer);
+  return layer ? layer.alpha : 0.6;
 }
 
 export function clearLandCoverSurface(viewer: Cesium.Viewer): void {
@@ -249,9 +292,11 @@ export async function runLandCoverPipeline(
 
   const saved = saveCamera(viewer);
   let imageUrl: string;
+  let squareUrl: string;
   let camW: number;
   let camH: number;
   let captureBbox: Bbox | null;
+  let target: Bbox;
 
   try {
     hooks?.onStep('capture', 'running', opts.bbox ? 'Framing study area top-down…' : 'Pointing camera straight down…');
@@ -261,48 +306,39 @@ export async function runLandCoverPipeline(
     }
     ({ imageUrl, width: camW, height: camH } = captureViewerFrame(viewer));
     captureBbox = getViewBbox(viewer);
+
+    if (!captureBbox) {
+      throw new Error('Could not determine the visible map area — zoom in and try again.');
+    }
+
+    target = opts.bbox ?? captureBbox;
+    hooks?.onStep(
+      'capture',
+      'done',
+      opts.topDown
+        ? '3D scene captured (top-down)'
+        : '3D scene captured (perspective view — overlay is approximate)',
+    );
+
+    // CRITICAL FIX: Calculate target pixel coordinates and crop directly while the camera
+    // is STILL at the exact top-down capture frame, guaranteeing 100% geometric alignment!
+    const cropRect = targetPixelRect(target, captureBbox, camW, camH, viewer);
+    const canvas = viewer.canvas as HTMLCanvasElement;
+    squareUrl = await cropTargetToSquare(canvas || imageUrl, cropRect, 1024);
   } finally {
     restoreCamera(viewer, saved);
   }
 
   throwIfAborted(signal);
 
-  if (!captureBbox) {
-    throw new Error('Could not determine the visible map area — zoom in and try again.');
-  }
-
-  const target = opts.bbox ?? captureBbox;
-  hooks?.onStep(
-    'capture',
-    'done',
-    opts.topDown
-      ? '3D scene captured (top-down)'
-      : '3D scene captured (perspective view — overlay is approximate)',
-  );
-
-  const squareUrl = await cropTargetToSquare(imageUrl, target, captureBbox, camW, camH);
   const squareImage = await loadImage(squareUrl);
   throwIfAborted(signal);
 
-  let classMap: ClassMap;
-  if (opts.useDetr) {
-    hooks?.onStep('features', 'running', 'Running DETR panoptic segmentation…');
-    const tf = await loadTf();
-    const t0 = Date.now();
-    const cm = await detectClassMap(tf, squareUrl, squareImage);
-    throwIfAborted(signal);
-
-    if (!cm) {
-      throw new Error('DETR returned no segments for this scene — try a clearer top-down view.');
-    }
-    hooks?.onStep('features', 'done', `DETR panoptic + spectral fill in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    classMap = cm;
-  } else {
-    hooks?.onStep('features', 'running', 'Classifying pixels by spectral indices…');
-    classMap = spectralClassMap(squareImage);
-    throwIfAborted(signal);
-    hooks?.onStep('features', 'done', `Spectral classification done (${classMap.w}×${classMap.h})`);
-  }
+  hooks?.onStep('features', 'running', 'Classifying pixels via scientific spectral & spatial engine…');
+  const t0 = Date.now();
+  const classMap = spectralClassMap(squareImage);
+  throwIfAborted(signal);
+  hooks?.onStep('features', 'done', `Classified ${classMap.w}×${classMap.h} raster in ${((Date.now() - t0) / 1000).toFixed(2)}s`);
 
   hooks?.onStep('regions', 'running', 'Majority-voting the class map onto the output grid…');
   await yieldToUi();
@@ -405,7 +441,44 @@ interface CenterRect {
   y1: number;
 }
 
-function targetPixelRect(target: Bbox, capture: Bbox, W: number, H: number): CenterRect {
+function targetPixelRect(target: Bbox, capture: Bbox, W: number, H: number, viewer?: Cesium.Viewer): CenterRect {
+  if (viewer && !viewer.isDestroyed()) {
+    try {
+      const scene = viewer.scene;
+      const canvas = viewer.canvas as HTMLCanvasElement;
+      const scaleX = canvas && canvas.clientWidth > 0 ? W / canvas.clientWidth : 1;
+      const scaleY = canvas && canvas.clientHeight > 0 ? H / canvas.clientHeight : 1;
+
+      const pNW = Cesium.Cartesian3.fromDegrees(target.lonMin, target.latMax);
+      const pNE = Cesium.Cartesian3.fromDegrees(target.lonMax, target.latMax);
+      const pSE = Cesium.Cartesian3.fromDegrees(target.lonMax, target.latMin);
+      const pSW = Cesium.Cartesian3.fromDegrees(target.lonMin, target.latMin);
+
+      const wNW = Cesium.SceneTransforms.worldToWindowCoordinates(scene, pNW);
+      const wNE = Cesium.SceneTransforms.worldToWindowCoordinates(scene, pNE);
+      const wSE = Cesium.SceneTransforms.worldToWindowCoordinates(scene, pSE);
+      const wSW = Cesium.SceneTransforms.worldToWindowCoordinates(scene, pSW);
+
+      if (wNW && wNE && wSE && wSW) {
+        const xMin = Math.min(wNW.x, wNE.x, wSE.x, wSW.x) * scaleX;
+        const xMax = Math.max(wNW.x, wNE.x, wSE.x, wSW.x) * scaleX;
+        const yMin = Math.min(wNW.y, wNE.y, wSE.y, wSW.y) * scaleY;
+        const yMax = Math.max(wNW.y, wNE.y, wSE.y, wSW.y) * scaleY;
+
+        if (xMax > xMin && yMax > yMin) {
+          return {
+            x0: Math.max(0, Math.min(W, Math.round(xMin))),
+            y0: Math.max(0, Math.min(H, Math.round(yMin))),
+            x1: Math.max(0, Math.min(W, Math.round(xMax))),
+            y1: Math.max(0, Math.min(H, Math.round(yMax))),
+          };
+        }
+      }
+    } catch {
+      // Fallback to linear if transforms fail
+    }
+  }
+
   const cw = capture.lonMax - capture.lonMin;
   const ch = capture.latMax - capture.latMin;
   const x0 = cw > 0 ? ((target.lonMin - capture.lonMin) / cw) * W : 0;
@@ -414,28 +487,39 @@ function targetPixelRect(target: Bbox, capture: Bbox, W: number, H: number): Cen
   const y1 = ch > 0 ? ((capture.latMax - target.latMin) / ch) * H : H;
 
   return {
-    x0: Math.max(0, Math.min(W, x0)),
-    y0: Math.max(0, Math.min(H, y0)),
-    x1: Math.max(0, Math.min(W, x1)),
-    y1: Math.max(0, Math.min(H, y1)),
+    x0: Math.max(0, Math.min(W, Math.round(x0))),
+    y0: Math.max(0, Math.min(H, Math.round(y0))),
+    x1: Math.max(0, Math.min(W, Math.round(x1))),
+    y1: Math.max(0, Math.min(H, Math.round(y1))),
   };
 }
 
 function cropTargetToSquare(
-  imageUrl: string,
-  target: Bbox,
-  capture: Bbox,
-  W: number,
-  H: number,
+  imageSource: HTMLCanvasElement | string,
+  cropRect: CenterRect,
   squareSize = 1024,
 ): Promise<string> {
+  const rw = Math.max(1, cropRect.x1 - cropRect.x0);
+  const rh = Math.max(1, cropRect.y1 - cropRect.y0);
+
+  if (typeof imageSource !== 'string') {
+    // Fast synchronous crop directly from active WebGL canvas buffer
+    const cw = document.createElement('canvas');
+    cw.width = squareSize;
+    cw.height = squareSize;
+    const ctx = cw.getContext('2d');
+    if (!ctx) return Promise.reject(new Error('Failed to acquire 2D context for cropping'));
+
+    ctx.drawImage(imageSource, cropRect.x0, cropRect.y0, rw, rh, 0, 0, squareSize, squareSize);
+    const outUrl = cw.toDataURL('image/png');
+    cw.width = 0;
+    cw.height = 0;
+    return Promise.resolve(outUrl);
+  }
+
   return new Promise<string>((resolve, reject) => {
     const src = new Image();
     src.onload = () => {
-      const r = targetPixelRect(target, capture, W, H);
-      const rw = Math.max(1, r.x1 - r.x0);
-      const rh = Math.max(1, r.y1 - r.y0);
-
       const cw = document.createElement('canvas');
       cw.width = squareSize;
       cw.height = squareSize;
@@ -445,7 +529,7 @@ function cropTargetToSquare(
         return;
       }
 
-      ctx.drawImage(src, r.x0, r.y0, rw, rh, 0, 0, squareSize, squareSize);
+      ctx.drawImage(src, cropRect.x0, cropRect.y0, rw, rh, 0, 0, squareSize, squareSize);
       const outUrl = cw.toDataURL('image/png');
 
       cw.width = 0;
@@ -453,7 +537,7 @@ function cropTargetToSquare(
       resolve(outUrl);
     };
     src.onerror = () => reject(new Error('Failed to load captured image for region crop'));
-    src.src = imageUrl;
+    src.src = imageSource;
   });
 }
 

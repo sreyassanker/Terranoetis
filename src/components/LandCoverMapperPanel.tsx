@@ -13,6 +13,7 @@ import {
   runLandCoverPipeline,
   showLandCoverSurface,
   clearLandCoverSurface,
+  setLandCoverAlpha,
   type LandCoverResult,
   type StepStatus,
   type Bbox,
@@ -52,7 +53,7 @@ export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
   zIndex = 999,
 }) => {
   const [topDown, setTopDown] = useState(true);
-  const [useDetr, setUseDetr] = useState(false);
+  const [opacity, setOpacity] = useState(0.65);
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<StepView[]>(() =>
     STEP_IDS.map(s => ({ ...s, status: 'pending' })),
@@ -72,6 +73,11 @@ export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
       abortRef.current?.abort();
     };
   }, []);
+
+  const handleOpacityChange = useCallback((val: number) => {
+    setOpacity(val);
+    if (viewer) setLandCoverAlpha(viewer, val);
+  }, [viewer]);
 
   const handleStep = useCallback((id: string, status: StepStatus, msg?: string) => {
     if (!isMountedRef.current) return;
@@ -102,13 +108,13 @@ export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
     try {
       const res = await runLandCoverPipeline(
         viewer,
-        { topDown, bbox, polygon, signal: ac.signal, useDetr },
+        { topDown, bbox, polygon, signal: ac.signal },
         { onStep: handleStep },
       );
 
       if (!isMountedRef.current) return;
       setResult(res);
-      showLandCoverSurface(viewer, res.grid, res.bbox);
+      showLandCoverSurface(viewer, res.grid, res.bbox, undefined, opacity);
       setPushed(true);
     } catch (e) {
       if (!isMountedRef.current) return;
@@ -122,13 +128,13 @@ export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
         setRunning(false);
       }
     }
-  }, [viewer, topDown, useDetr, bbox, polygon, handleStep]);
+  }, [viewer, topDown, bbox, polygon, handleStep, opacity]);
 
   const pushToGlobe = useCallback(() => {
     if (!viewer || !result) return;
-    showLandCoverSurface(viewer, result.grid, result.bbox);
+    showLandCoverSurface(viewer, result.grid, result.bbox, undefined, opacity);
     setPushed(true);
-  }, [viewer, result]);
+  }, [viewer, result, opacity]);
 
   const clearGlobe = useCallback(() => {
     if (!viewer) return;
@@ -330,29 +336,32 @@ export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', cursor: 'pointer' }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', padding: '2px 0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', cursor: 'pointer', fontSize: 11 }}>
               <input
                 type="checkbox"
                 checked={topDown}
                 onChange={e => setTopDown(e.target.checked)}
                 disabled={running}
               />
-              <span style={{ color: '#94a3b8' }}>Top-down</span>
+              <span style={{ color: '#94a3b8' }}>Top-down framing</span>
             </label>
-            <label
-              style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', cursor: 'pointer' }}
-              title="DETR adds inference time. Enable for scenes with strong object semantics (vehicles, structures)."
-            >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+              <span style={{ color: '#94a3b8' }}>Opacity {Math.round(opacity * 100)}%</span>
               <input
-                type="checkbox"
-                checked={useDetr}
-                onChange={e => setUseDetr(e.target.checked)}
-                disabled={running}
+                type="range"
+                min="0"
+                max="1.0"
+                step="0.05"
+                value={opacity}
+                onChange={e => handleOpacityChange(parseFloat(e.target.value))}
+                style={{ width: 85, accentColor: '#22c55e', cursor: 'pointer' }}
               />
-              <span style={{ color: '#94a3b8' }}>DETR model</span>
-            </label>
-            <span style={{ color: '#64748b', fontSize: 10 }}>Spectral indices → 6 classes</span>
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>●</span>
+            <span>Multi-spectral CIE L*a*b* + VARI + Spatial regularizer (11 standardized GIS classes)</span>
           </div>
 
           {error && (

@@ -3890,13 +3890,15 @@ p { text-align: justify; }
   @keyframes forkFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
   .fork-card {
-    width: 460px;
-    max-width: 92vw;
+    width: 530px;
+    max-width: 94vw;
+    max-height: 88vh;
+    overflow-y: auto;
     background: var(--panel-solid);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px 26px 22px;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,140,0,0.08);
+    border-radius: 14px;
+    padding: 18px 22px 16px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,140,0,0.12);
     animation: forkRise 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
   @keyframes forkRise { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -3905,55 +3907,49 @@ p { text-align: justify; }
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 22px;
-    padding-bottom: 16px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
-  }
-  .fork-icon {
-    font-size: 26px;
-    color: #FF8C00;
-    line-height: 1;
-    filter: drop-shadow(0 0 8px rgba(255,140,0,0.4));
   }
   .fork-title {
     font-family: 'Inter', sans-serif;
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--text);
     letter-spacing: 0.2px;
   }
   .fork-sub {
-    font-size: 11.5px;
+    font-size: 11px;
     color: var(--text-dim);
-    margin-top: 2px;
+    margin-top: 1px;
   }
 
-  .fork-field { margin-bottom: 18px; }
+  .fork-field { margin-bottom: 12px; }
   .fork-label {
     display: block;
     font-family: 'Inter', sans-serif;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
   }
   .fork-label-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
   }
 
   .fork-input {
     width: 100%;
     background: rgba(255,255,255,0.04);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
+    border-radius: 7px;
+    padding: 8px 11px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--text);
     outline: none;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -3966,19 +3962,19 @@ p { text-align: justify; }
 
   .fork-coords {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text);
     background: rgba(255,255,255,0.03);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
+    border-radius: 7px;
+    padding: 8px 10px;
   }
 
   .fork-unit-toggle {
     display: inline-flex;
     background: rgba(255,255,255,0.04);
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: 6px;
     padding: 2px;
   }
   .fork-unit-toggle button {
@@ -3986,10 +3982,10 @@ p { text-align: justify; }
     background: transparent;
     color: var(--text-dim);
     font-family: 'Inter', sans-serif;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 5px;
+    padding: 2px 9px;
+    border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -4003,7 +3999,7 @@ p { text-align: justify; }
     gap: 10px;
     align-items: center;
   }
-  .fork-radius-input { flex: 0 0 120px; }
+  .fork-radius-input { flex: 0 0 110px; }
   .fork-slider {
     flex: 1;
     -webkit-appearance: none;
@@ -4017,8 +4013,8 @@ p { text-align: justify; }
   .fork-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
     border-radius: 50%;
     background: #FF8C00;
     border: 2px solid #1a0d00;
@@ -4028,8 +4024,8 @@ p { text-align: justify; }
   }
   .fork-slider::-webkit-slider-thumb:hover { transform: scale(1.18); }
   .fork-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
     border-radius: 50%;
     background: #FF8C00;
     border: 2px solid #1a0d00;
@@ -4039,17 +4035,17 @@ p { text-align: justify; }
   .fork-presets {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
+    gap: 5px;
+    margin-top: 8px;
   }
   .fork-preset {
     border: 1px solid var(--border);
     background: rgba(255,255,255,0.03);
     color: var(--text-dim);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
-    padding: 4px 9px;
-    border-radius: 6px;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 5px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -4061,28 +4057,72 @@ p { text-align: justify; }
   }
 
   .fork-radius-hint {
-    font-size: 10.5px;
+    font-size: 10px;
     color: var(--text-dim);
-    margin-top: 8px;
+    margin-top: 6px;
     font-family: 'JetBrains Mono', monospace;
+  }
+
+  .fork-scenarios-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .fork-scenario-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 9px;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease;
+  }
+  .fork-scenario-card:hover {
+    border-color: rgba(255, 140, 0, 0.45);
+    background: rgba(255, 140, 0, 0.04);
+  }
+  .fork-scenario-card.active {
+    border-color: #FF8C00;
+    background: rgba(255, 140, 0, 0.11);
+    box-shadow: 0 0 0 1px #FF8C00;
+  }
+  .fork-scenario-info {
+    min-width: 0;
+  }
+  .fork-scenario-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .fork-scenario-desc {
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .fork-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 22px;
-    padding-top: 16px;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
     border-top: 1px solid var(--border);
   }
   .fork-create-btn {
     background: #FF8C00;
     color: #1a0d00;
     border: none;
-    border-radius: 8px;
-    padding: 10px 18px;
+    border-radius: 7px;
+    padding: 8px 16px;
     font-family: 'Inter', sans-serif;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 700;
     cursor: pointer;
     transition: all 0.18s ease;

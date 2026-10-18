@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -22,6 +22,7 @@ import { useUserPrefStore } from '@/store/userPrefStore';
 import { ChatPanel } from '@/components/chat';
 import type { VirtualizedMessageListHandle } from '@/components/chat/VirtualizedMessageList';
 import { useCollaboration } from '@/hooks/useCollaboration';
+import { PresenceIndicator } from '@/components/collaboration';
 import { useOfflineChat } from '@/hooks/useOfflineChat';
 import { useChat } from '@/hooks/useChat';
 import { useRealtimeVoice } from '@/hooks/useRealtimeVoice';
@@ -141,7 +142,7 @@ import { StreamingMarkdownRenderer, extractArtifacts, fetchSuggestions, fetchTie
 import { flushQueue } from '@/lib/offlineChat';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import { formatSci } from '@/lib/formatSci';
-import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
+import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
 import { isDesktopApp, DESKTOP_API_SERVER, openInBrowser, getYoutubeEmbedUrl } from '@/lib/desktop';
 
 /* ═════════════════════════════════════════════════════════════════
@@ -1414,25 +1415,46 @@ export default function App() {
   const [activeEvents, setActiveEvents] = useState(0);
   const [weatherCards, setWeatherCards] = useState<WeatherCardData[]>([]);
   const [contextMenu, setContextMenu] = useState<{show:boolean;x:number;y:number;lat:number;lon:number}>({show:false,x:0,y:0,lat:0,lon:0});
-  const [forks, setForks] = useState<Array<{forkId: string; name: string; divergenceScore: number; status: string}>>([]);
+  const [forks, setForks] = useState<Array<{
+    forkId: string;
+    name: string;
+    divergenceScore: number;
+    status: string;
+    lat?: number;
+    lon?: number;
+    radiusM?: number;
+    bufferRadiusM?: number;
+    disruptionType?: string;
+    disruptionDetails?: string;
+    simulatedTimeMs?: number;
+  }>>([]);
   const [activeForkCount, setActiveForkCount] = useState(0);
-  const [monitorCollapsed, setMonitorCollapsed] = useState(true);
   const [forkMode, setForkMode] = useState(false);
   const forkModeRef = useRef(false);
   useEffect(() => { forkModeRef.current = forkMode; }, [forkMode]);
 
   // ── Fork creation dialog state ──
-  // When the user right-clicks the globe in Fork Mode, we open this dialog
-  // instead of a browser prompt so they can name the reality and set a
-  // buffer radius (with m/km unit toggle) in a professional manner.
   const [forkDialog, setForkDialog] = useState<{
     open: boolean;
     lat: number;
     lon: number;
     name: string;
-    radius: number;   // always stored in meters
+    radius: number;   // stored in meters
     unit: 'm' | 'km';
-  }>({ open: false, lat: 0, lon: 0, name: '', radius: 500000, unit: 'km' });
+    disruptionType: string;
+    disruptionDetails: string;
+    durationHours: number;
+  }>({
+    open: false,
+    lat: 0,
+    lon: 0,
+    name: '',
+    radius: 50000,
+    unit: 'km',
+    disruptionType: 'cyclone',
+    disruptionDetails: '',
+    durationHours: 72,
+  });
 
   const [showMarketIntelPanel, setShowMarketIntelPanel] = useState(false);
   const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
@@ -1621,8 +1643,7 @@ export default function App() {
   const [scenarioGalleryLoading, setScenarioGalleryLoading] = useState(false);
   const [scenarioGalleryError, setScenarioGalleryError] = useState<string | null>(null);
   const [activeStudyAreaId, setActiveStudyAreaId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!showScenarioGallery) return;
+  const loadScenarioGallery = useCallback(() => {
     setScenarioGalleryLoading(true);
     setScenarioGalleryError(null);
     fetch('/api/scenarios/search', { headers: { ...authHeaders() } })
@@ -1635,7 +1656,12 @@ export default function App() {
       })
       .catch(err => setScenarioGalleryError(err.message))
       .finally(() => setScenarioGalleryLoading(false));
-  }, [showScenarioGallery]);
+  }, []);
+
+  useEffect(() => {
+    if (!showScenarioGallery) return;
+    loadScenarioGallery();
+  }, [showScenarioGallery, loadScenarioGallery]);
   // Phase 2: Vision
   const nextImageIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1800,6 +1826,33 @@ export default function App() {
     listChats().then(setChatList).catch(() => {});
   }, [auth.token, setChatList]);
 
+  // Rehydrate active parallel reality forks on mount
+  useEffect(() => {
+    fetch('/api/fork/list', { headers: { ...authHeaders() }, credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!Array.isArray(data?.forks) || data.forks.length === 0) return;
+        const activeForks = data.forks.filter((f: any) => f.status !== 'terminated');
+        if (activeForks.length === 0) return;
+        setForks(activeForks);
+        setActiveForkCount(activeForks.length);
+        const checkTimer = setInterval(() => {
+          if (viewerRef.current && !viewerRef.current.isDestroyed() && forkRendererRef.current) {
+            clearInterval(checkTimer);
+            for (const f of activeForks) {
+              if (typeof f.lat === 'number' && typeof f.lon === 'number') {
+                forkRendererRef.current.createForkVisual(f.forkId, f.name, f.lat, f.lon, f.bufferRadiusM);
+                forkRendererRef.current.updateDivergence(f.forkId, f.divergenceScore || 0, f.simulatedTimeMs || 0);
+                forkRendererRef.current.spawnGhostsWithRetry(f.forkId);
+              }
+            }
+          }
+        }, 500);
+        setTimeout(() => clearInterval(checkTimer), 12000);
+      })
+      .catch(() => {});
+  }, []);
+
   // Poll memory stats every 30s
   useEffect(() => {
     const fetchMemory = async () => {
@@ -1855,6 +1908,38 @@ export default function App() {
   const [flightTravelHud, setFlightTravelHud] = useState<{ callsign: string; lat: number; lon: number; altFt: number; speedKts: number; speedKmh: number; heading: number; vs: number; pitch?: number } | null>(null);
   const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
   const [intelFilter, setIntelFilter] = useState('all');
+
+  // Fetch cross-sensor fused events when Intel Feed is active
+  useEffect(() => {
+    if (!showIntelFeed) return;
+    fetch('/api/multimodal/fusion/events')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!Array.isArray(data?.events)) return;
+        const fusedItems: IntelFeedItem[] = data.events.map((e: any) => ({
+          id: `fused_${e.id}`,
+          title: `[Fused Incident] ${e.type?.toUpperCase()} — ${e.summary || 'Multi-sensor event'}`,
+          source: `${(e.modalities || ['cross-sensor']).join('+')} (${Math.round((e.confidence || 0.8) * 100)}% conf)`,
+          type: 'fused',
+          lat: e.lat,
+          lon: e.lon,
+          timestamp: e.timestamp || Date.now(),
+          timeLabel: new Date(e.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          desc: `Cross-sensor fusion detected compound hazard activity. Severity: ${e.severity || 'warning'}. Modalities: ${(e.modalities || []).join(', ')}.`,
+          platform: 'internal',
+        }));
+        if (fusedItems.length > 0) {
+          setIntelFeed(prev => {
+            const map = new Map(prev.map(i => [i.id, i]));
+            for (const fi of fusedItems) map.set(fi.id, fi);
+            const next = Array.from(map.values());
+            next.sort((a, b) => b.timestamp - a.timestamp);
+            return next.slice(0, 500);
+          });
+        }
+      })
+      .catch(() => {});
+  }, [showIntelFeed]);
   const [cameraLat, setCameraLat] = useState('');
   const [cameraLon, setCameraLon] = useState('');
   const [cameraLatDir, setCameraLatDir] = useState('N');
@@ -2794,8 +2879,11 @@ export default function App() {
         lat,
         lon,
         name: `Fork-${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
-        radius: 500000,   // 500 km default
+        radius: 50000,   // 50 km default
         unit: 'km',
+        disruptionType: 'cyclone',
+        disruptionDetails: '',
+        durationHours: 72,
       });
     }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
@@ -6832,8 +6920,46 @@ export default function App() {
       forkRendererRef.current?.removeForkVisual(forkId);
       setForks(prev => prev.filter(f => f.forkId !== forkId));
       setActiveForkCount(prev => Math.max(0, prev - 1));
+      if (useChatStore.getState().activeFork?.forkId === forkId) {
+        useChatStore.getState().setActiveFork(null);
+        useChatStore.getState().setStudyAreaBbox(null);
+      }
     } catch (e) { console.error('Terminate fork failed:', e); }
   }, []);
+
+  const handleFlyToFork = useCallback((fork: any) => {
+    if (typeof fork.lat === 'number' && typeof fork.lon === 'number') {
+      const radius = fork.radiusM || fork.bufferRadiusM || 500000;
+      focusLocation(fork.lat, fork.lon, { label: fork.name, color: '#f59e0b', height: Math.max(80000, radius * 2.8) });
+    }
+  }, [focusLocation]);
+
+  const handleFocusChatOnFork = useCallback((fork: any) => {
+    if (typeof fork.lat === 'number' && typeof fork.lon === 'number') {
+      const radius = fork.radiusM || fork.bufferRadiusM || 500000;
+      const dLat = (radius / 111320);
+      const dLon = (radius / (111320 * Math.max(0.1, Math.cos((fork.lat * Math.PI) / 180))));
+      const bbox = {
+        latMin: Math.max(-90, fork.lat - dLat),
+        latMax: Math.min(90, fork.lat + dLat),
+        lonMin: Math.max(-180, fork.lon - dLon),
+        lonMax: Math.min(180, fork.lon + dLon),
+      };
+      chatState.setStudyAreaBbox(bbox, 'manual');
+      chatState.setActiveFork({
+        forkId: fork.forkId,
+        name: fork.name,
+        lat: fork.lat,
+        lon: fork.lon,
+        radiusM: radius,
+        disruptionType: fork.disruptionType,
+        divergenceScore: fork.divergenceScore,
+        simulatedTimeMs: fork.simulatedTimeMs,
+      });
+      setShowAI(true);
+      focusPanel('ai');
+    }
+  }, [chatState, focusPanel]);
 
   const renderCausalChain = useCallback((links: CausalChainLink[]) => {
     oracleChainRef.current?.renderChain(links);
@@ -9199,10 +9325,6 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       case 'fork': case 'fork-manager': case 'fork-mode':
         setForkMode(p => !p);
         return true;
-      case 'monitor': case 'monitor-panel':
-        if (desired === false) { setMonitorCollapsed(true); return false; }
-        setMonitorCollapsed(false);
-        return true;
       case 'route': case 'route-tool':
         setNavMode(desired === false ? 'none' : 'route');
         if (desired !== false) { setShowMeasureTool(false); }
@@ -9220,7 +9342,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   // Register a chat-resolved boundary as the app-wide ACTIVE study area so
   // every study-area consumer (Analytics Workbench, Land Cover Mapper, later
@@ -10203,8 +10325,17 @@ case 'openPanel':
      FORK (PARALLEL REALITY) CREATION
      ═════════════════════════════════════════════════════════════════ */
 
-  const submitFork = useCallback((opts: { name: string; radiusM: number; lat: number; lon: number }) => {
+  const submitFork = useCallback((opts: {
+    name: string;
+    radiusM: number;
+    lat: number;
+    lon: number;
+    disruptionType?: string;
+    disruptionDetails?: string;
+    durationHours?: number;
+  }) => {
     const forkName = opts.name.trim() || `Fork-${Date.now()}`;
+    const disruption = opts.disruptionType || 'cyclone';
     fetch('/api/fork/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -10214,20 +10345,83 @@ case 'openPanel':
         lat: opts.lat,
         lon: opts.lon,
         bufferRadiusM: opts.radiusM,
-        deltas: [{ type: 'INJECT_EVENT', targetId: 'manual_fork', parameters: { lat: opts.lat, lon: opts.lon }, effectiveTimeOffsetHours: 0 }],
-        maxSimulationHours: 72,
+        disruptionType: disruption,
+        disruptionDetails: opts.disruptionDetails,
+        deltas: [{
+          type: 'INJECT_EVENT',
+          targetId: `disruption_${disruption}`,
+          parameters: {
+            lat: opts.lat,
+            lon: opts.lon,
+            disruptionType: disruption,
+            details: opts.disruptionDetails,
+          },
+          effectiveTimeOffsetHours: 0,
+        }],
+        maxSimulationHours: opts.durationHours || 72,
       }),
     }).then(r => r.json()).then(data => {
       if (data.forkId) {
         forkRendererRef.current?.createForkVisual(data.forkId, forkName, opts.lat, opts.lon, opts.radiusM);
         forkRendererRef.current?.spawnGhostsWithRetry(data.forkId);
-        setForks(prev => [...prev, { forkId: data.forkId, name: forkName, divergenceScore: 0, status: 'running' }]);
+
+        const newFork = {
+          forkId: data.forkId,
+          name: forkName,
+          divergenceScore: 0,
+          status: 'running',
+          lat: opts.lat,
+          lon: opts.lon,
+          radiusM: opts.radiusM,
+          bufferRadiusM: opts.radiusM,
+          disruptionType: disruption,
+          disruptionDetails: opts.disruptionDetails,
+          simulatedTimeMs: 0,
+        };
+
+        setForks(prev => [...prev, newFork]);
         setActiveForkCount(prev => prev + 1);
+
+        // Bind Chat Copilot to this parallel reality
+        const dLat = (opts.radiusM / 111320);
+        const dLon = (opts.radiusM / (111320 * Math.max(0.1, Math.cos((opts.lat * Math.PI) / 180))));
+        const bbox = {
+          latMin: Math.max(-90, opts.lat - dLat),
+          latMax: Math.min(90, opts.lat + dLat),
+          lonMin: Math.max(-180, opts.lon - dLon),
+          lonMax: Math.min(180, opts.lon + dLon),
+        };
+        chatState.setStudyAreaBbox(bbox, 'manual');
+        chatState.setActiveFork({
+          forkId: data.forkId,
+          name: forkName,
+          lat: opts.lat,
+          lon: opts.lon,
+          radiusM: opts.radiusM,
+          disruptionType: disruption,
+          divergenceScore: 0,
+          simulatedTimeMs: 0,
+        });
+
+        // Announce in chat Copilot
+        setAiMessages(prev => [
+          ...prev,
+          {
+            id: nextAiMsgIdRef.current++,
+            role: 'assistant',
+            content: `🌐 **Parallel Reality Initialized:** "${forkName}"\n• **Coordinates:** ${opts.lat.toFixed(4)}°, ${opts.lon.toFixed(4)}°\n• **Buffer Zone:** ${(opts.radiusM / 1000).toFixed(0)} km diameter\n• **Scenario:** ${disruption.toUpperCase()}${opts.disruptionDetails ? ` (${opts.disruptionDetails})` : ''}\n• **Pace:** 1,000x accelerated time\n\n*Earth Intelligence Copilot is locked onto this dome. All queries and hazard simulations will analyze this parallel counterfactual reality.*`,
+          },
+        ]);
+        setShowAI(true);
+        focusPanel('ai');
+
+        // Smoothly zoom Cesium camera to dome
+        focusLocation(opts.lat, opts.lon, { label: forkName, color: '#f59e0b', height: Math.max(80000, opts.radiusM * 2.8) });
         showNotification(`Parallel reality "${forkName}" created (${(opts.radiusM / 1000).toFixed(0)} km buffer)`, 'success');
       }
     }).catch(e => console.error('Fork creation failed:', e));
     setForkDialog(d => ({ ...d, open: false }));
-  }, []);
+  }, [chatState, focusLocation, focusPanel, setShowAI, setAiMessages]);
 
   /* ═════════════════════════════════════════════════════════════════
      CONTEXT MENU ACTIONS
@@ -11247,8 +11441,8 @@ case 'openPanel':
             <div className="status-dot" />
             <span>Live</span>
           </div>
+          <PresenceIndicator users={collaboration.users} typingUsers={collaboration.typingUsers} />
 
-          <button className="btn-icon" onClick={() => window.location.reload()} title="Reload App (⌘R / F5)"><RotateCcw size={16} /></button>
           <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => { setShowIntelFeed(p => !p); focusPanel('intel-feed'); }} title="Intel Feed"><Activity size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
@@ -11310,7 +11504,6 @@ case 'openPanel':
             menuId={openMenu} setMenuId={setOpenMenu}
             active={showSettings || showPerfMonitor}
             items={[
-              { label: 'Reload App (⌘R)', icon: <RotateCcw size={15} />, onClick: () => window.location.reload() },
               { label: 'API Configuration', icon: <Key size={15} />, onClick: () => setShowApiVault(true) },
               { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => { setShowSettings(p => !p); focusPanel('settings'); } },
               { label: 'Performance Monitor', icon: <Activity size={15} />, active: showPerfMonitor, onClick: () => setShowPerfMonitor(p => !p) },
@@ -11595,10 +11788,10 @@ case 'openPanel':
         <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('intel-feed', 110), width: 360 }}>
           <Panel title="INTEL FEED" icon={<Radio size={16} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowIntelFeed(false)} style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
-          {['all','news','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
+          {['all','fused','news','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
             <button key={f} className={`social-filter-chip ${intelFilter === f ? 'active' : ''}`}
               onClick={() => setIntelFilter(f)}>
-              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === 'all' ? 'All' : f === 'fused' ? '⚡ Fused' : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
@@ -11617,6 +11810,11 @@ case 'openPanel':
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
                 <div>
                   <div style={{fontSize:10,color:'var(--text-muted)'}}>
+                    {item.type === 'fused' && (
+                      <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: 'rgba(239,68,68,0.25)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)', marginRight: 5, fontWeight: 700 }}>
+                        FUSED CRISIS
+                      </span>
+                    )}
                     {item.platform === 'twitter' ? <MessageCircle size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'facebook' ? <Share2 size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'news' ? <Newspaper size={10} style={{display:'inline',marginRight:3}} /> : ''}
                     {item.source} · {item.type}
                   </div>
@@ -11648,19 +11846,12 @@ case 'openPanel':
         <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-val">{cameraLat && cameraLon ? `${cameraLat}°${cameraLatDir} ${cameraLon}°${cameraLonDir}` : '—'}</span></div>
 
         <button
-          className={`btn-icon monitor-btn ${!monitorCollapsed ? 'active' : ''}`}
-          onClick={() => { setMonitorCollapsed(prev => !prev); focusPanel('monitor'); }}
-          title="Monitor Panel"
-        >
-          <Monitor size={14} />
-        </button>
-        <button
           className={`btn-icon monitor-btn ${forkMode ? 'active' : ''}`}
           onClick={() => setForkMode(prev => !prev)}
           title="Fork Mode — right-click to create parallel realities"
           style={forkMode ? { borderColor: '#FF8C00', color: '#FF8C00' } : {}}
         >
-          <span style={{ fontSize: 16 }}>⬡</span>
+          <Monitor size={14} />
         </button>
 
         <TopbarMenu
@@ -11790,10 +11981,22 @@ case 'openPanel':
         <div className="fork-dialog" onClick={e => { if (e.target === e.currentTarget) setForkDialog(d => ({ ...d, open: false })); }}>
           <div className="fork-card">
             <div className="fork-header">
-              <span className="fork-icon">⬡</span>
+              <div style={{
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                background: 'rgba(255, 140, 0, 0.12)',
+                border: '1px solid rgba(255, 140, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <GitFork size={18} color="#FF8C00" />
+              </div>
               <div>
                 <div className="fork-title">Create Parallel Reality</div>
-                <div className="fork-sub">Define a forked simulation branch with a buffer zone.</div>
+                <div className="fork-sub">Define an isolated simulation branch with live GIS containment & physics divergence.</div>
               </div>
             </div>
 
@@ -11804,21 +12007,76 @@ case 'openPanel':
                 value={forkDialog.name}
                 autoFocus
                 onChange={e => setForkDialog(d => ({ ...d, name: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon }); }}
-                placeholder="e.g. Atlantic Storm Surge Variant"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    submitFork({
+                      name: forkDialog.name,
+                      radiusM: forkDialog.radius,
+                      lat: forkDialog.lat,
+                      lon: forkDialog.lon,
+                      disruptionType: forkDialog.disruptionType,
+                      disruptionDetails: forkDialog.disruptionDetails,
+                      durationHours: forkDialog.durationHours,
+                    });
+                  }
+                }}
+                placeholder="e.g. Category 5 Landfall Stress Variant"
               />
             </div>
 
             <div className="fork-field">
-              <label className="fork-label">Origin Coordinates</label>
-              <div className="fork-coords">
-                <span>{forkDialog.lat.toFixed(4)}°, {forkDialog.lon.toFixed(4)}°</span>
+              <label className="fork-label">Disruption Scenario</label>
+              <div className="fork-scenarios-grid">
+                {[
+                  { id: 'cyclone', Icon: Wind, iconColor: '#38bdf8', title: 'Tropical Cyclone', desc: 'Cat-4/5 wind field & storm surge' },
+                  { id: 'earthquake', Icon: Activity, iconColor: '#fbbf24', title: 'Seismic Shock', desc: 'M7.5+ fault rupture & PGA wave' },
+                  { id: 'flood', Icon: Waves, iconColor: '#60a5fa', title: 'Severe Inundation', desc: 'Riverine overflow & stormwater surge' },
+                  { id: 'wildfire', Icon: Flame, iconColor: '#f87171', title: 'Wildfire Inferno', desc: 'Rothermel spread & smoke plume' },
+                  { id: 'port_closure', Icon: Anchor, iconColor: '#c084fc', title: 'Maritime Blockade', desc: 'Strait/port closure & logistics backlog' },
+                  { id: 'airspace_block', Icon: Plane, iconColor: '#f472b6', title: 'Airspace Closure', desc: 'NOTAM ground stop & diversions' },
+                  { id: 'power_outage', Icon: Zap, iconColor: '#fb923c', title: 'Grid Blackout', desc: 'Substation cascade & critical power loss' },
+                  { id: 'custom', Icon: Sliders, iconColor: '#34d399', title: 'Custom Disruption', desc: 'User-specified parametric deltas' },
+                ].map(sc => (
+                  <div
+                    key={sc.id}
+                    className={`fork-scenario-card ${forkDialog.disruptionType === sc.id ? 'active' : ''}`}
+                    onClick={() => setForkDialog(d => ({ ...d, disruptionType: sc.id }))}
+                  >
+                    <div style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      background: forkDialog.disruptionType === sc.id ? 'rgba(255, 140, 0, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                      border: `1px solid ${forkDialog.disruptionType === sc.id ? 'rgba(255, 140, 0, 0.4)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <sc.Icon size={14} color={sc.iconColor} />
+                    </div>
+                    <div className="fork-scenario-info">
+                      <div className="fork-scenario-title">{sc.title}</div>
+                      <div className="fork-scenario-desc">{sc.desc}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="fork-field">
+              <label className="fork-label">Disruption Details / Stress Factor</label>
+              <input
+                className="fork-input"
+                value={forkDialog.disruptionDetails}
+                onChange={e => setForkDialog(d => ({ ...d, disruptionDetails: e.target.value }))}
+                placeholder="e.g. 155 kt peak sustained winds, 4.8m surge at river mouth"
+              />
+            </div>
+
+            <div className="fork-field">
               <div className="fork-label-row">
-                <label className="fork-label">Buffer Radius</label>
+                <label className="fork-label">Buffer Radius (Containment Dome)</label>
                 <div className="fork-unit-toggle">
                   <button className={forkDialog.unit === 'm' ? 'active' : ''} onClick={() => setForkDialog(d => ({ ...d, unit: 'm' }))}>m</button>
                   <button className={forkDialog.unit === 'km' ? 'active' : ''} onClick={() => setForkDialog(d => ({ ...d, unit: 'km' }))}>km</button>
@@ -11835,10 +12093,8 @@ case 'openPanel':
                     const raw = parseFloat(e.target.value);
                     if (!Number.isFinite(raw) || raw < 0) return;
                     const meters = forkDialog.unit === 'km' ? raw * 1000 : raw;
-                    // Allow 0 m up to 10,000 km.
                     setForkDialog(d => ({ ...d, radius: Math.min(meters, 10000000) }));
                   }}
-                  onKeyDown={e => { if (e.key === 'Enter') submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon }); }}
                 />
                 <input
                   className="fork-slider"
@@ -11852,11 +12108,12 @@ case 'openPanel':
               </div>
               <div className="fork-presets">
                 {[
+                  { label: '25 km', m: 25000 },
                   { label: '50 km', m: 50000 },
+                  { label: '100 km', m: 100000 },
                   { label: '250 km', m: 250000 },
                   { label: '500 km', m: 500000 },
                   { label: '1,000 km', m: 1000000 },
-                  { label: '2,500 km', m: 2500000 },
                 ].map(p => (
                   <button
                     key={p.label}
@@ -11866,16 +12123,48 @@ case 'openPanel':
                 ))}
               </div>
               <div className="fork-radius-hint">
-                Coverage diameter ≈ {(forkDialog.radius * 2 / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} km · Dome height ≈ {(() => {
+                Coverage diameter ≈ {(forkDialog.radius * 2 / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} km · Dome apex ≈ {(() => {
                   const h = Math.min(Math.max(forkDialog.radius * 0.25, 50000), 500000);
                   return (h / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 });
-                })()} km · Range 0 m – 10,000 km
+                })()} km · Epicenter: {forkDialog.lat.toFixed(4)}°, {forkDialog.lon.toFixed(4)}°
+              </div>
+            </div>
+
+            <div className="fork-field">
+              <label className="fork-label">Simulation Horizon</label>
+              <div className="fork-presets">
+                {[
+                  { label: '12 Hours', h: 12 },
+                  { label: '24 Hours', h: 24 },
+                  { label: '48 Hours', h: 48 },
+                  { label: '72 Hours', h: 72 },
+                  { label: '7 Days', h: 168 },
+                ].map(hp => (
+                  <button
+                    key={hp.label}
+                    className={`fork-preset ${forkDialog.durationHours === hp.h ? 'active' : ''}`}
+                    onClick={() => setForkDialog(d => ({ ...d, durationHours: hp.h }))}
+                  >
+                    {hp.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="fork-actions">
               <button className="btn-secondary" onClick={() => setForkDialog(d => ({ ...d, open: false }))}>Cancel</button>
-              <button className="fork-create-btn" onClick={() => submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon })}>
+              <button
+                className="fork-create-btn"
+                onClick={() => submitFork({
+                  name: forkDialog.name,
+                  radiusM: forkDialog.radius,
+                  lat: forkDialog.lat,
+                  lon: forkDialog.lon,
+                  disruptionType: forkDialog.disruptionType,
+                  disruptionDetails: forkDialog.disruptionDetails,
+                  durationHours: forkDialog.durationHours,
+                })}
+              >
                 <Plus size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} /> Create Reality
               </button>
             </div>
@@ -12535,7 +12824,15 @@ case 'openPanel':
 
       {/* Memory Explorer */}
       {showMemoryExplorer && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('memory', 110), width: 380, maxHeight: 'calc(100vh - 160px)' }}>
+        <div style={{
+          position: 'absolute', top: 60, right: 10,
+          zIndex: getPanelZIndex('memory', 110),
+          width: 440,
+          height: 'calc(100vh - 120px)',
+          maxHeight: 'calc(100vh - 120px)',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
           <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
         </div>
       )}
@@ -12553,6 +12850,8 @@ case 'openPanel':
         onPauseFork={handlePauseFork}
         onResumeFork={handleResumeFork}
         onTerminateFork={handleTerminateFork}
+        onFlyToFork={handleFlyToFork}
+        onFocusChat={handleFocusChatOnFork}
         zIndex={getPanelZIndex('fork', 110)}
       /></PanelSuspense>
 
@@ -12636,126 +12935,7 @@ case 'openPanel':
       />
 
       <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor && !heliFlying} onToggle={() => setShowPerfMonitor(p => !p)} sidebarCollapsed={sidebarCollapsed} />
-      {/* Monitor Panel */}
-      {!loading && !monitorCollapsed && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('monitor', 110), width: 320 }}>
-          <Panel title="MONITOR" icon={<span>⬡</span>} accentColor="#00ff88" iconColor="#00ff88" titleColor="#00ff88" onClose={() => setMonitorCollapsed(true)} style={{ fontFamily: 'monospace', fontSize: 11, maxHeight: 'calc(100vh - 96px)' }}>
-            <div style={{ padding: 8, overflowY: 'auto', flex: 1 }}>
-            {/* Planetary Entropy */}
-            {(() => {
-              const entropyVal = entropyHaloRef.current?.getEntropy() || 0;
-              const interp = entropyHaloRef.current?.getInterpretation() || 'baseline';
-              const pct = Math.round(entropyVal * 100);
-              const color = entropyVal < 0.3 ? '#22c55e' : entropyVal < 0.6 ? '#eab308' : entropyVal < 0.9 ? '#FF8C00' : '#ef4444';
-              return (
-                <>
-                  <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Planetary Entropy</div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 20, fontWeight: 'bold', color }} className={entropyVal >= 0.9 ? 'monitor-entropy-critical' : ''}>{pct}%</span>
-                    <span style={{ color, fontSize: 10 }}>{interp.toUpperCase()}</span>
-                  </div>
-                  <div style={{ width: '100%', height: 8, background: '#1a1a2e', borderRadius: 4, overflow: 'hidden', marginTop: 4 }}>
-                    <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.5s ease' }} />
-                  </div>
-                </>
-              );
-            })()}
 
-            {/* Active Forks */}
-            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
-              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
-                Active Forks <span style={{ marginLeft: 6, color: '#ff8c00', fontSize: 10 }}>({forks.length})</span>
-              </div>
-              {forks.length === 0 && <div style={{ color: '#666', fontSize: 10 }}>No active forks</div>}
-              {forks.map(fork => (
-                <div key={fork.forkId} style={{ marginBottom: 4 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
-                    <span style={{ color: '#ddd' }}>{fork.name}</span>
-                    <span style={{ color: fork.status === 'running' ? '#22c55e' : '#eab308' }}>{fork.status}</span>
-                  </div>
-                  <div style={{ width: '100%', height: 6, background: '#1a1a2e', borderRadius: 4, overflow: 'hidden', marginTop: 2 }}>
-                    <div style={{
-                      width: `${Math.min(100, fork.divergenceScore * 100)}%`,
-                      height: '100%',
-                      background: fork.divergenceScore > 0.6 ? '#ef4444' : fork.divergenceScore > 0.3 ? '#eab308' : '#22c55e',
-                      borderRadius: 4,
-                      transition: 'width 0.5s ease',
-                    }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Reflex Status */}
-            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
-              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Reflex Status</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
-                {reflexStates.map(reflex => {
-                  const refColors: Record<string, string> = { IDLE: '#22c55e', ARMED: '#eab308', ACTIVE: '#ef4444', RECOVERING: '#6b7280' };
-                  return (
-                    <div key={reflex.reflexId} style={{ padding: '4px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, textAlign: 'center' }}>
-                      <div style={{ fontSize: 8, color: '#888', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {reflex.reflexId.replace(/-/g, '\n')}
-                      </div>
-                      <div style={{ fontSize: 9, fontWeight: 'bold', color: refColors[reflex.status] || '#666' }}
-                        className={reflex.status === 'ACTIVE' ? 'monitor-entropy-critical' : ''}>
-                        {reflex.status}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Memory Tiers */}
-            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
-              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Memory Tiers</div>
-              {memoryStats ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', fontSize: 10 }}>
-                  {Object.entries(memoryStats).map(([tier, info]) => (
-                    <div key={tier} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#888' }}>{tier}</span>
-                      <span style={{ color: '#ddd' }}>{(info as any).count ?? 0}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: '#666', fontSize: 10 }}>Loading...</div>
-              )}
-            </div>
-
-            {/* Recent Discoveries */}
-            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
-              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Recent Discoveries</div>
-              {recentDiscoveries.length === 0 && <div style={{ color: '#666', fontSize: 10 }}>No discoveries yet</div>}
-              {recentDiscoveries.slice(0, 3).map((d, i) => (
-                <div key={i} style={{ fontSize: 10, color: '#ccc', marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{d.summary}</span>
-                  <span style={{ color: d.confidence > 0.7 ? '#22c55e' : d.confidence > 0.4 ? '#eab308' : '#ef4444', marginLeft: 6, flexShrink: 0 }}>
-                    {Math.round(d.confidence * 100)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Last Dream Cycle */}
-            <div style={{ padding: '8px 0' }}>
-              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Last Dream Cycle</div>
-              {lastDream ? (
-                <div style={{ fontSize: 10, color: '#ccc' }}>
-                  <div>Scenarios: <span style={{ color: '#ddd' }}>{lastDream.scenariosRun}</span></div>
-                  <div>Model updates: <span style={{ color: '#ddd' }}>{lastDream.modelUpdates}</span></div>
-                  <div>New edges: <span style={{ color: '#ddd' }}>{lastDream.newCausalEdges}</span></div>
-                  <div style={{ color: '#666', fontSize: 9, marginTop: 2 }}>{formatIST(lastDream.timestamp, { dateStyle: 'medium', timeStyle: 'short' })} IST</div>
-                </div>
-              ) : (
-                <div style={{ color: '#666', fontSize: 10 }}>No dream cycle recorded</div>
-              )}
-            </div>
-            </div>
-          </Panel>
-        </div>
-      )}
 
       {/* Login Modal */}
       <LoginModal />
@@ -12772,6 +12952,7 @@ case 'openPanel':
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
           zIndex={getPanelZIndex('scenario-gallery')}
+          onRefresh={loadScenarioGallery}
         />
       )}
 
