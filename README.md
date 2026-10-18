@@ -107,7 +107,7 @@ terranoetis/
 │   ├── components/               # UI components (chat/, cockpit/, scenarios/, kaggle/, ...)
 │   ├── rendering/                # 41 Cesium rendering modules (ais, flights, satellites, ...)
 │   ├── hooks/                    # useChat, useWebSocket, useRealtimeVoice, ...
-│   ├── lib/                      # API client, chat store, formatTime, DuckDB, PDF
+│   ├── lib/                      # API client, chat store, formatTime, PDF
 │   ├── data/                     # Analytical models catalog, land cover classes
 │   ├── store/                    # Zustand: chat store, user location/timezone prefs
 │   └── __tests__/                # Frontend unit tests
@@ -146,7 +146,7 @@ terranoetis/
 ├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
 ├── data/                         # Runtime databases + ML models → gitignored
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
-├── public/                       # Static assets (DuckDB-WASM, fonts, offline data; Cesium synced from node_modules at build; models gitignored)
+├── public/                       # Static assets (fonts, offline data; Cesium synced from node_modules at build; models gitignored)
 │
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
 ├── Dockerfile                    # Multi-stage build (node:20-alpine)

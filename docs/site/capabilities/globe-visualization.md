@@ -4,7 +4,7 @@ Verified counts and overlay architecture: [globe-visualization.html](globe-visua
 
 ## The rendering thesis
 
-The globe is the interface's core claim: geospatial intelligence is legible in situ. The client is deliberately thin over CesiumJS: live entities (flights, vessels, satellites, quakes, fires) become primitives refreshed from the API; analytical and simulation results become draped scalar fields, arrow fields, particle streams and intensity colormaps rendered by purpose-built GPU *rendering* primitives; and the same data powers 2D panels, DuckDB workbench and PDF reports.
+The globe is the interface's core claim: geospatial intelligence is legible in situ. The client is deliberately thin over CesiumJS: live entities (flights, vessels, satellites, quakes, fires) become primitives refreshed from the API; analytical and simulation results become draped scalar fields, arrow fields, particle streams and intensity colormaps rendered by purpose-built GPU *rendering* primitives; and the same data powers 2D panels and PDF reports.
 
 ## What "GPU" means here — and where it does not
 

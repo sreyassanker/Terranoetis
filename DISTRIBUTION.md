@@ -8,7 +8,7 @@ This guide details the packaging, security architecture, code signing, notarizat
 
 Terranoetis is packaged as a native desktop application using **Tauri v2** with an embedded production Node.js intelligence engine:
 
-- **Frontend Core**: High-performance React 19 + Cesium 3D geospatial engine, bundled with Vite and WebAssembly modules (`duckdb-wasm`, `onnxruntime-web`).
+- **Frontend Core**: High-performance React 19 + Cesium 3D geospatial engine, bundled with Vite and WebAssembly modules (`onnxruntime-web`).
 - **Backend Core**: Self-contained Node 20 ESM bundle (`dist-server/server.mjs`) compiled via `esbuild`. All 150 analytical equation models, WebSocket streams, and REST endpoints are packaged directly into the application's native bundle resources.
 - **AppData Directory Isolation**: User credentials (AES-256-GCM encrypted) and SQLite state (`realtime.db`) are stored in OS application data directories:
   - **macOS**: `~/Library/Application Support/Terranoetis/`

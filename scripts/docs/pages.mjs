@@ -466,7 +466,7 @@ export const CORE_PAGES = [
       { kind: 'list', items: [
         'Chat (11 components: SSE streaming, tool approval cards, model tier selector, study-area prompts)',
         'Cockpit (memory graph, settings: cognitive bias, alerts, providers, privacy)',
-        'Trackers (aviation, satellite TLE), DuckDB-WASM analytics workbench (7 live layers), Market Intel (8 tabs)',
+        'Trackers (aviation, satellite TLE), Market Intel (8 tabs)',
         'Scenario studio (editor, gallery, cinematic director, per-hazard visualizers; origin points pinned by globe click)',
         'Collaboration presence (cursors/typing) over /ws/agent; realtime voice via /ws/voice',
       ]},

@@ -163,7 +163,6 @@ const LazyLaunchReplayPanel = lazy(() => import('@/components/LaunchReplayPanel'
 const LazyRadioTunerPanel = lazy(() => import('@/components/RadioTunerPanel').then(m => ({ default: m.RadioTunerPanel })));
 const LazySatelliteImageryPanel = lazy(() => import('@/components/ui/SatelliteImageryPanel'));
 const LazySatelliteTrackerPanel = lazy(() => import('@/components/trackers/SatelliteTrackerPanel').then(m => ({ default: m.SatelliteTrackerPanel })));
-const LazyDuckdbAnalyticsPanel = lazy(() => import('@/components/DuckdbAnalyticsPanel').then(m => ({ default: m.DuckdbAnalyticsPanel })));
 
 /** Suspense boundary for the lazy panels — a silent null keeps the layout
  *  stable while a panel chunk loads (panels render after user interaction,
@@ -1466,8 +1465,6 @@ export default function App() {
   const [showRadioTuner, setShowRadioTuner] = useState(false);
   const radioWaveRef = useRef<{ handle: RadioWaveHandle; lat: number; lon: number } | null>(null);
   const radioLayerEnabledByTunerRef = useRef(false);
-  const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
-  const [duckdbRestoreKey, setDuckdbRestoreKey] = useState(0);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
   const [sensorStyle, setSensorStyle] = useState<SensorStyleId>('normal');
   const sensorStylesRef = useRef<SensorStyles | null>(null);
@@ -11901,15 +11898,6 @@ case 'openPanel':
         >
           <Radio size={14} />
         </button>
-        {/* DuckDB Spatial SQL — query live data layers with real SQL */}
-        <button
-          className={`btn-icon monitor-btn ${showDuckdbAnalytics ? 'active' : ''}`}
-          onClick={() => { setShowDuckdbAnalytics(true); setDuckdbRestoreKey(k => k + 1); focusPanel('analytics'); }}
-          title="DuckDB Spatial SQL — run SQL over live data layers (earthquakes, flights, satellites, radio, weather)"
-          style={{ color: showDuckdbAnalytics ? '#34d399' : undefined }}
-        >
-          <Database size={14} />
-        </button>
         </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
@@ -12905,9 +12893,6 @@ case 'openPanel':
           if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 350000), duration: 1.0 });
         }}
       /></PanelSuspense>
-
-      {/* DuckDB Spatial SQL Analytics */}
-      {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} restoreKey={duckdbRestoreKey} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} initialToolId={pendingAnalyticalToolId} onInitialToolConsumed={() => setPendingAnalyticalToolId(null)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />

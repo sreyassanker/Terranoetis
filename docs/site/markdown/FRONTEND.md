@@ -64,7 +64,6 @@ Defined in `src/main.tsx`:
 | MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates |
 | LaunchReplayPanel | 233 | Scrubbable rocket ascent replay (Launch Library 2) |
 | RadioTunerPanel | 206 | Analog tuner over 500 geolocated radio stations, stream playback |
-| DuckdbAnalyticsPanel | — | In-browser DuckDB-WASM SQL workbench over 7 live data layers |
 | FirstRunCard | 113 | First-load "stage a mission" card |
 | CameraControls | 332 | Zoom slider + log-scale height + fly-to-target |
 | ForkPanel | 68 | Parallel realities: pause/resume/terminate, divergence score |
@@ -237,4 +236,4 @@ Scenario types and colors:
 | `userPrefStore` (Zustand) | User location + timezone preference (persisted, applied globally) |
 | `useChatSelectors` | Derived selectors |
 | `src/data/` | Analytical models catalog, land cover classes |
-| `src/lib/` | API client, chat store, `formatTime.ts` (timezone-aware formatting), DuckDB, PDF |
+| `src/lib/` | API client, chat store, `formatTime.ts` (timezone-aware formatting), PDF |
