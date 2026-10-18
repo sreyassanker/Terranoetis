@@ -64,7 +64,7 @@ import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 import { HumanOverrideBanner } from '@/components/explainability/index';
 
-import { MultiHazardPanel, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
+import { MultiHazardPanel, MemoryExplorer } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
@@ -1597,7 +1597,6 @@ export default function App() {
   const offline = useOfflineChat();
   const [showMultiHazardPanel, setShowMultiHazardPanel] = useState(false);
   const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
   const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null } | null>(null);
@@ -9286,8 +9285,6 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         return apply(setShowMultiHazardPanel, showMultiHazardPanel, 'multihazard');
       case 'memory': case 'memory-explorer':
         return apply(setShowMemoryExplorer, showMemoryExplorer, 'memory');
-      case 'settings': case 'settings-panel':
-        return apply(setShowSettings, showSettings, 'settings');
       case 'study-area': case 'study_area':
         return apply(setShowStudyArea, showStudyArea, 'study-area');
       case 'api-vault': case 'api_vault': case 'keys':
@@ -9339,7 +9336,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   // Register a chat-resolved boundary as the app-wide ACTIVE study area so
   // every study-area consumer (Analytics Workbench, Land Cover Mapper, later
@@ -11499,10 +11496,9 @@ case 'openPanel':
           <TopbarMenu
             id="system" title="System" icon={<Cog size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={showSettings || showPerfMonitor}
+            active={showPerfMonitor}
             items={[
               { label: 'API Configuration', icon: <Key size={15} />, onClick: () => setShowApiVault(true) },
-              { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => { setShowSettings(p => !p); focusPanel('settings'); } },
               { label: 'Performance Monitor', icon: <Activity size={15} />, active: showPerfMonitor, onClick: () => setShowPerfMonitor(p => !p) },
             ]}
           />
@@ -12822,13 +12818,6 @@ case 'openPanel':
           overflow: 'hidden',
         }}>
           <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
-        </div>
-      )}
-
-      {/* Settings Panel */}
-      {showSettings && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('settings', 110), width: 360, maxHeight: 'calc(100vh - 160px)' }}>
-          <SettingsPanel onClose={() => setShowSettings(false)} />
         </div>
       )}
 

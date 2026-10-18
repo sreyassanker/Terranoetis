@@ -74,7 +74,6 @@ Defined in `src/main.tsx`:
 | Component | Lines | Description |
 |---|---|---|
 | MemoryExplorer | 244 | SVG knowledge graph (circular layout) |
-| SettingsPanel | 220 | 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy |
 | MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface |
 
 ### Chat (`src/components/chat/`, 11 components)
