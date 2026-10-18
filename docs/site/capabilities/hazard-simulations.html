@@ -131,7 +131,7 @@
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Bridge</th><th scope="col">Source</th><th scope="col">Feeds</th></tr></thead>
 <tbody>
-<tr><td>Terrain</td><td>Cesium globe sampling (256² on the run path; median-fill, retry ×3; null → kernel synthetic)</td><td><cite class="src">src/components/scenarios/studyAreaTerrain.ts:5-149</cite> <cite class="src">src/lib/terrainSampler.ts:3-31</cite></td></tr>
+<tr><td>Terrain</td><td>Cesium globe sampling (256² on the run path; median-fill, retry ×3; null → kernel synthetic)</td><td><cite class="src">src/components/scenarios/studyAreaTerrain.ts:5-149</cite></td></tr>
 <tr><td>Bathymetry</td><td>GEBCO 2020 via api.opentopodata.org (64² sample, uint16-quantized)</td><td><cite class="src">server/kaggle/bathymetry.ts:10-40</cite></td></tr>
 <tr><td>Land cover</td><td>ESA WorldCover v200 → per-cell Manning n</td><td><cite class="src">server/kaggle/landCover.ts:module</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:61-84</cite></td></tr>
 <tr><td>Wind profiles</td><td>ERA5-derived (volcano ash bins)</td><td><cite class="src">server/kaggle/era5Profile.ts:module</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:300-330</cite></td></tr>

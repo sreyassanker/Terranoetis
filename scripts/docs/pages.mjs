@@ -232,7 +232,7 @@ export const CORE_PAGES = [
       ]},
       { kind: 'h2', id: 'data-bridges', title: 'Real-data bridges feeding kernels' },
       { kind: 'table', cols: ['Bridge', 'Source', 'Feeds'], rows: [
-        ['Terrain', 'Cesium globe sampling (256² on the run path; median-fill, retry ×3; null → kernel synthetic)', src('src/components/scenarios/studyAreaTerrain.ts', '5-149') + ' ' + src('src/lib/terrainSampler.ts', '3-31')],
+        ['Terrain', 'Cesium globe sampling (256² on the run path; median-fill, retry ×3; null → kernel synthetic)', src('src/components/scenarios/studyAreaTerrain.ts', '5-149')],
         ['Bathymetry', 'GEBCO 2020 via api.opentopodata.org (64² sample, uint16-quantized)', src('server/kaggle/bathymetry.ts', '10-40')],
         ['Land cover', 'ESA WorldCover v200 → per-cell Manning n', src('server/kaggle/landCover.ts', 'module') + ' ' + src('kaggle-kernels/flood-sim/main.py', '61-84')],
         ['Wind profiles', 'ERA5-derived (volcano ash bins)', src('server/kaggle/era5Profile.ts', 'module') + ' ' + src('kaggle-kernels/volcano-sim/main.py', '300-330')],

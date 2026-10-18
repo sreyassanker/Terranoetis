@@ -104,8 +104,7 @@ Defined in `src/main.tsx`:
 | `HurricaneVisualizer.tsx`, `WildfireVisualizer.tsx`, `LandslideVisualizer.tsx`, `VolcanicVisualizer.tsx`, `FloodWaterSurface.tsx` | Per-hazard scenario visualizers |
 | `ScenarioEditor.tsx` | Parameter forms for 7 disaster types, with globe-pinned origin points (vent / epicentre / hurricane landfall) |
 | `ScenarioGallery.tsx` | Sortable/filterable grid, search |
-| `hazardRenderers.ts` | Renders 6 shape types on Cesium (polygon, cylinder, corridor, ellipse, polyline, ring) |
-| `SpatialSketching.tsx`, `TimelineControls.tsx`, `ScenarioThumbnail.tsx` | Supporting visualizers |
+| `SpatialSketching.tsx`, `ScenarioThumbnail.tsx` | Supporting visualizers |
 
 Scenario types and colors:
 
@@ -169,7 +168,6 @@ Scenario types and colors:
 | `scenarioEngine.ts` | What-if scenario definition/rollout/diff |
 | `causalGraph.ts` | Noisy-OR causal Bayesian network |
 | `blackboard.ts` | Blackboard pattern for probability writing |
-| `advancedWaterShader.ts` | Custom water shader |
 | `ghostEntity.ts` / `ghostProtocol.ts` | Ghost entity rendering + protocol |
 | `entropyHalo.ts` | Entropy halo visualization |
 | `forkRenderer.ts` | Parallel reality fork rendering |
