@@ -12,6 +12,7 @@ import type {
 import { PEER_REVIEWED_REFERENCE_SITES } from './referenceSites';
 import { acquireLiveSensoryTelemetry } from './dataAcquisition';
 import { inferBiomeFromCoordinates } from './biomeInference';
+import { extractAutonomousAnomalies } from './autonomousDetection';
 
 export { inferBiomeFromCoordinates };
 
@@ -115,40 +116,8 @@ export class ArchaeologyEngine {
       }
     }
 
-    // 4. Determine status and generate scientifically honest reporting
-    let status: ScanStatus = 'NO_ANOMALY_DETECTED';
-    let statusMessage = '';
-
-    const pixCount = liveSensors.sentinel2?.pixelStatistics?.validPixelsAnalyzed;
-    const pixStr = pixCount ? ` [${pixCount.toLocaleString()} Copernicus optical pixels evaluated via serverless COG range requests]` : '';
-
-    if (anomalies.length > 0) {
-      status = 'ANOMALY_CONFIRMED';
-      const a = anomalies[0];
-      statusMessage = `Confirmed archaeological anomaly: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence). Cross-referenced with live ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR radar and ${liveSensors.dem?.dataset || 'SRTM DEM'} topography${pixStr}.`;
-    } else {
-      status = 'NO_ANOMALY_DETECTED';
-      const s2Info = liveSensors.sentinel2
-        ? `${liveSensors.sentinel2.platform} (cloud ${liveSensors.sentinel2.cloudCoverPercent}%)`
-        : 'S2 optical unavailable';
-      const s1Info = liveSensors.sentinel1
-        ? `${liveSensors.sentinel1.platform} ${liveSensors.sentinel1.polarizations.join('/')}`
-        : 'S1 SAR unavailable';
-      const demInfo = liveSensors.dem
-        ? `SRTM elevation ${liveSensors.dem.minElevationM}m–${liveSensors.dem.maxElevationM}m, slope ${liveSensors.dem.slopeDegrees}°`
-        : 'DEM unavailable';
-
-      statusMessage = `Multi-sensor prospection completed across ${areaKm2} km² [${s2Info}; ${s1Info}; ${demInfo}${pixStr}]. Terrain micro-relief and radar backscatter across this area do not show coherent orthogonal foundations, ditch enclosures, or paleochannel signatures above the consensus threshold. No archaeological anomalies detected.`;
-    }
-
-    const highConfidenceCount = anomalies.filter(a => a.confidenceScore >= 0.95).length;
-    const overallConfidence =
-      anomalies.length > 0
-        ? parseFloat((anomalies.reduce((acc, a) => acc + a.confidenceScore, 0) / anomalies.length).toFixed(4))
-        : 0;
-
-    // 5. Generate high-density Spatial Evaluation Grid for IDW Surface Interpolation (1,024 points, 32x32 resolution)
-    // Truly derived from the real physical elevation matrix (SRTM 30m) and SoilGrids telemetry
+    // 4. Generate high-density Spatial Evaluation Grid for IDW Surface Interpolation (1,024 points, 32x32 resolution)
+    // Truly derived from the real physical elevation matrix (SRTM 30m) and sensor telemetry
     const gridCols = 32;
     const gridRows = 32;
     const dLat = (studyArea.latMax - studyArea.latMin) / Math.max(1, gridRows - 1);
@@ -196,35 +165,17 @@ export class ArchaeologyEngine {
 
         // Base terrain response: directly scales with actual elevation variance and micro-relief
         const reliefContrast = Math.min(1.0, Math.abs(microReliefM) / (3.0 * stdDevElev));
-        let pointValue = 0.08 + 0.15 * reliefContrast;
+        const pointValue = 0.08 + 0.15 * reliefContrast;
 
         // Physical sensor telemetry at this point
-        let opticalDelta = 0.02;
-        let radarDb = (liveSensors.soil ? 3.0 + 0.1 * (liveSensors.soil.clayPercent / 10) : -16.0);
-        let slope = liveSensors.dem?.slopeDegrees ?? 1.5;
-
-        // If an archaeological anomaly is confirmed by multi-sensor consensus in this region:
-        if (anomalies.length > 0) {
-          for (const a of anomalies) {
-            const distM = calculateHaversineDistanceMeters(lat, lon, a.centroid.lat, a.centroid.lon);
-            const radiusM = Math.max(350, Math.sqrt(a.areaM2 || 10000) * 1.5);
-            if (distM < radiusM) {
-              const proximityWeight = Math.max(0, 1.0 - distM / radiusM);
-              pointValue = Math.max(pointValue, a.confidenceScore * (0.65 + 0.35 * proximityWeight));
-              opticalDelta = Math.max(opticalDelta, a.evidence.spectralContrastDelta * proximityWeight);
-              radarDb = Math.max(radarDb, a.evidence.radarBackscatterRatioDb);
-              slope = a.evidence.slopeGradientDegrees;
-            }
-          }
-        }
-
-        // Clamp pointValue to 0.0 - 1.0
-        pointValue = Math.max(0.0, Math.min(1.0, parseFloat(pointValue.toFixed(4))));
+        const opticalDelta = 0.02;
+        const radarDb = (liveSensors.soil ? 3.0 + 0.1 * (liveSensors.soil.clayPercent / 10) : -16.0);
+        const slope = liveSensors.dem?.slopeDegrees ?? 1.5;
 
         points.push({
           lat: parseFloat(lat.toFixed(6)),
           lon: parseFloat(lon.toFixed(6)),
-          value: pointValue,
+          value: parseFloat(pointValue.toFixed(4)),
           confidence: parseFloat(baseCertainty.toFixed(3)),
           opticalDelta: parseFloat(opticalDelta.toFixed(3)),
           radarDb: parseFloat(radarDb.toFixed(1)),
@@ -232,6 +183,80 @@ export class ArchaeologyEngine {
         });
       }
     }
+
+    // 5. Autonomous Multi-Sensor Discovery:
+    // If no cataloged benchmark site was matched, evaluate the physical terrain autonomously
+    if (anomalies.length === 0) {
+      const autonomousDiscoveries = extractAutonomousAnomalies(
+        studyArea,
+        biome,
+        points,
+        gridCols,
+        gridRows,
+        liveSensors,
+      );
+      if (autonomousDiscoveries.length > 0) {
+        anomalies.push(...autonomousDiscoveries);
+      }
+    }
+
+    // 6. If anomalies are confirmed (benchmark or autonomous), apply spatial proximity weighting
+    if (anomalies.length > 0) {
+      for (const pt of points) {
+        for (const a of anomalies) {
+          const distM = calculateHaversineDistanceMeters(pt.lat, pt.lon, a.centroid.lat, a.centroid.lon);
+          const radiusM = Math.max(350, Math.sqrt(a.areaM2 || 10000) * 1.5);
+          if (distM < radiusM) {
+            const proximityWeight = Math.max(0, 1.0 - distM / radiusM);
+            pt.value = Math.max(pt.value, a.confidenceScore * (0.65 + 0.35 * proximityWeight));
+            pt.opticalDelta = Math.max(pt.opticalDelta, a.evidence.spectralContrastDelta * proximityWeight);
+            pt.radarDb = Math.max(pt.radarDb, a.evidence.radarBackscatterRatioDb);
+            pt.slopeDegrees = a.evidence.slopeGradientDegrees;
+          }
+        }
+        pt.value = Math.max(0.0, Math.min(1.0, parseFloat(pt.value.toFixed(4))));
+        pt.opticalDelta = parseFloat(pt.opticalDelta.toFixed(3));
+        pt.radarDb = parseFloat(pt.radarDb.toFixed(1));
+        pt.slopeDegrees = parseFloat(pt.slopeDegrees.toFixed(1));
+      }
+    }
+
+    // 7. Determine status and generate scientifically honest reporting
+    let status: ScanStatus = 'NO_ANOMALY_DETECTED';
+    let statusMessage = '';
+
+    const pixCount = liveSensors.sentinel2?.pixelStatistics?.validPixelsAnalyzed;
+    const pixStr = pixCount ? ` [${pixCount.toLocaleString()} Copernicus optical pixels evaluated via serverless COG range requests]` : '';
+
+    if (anomalies.length > 0) {
+      status = 'ANOMALY_CONFIRMED';
+      const a = anomalies[0];
+      if (a.id.startsWith('auto_')) {
+        const sign = a.evidence.microReliefDepthMeters >= 0 ? '+' : '';
+        statusMessage = `Autonomous multi-sensor anomaly confirmed: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence, ${Math.round(a.areaM2 || 0).toLocaleString()} m²). Micro-relief TPI (${sign}${a.evidence.microReliefDepthMeters.toFixed(2)}m) and spatial DBSCAN clustering indicate coherent anthropogenic morphology cross-referenced with live ${liveSensors.dem?.dataset || 'SRTM DEM'} and ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR${pixStr}.`;
+      } else {
+        statusMessage = `Confirmed archaeological anomaly: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence). Cross-referenced with live ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR radar and ${liveSensors.dem?.dataset || 'SRTM DEM'} topography${pixStr}.`;
+      }
+    } else {
+      status = 'NO_ANOMALY_DETECTED';
+      const s2Info = liveSensors.sentinel2
+        ? `${liveSensors.sentinel2.platform} (cloud ${liveSensors.sentinel2.cloudCoverPercent}%)`
+        : 'S2 optical unavailable';
+      const s1Info = liveSensors.sentinel1
+        ? `${liveSensors.sentinel1.platform} ${liveSensors.sentinel1.polarizations.join('/')}`
+        : 'S1 SAR unavailable';
+      const demInfo = liveSensors.dem
+        ? `SRTM elevation ${liveSensors.dem.minElevationM}m–${liveSensors.dem.maxElevationM}m, slope ${liveSensors.dem.slopeDegrees}°`
+        : 'DEM unavailable';
+
+      statusMessage = `Multi-sensor prospection completed across ${areaKm2} km² [${s2Info}; ${s1Info}; ${demInfo}${pixStr}]. Terrain micro-relief (TPI) and radar backscatter across this area do not show coherent orthogonal foundations, ditch enclosures, or tell mound signatures above the consensus threshold. No archaeological anomalies detected.`;
+    }
+
+    const highConfidenceCount = anomalies.filter(a => a.confidenceScore >= 0.95).length;
+    const overallConfidence =
+      anomalies.length > 0
+        ? parseFloat((anomalies.reduce((acc, a) => acc + a.confidenceScore, 0) / anomalies.length).toFixed(4))
+        : 0;
 
     return {
       scanId: `arch_scan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,

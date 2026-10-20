@@ -10,6 +10,8 @@ import {
   calculateBboxIoU,
 } from '../../archaeology/validationBenchmark';
 
+import { extractAutonomousAnomalies } from '../../archaeology/autonomousDetection';
+
 describe('Space Archaeology & Validation Engine', () => {
   it('has 5 peer-reviewed reference sites with valid coordinates and citations', () => {
     expect(PEER_REVIEWED_REFERENCE_SITES.length).toBe(5);
@@ -153,5 +155,91 @@ describe('Space Archaeology & Validation Engine', () => {
     expect(scan.liveSensors.dem).toBeDefined();
     expect(scan.liveSensors.dem!.pointsSampled).toBeGreaterThanOrEqual(9);
     expect(scan.liveSensors.dem!.meanElevationM).toBeGreaterThanOrEqual(0);
+  });
+
+  it('autonomously detects uncataloged archaeological tell mound features with dynamic multi-modal confidence', () => {
+    const gridCols = 32;
+    const gridRows = 32;
+    const studyArea = {
+      latMin: 35.1000,
+      latMax: 35.1200,
+      lonMin: 42.1000,
+      lonMax: 42.1200,
+    };
+
+    const gridPoints: any[] = [];
+    for (let r = 0; r < gridRows; r++) {
+      const lat = studyArea.latMin + (r / 31) * 0.02;
+      for (let c = 0; c < gridCols; c++) {
+        const lon = studyArea.lonMin + (c / 31) * 0.02;
+        gridPoints.push({
+          lat,
+          lon,
+          value: 0.1,
+          confidence: 0.95,
+          opticalDelta: 0.02,
+          radarDb: -16.0,
+          slopeDegrees: 1.5,
+        });
+      }
+    }
+
+    // 5x5 DEM grid with a pronounced 4.5m tell mound in center
+    const demGrid = [
+      120.0, 120.1, 120.0, 119.9, 120.0,
+      120.1, 121.0, 122.5, 121.2, 120.1,
+      120.0, 122.2, 124.5, 122.4, 120.0,
+      119.9, 121.1, 122.6, 121.0, 119.9,
+      120.0, 120.0, 120.1, 120.0, 120.0,
+    ];
+
+    const liveSensors: any = {
+      dem: {
+        dataset: 'SRTM GL1 30m',
+        minElevationM: 119.9,
+        maxElevationM: 124.5,
+        meanElevationM: 120.8,
+        elevationStdDevM: 1.1,
+        slopeDegrees: 2.5,
+        elevationGrid: demGrid,
+        gridRows: 5,
+        gridCols: 5,
+      },
+      sentinel2: {
+        platform: 'Sentinel-2B',
+        cloudCoverPercent: 2.0,
+        pixelStatistics: {
+          computedNdre: 0.18, // Significant crop mark contrast
+        },
+      },
+      sentinel1: {
+        platform: 'Sentinel-1A',
+        polarizations: ['VV', 'VH'],
+      },
+      soil: {
+        clayPercent: 42,
+        sandPercent: 30,
+      },
+    };
+
+    const discoveries = extractAutonomousAnomalies(
+      studyArea,
+      'steppe_grassland',
+      gridPoints,
+      gridCols,
+      gridRows,
+      liveSensors
+    );
+
+    expect(discoveries.length).toBeGreaterThanOrEqual(1);
+    const tell = discoveries[0];
+    expect(tell.name).toContain('Autonomous Discovery');
+    expect(tell.confidenceScore).toBeGreaterThanOrEqual(0.76);
+    expect(tell.confidenceScore).toBeLessThanOrEqual(0.95);
+    expect(tell.areaM2).toBeGreaterThanOrEqual(500);
+    expect(tell.polygonCoordinates.length).toBeGreaterThanOrEqual(4);
+    expect(tell.evidence.microReliefDepthMeters).toBeGreaterThan(0.5);
+    expect(tell.centroid.lat).toBeCloseTo(35.11, 1);
+    expect(tell.centroid.lon).toBeCloseTo(42.11, 1);
   });
 });
