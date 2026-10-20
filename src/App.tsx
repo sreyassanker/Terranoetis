@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -154,6 +154,7 @@ import { isDesktopApp, DESKTOP_API_SERVER, openInBrowser, getYoutubeEmbedUrl } f
    ═════════════════════════════════════════════════════════════════ */
 
 const LazyAviationTrackerPanel = lazy(() => import('@/components/trackers/AviationTrackerPanel').then(m => ({ default: m.AviationTrackerPanel })));
+const LazyArchaeologyDiscoveryPanel = lazy(() => import('@/components/archaeology/ArchaeologyDiscoveryPanel').then(m => ({ default: m.ArchaeologyDiscoveryPanel })));
 const LazyChatHistoryPanel = lazy(() => import('@/components/chat/ChatHistoryPanel').then(m => ({ default: m.ChatHistoryPanel })));
 const LazyForkPanel = lazy(() => import('@/components/ForkPanel').then(m => ({ default: m.ForkPanel })));
 const LazyMarketIntelPanel = lazy(() => import('@/components/MarketIntelPanel').then(m => ({ default: m.MarketIntelPanel })));
@@ -1477,6 +1478,7 @@ export default function App() {
   const cinematicCameraRef = useRef<CinematicCamera | null>(null);
   const [showFirstRun, setShowFirstRun] = useState<boolean>(() => isFirstRun());
   const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
+  const [showArchaeologyPanel, setShowArchaeologyPanel] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // CMD+K keyboard shortcut
   useEffect(() => {
@@ -9277,6 +9279,8 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         return apply(setShowAviationTracker, showAviationTracker, 'aviation-tracker');
       case 'land-cover': case 'land_cover': case 'land-cover-mapper':
         return apply(setShowLandCoverMapper, showLandCoverMapper, 'land-cover');
+      case 'archaeology': case 'space-archaeology': case 'space_archaeology': case 'discovery':
+        return apply(setShowArchaeologyPanel, showArchaeologyPanel, 'archaeology');
       case 'market-intel': case 'market_intel': case 'intelligence': case 'pulse': case 'intel':
         return apply(setShowMarketIntelPanel, showMarketIntelPanel, 'market-intel');
       case 'intel-feed': case 'intel_feed': case 'feed':
@@ -9336,7 +9340,11 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showArchaeologyPanel, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowArchaeologyPanel, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+
+  useEffect(() => {
+    (window as any).__applyPanelCommand__ = applyPanelCommand;
+  }, [applyPanelCommand]);
 
   // Register a chat-resolved boundary as the app-wide ACTIVE study area so
   // every study-area consumer (Analytics Workbench, Land Cover Mapper, later
@@ -11457,6 +11465,23 @@ case 'openPanel':
           />
 
           <TopbarMenu
+            id="exploration" title="Exploration" icon={<Compass size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={showArchaeologyPanel}
+            items={[
+              {
+                label: 'Space Archaeology',
+                icon: <Landmark size={15} />,
+                active: showArchaeologyPanel,
+                onClick: () => {
+                  setShowArchaeologyPanel(p => !p);
+                  focusPanel('archaeology');
+                },
+              },
+            ]}
+          />
+
+          <TopbarMenu
             id="scenarios" title="Scenarios" icon={<Flame size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
             active={showScenarioGallery || showScenarioEditor || showCinematicDirector || showSpatialSketching}
@@ -12897,6 +12922,21 @@ case 'openPanel':
         onClearResult={handleClearToolResult}
         zIndex={getPanelZIndex('land-cover')}
       /></PanelSuspense>
+
+      {/* Space Archaeology & Discovery Panel */}
+      {showArchaeologyPanel && (
+        <PanelSuspense>
+          <LazyArchaeologyDiscoveryPanel
+            viewer={viewerRef.current}
+            show={showArchaeologyPanel}
+            onClose={() => setShowArchaeologyPanel(false)}
+            activeStudyAreaBbox={activeBbox}
+            studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name}
+            onOpenStudyAreaPanel={() => setShowStudyArea(true)}
+            zIndex={getPanelZIndex('archaeology', 115)}
+          />
+        </PanelSuspense>
+      )}
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette

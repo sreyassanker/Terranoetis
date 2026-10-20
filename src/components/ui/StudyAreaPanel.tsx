@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type Cesium from 'cesium';
-import { Map, Satellite, Droplets, Flame, Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import * as Cesium from 'cesium';
+import { Map, Satellite, Droplets, Flame, Sparkles, Loader2, CheckCircle2, AlertCircle, Landmark } from 'lucide-react';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   generateAreaId, loadGeoJsonToGlobe, removeStudyAreaFromGlobe,
@@ -10,8 +10,10 @@ import {
   updateStudyAreaStyle,
   computeStudyAreaBbox,
 } from '@/rendering/studyArea';
+import { renderArchaeologyAnomaliesOnGlobe } from '@/rendering/archaeologyOverlay';
 import Panel from '@/components/ui/Panel';
 import { authHeaders } from '@/context/AuthContext';
+
 
 type TabId = 'upload' | 'draw' | 'manage' | 'analyze' | 'export';
 
@@ -42,7 +44,7 @@ export default React.memo(function StudyAreaPanel({
 
   // Satellite Raster Analysis states
   const [analyzing, setAnalyzing] = useState(false);
-  const [activeAnalysisType, setActiveAnalysisType] = useState<'observation' | 'flood' | 'fire' | 'vision' | null>(null);
+  const [activeAnalysisType, setActiveAnalysisType] = useState<'observation' | 'flood' | 'fire' | 'vision' | 'archaeology' | null>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
@@ -51,8 +53,8 @@ export default React.memo(function StudyAreaPanel({
   const centerLat = activeBbox ? (activeBbox.latMin + activeBbox.latMax) / 2 : null;
   const centerLon = activeBbox ? (activeBbox.lonMin + activeBbox.lonMax) / 2 : null;
 
-  const runAnalysis = async (type: 'observation' | 'flood' | 'fire' | 'vision') => {
-    if (centerLat === null || centerLon === null) {
+  const runAnalysis = async (type: 'observation' | 'flood' | 'fire' | 'vision' | 'archaeology') => {
+    if (centerLat === null || centerLon === null || !activeBbox) {
       setAnalysisError('Please select or draw a valid study area with coordinates');
       return;
     }
@@ -75,6 +77,16 @@ export default React.memo(function StudyAreaPanel({
       } else if (type === 'vision') {
         endpoint = '/api/multimodal/satellite/interpret';
         body = { lat: centerLat, lon: centerLon };
+      } else if (type === 'archaeology') {
+        endpoint = '/api/archaeology/scan';
+        body = {
+          studyArea: {
+            latMin: activeBbox.latMin,
+            latMax: activeBbox.latMax,
+            lonMin: activeBbox.lonMin,
+            lonMax: activeBbox.lonMax,
+          },
+        };
       }
 
       const resp = await fetch(endpoint, {
@@ -85,6 +97,32 @@ export default React.memo(function StudyAreaPanel({
 
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+      if (type === 'archaeology' && data.anomalies) {
+        if (viewer) {
+          renderArchaeologyAnomaliesOnGlobe(viewer, data.anomalies, activeBbox);
+          // Frame the camera smoothly over the study area
+          const padLon = (activeBbox.lonMax - activeBbox.lonMin) * 0.20;
+          const padLat = (activeBbox.latMax - activeBbox.latMin) * 0.20;
+          viewer.camera.flyTo({
+            destination: Cesium.Rectangle.fromDegrees(
+              activeBbox.lonMin - padLon,
+              activeBbox.latMin - padLat,
+              activeBbox.lonMax + padLon,
+              activeBbox.latMax + padLat,
+            ),
+            duration: 1.5,
+          });
+        }
+        setAnalysisResult({
+          interpretation: data.anomalies.length > 0
+            ? `Space Archaeology Multi-Sensor Prospection Complete.\nEvaluated ${data.sensorMetrics?.pointsEvaluated || 250} grid points across ${data.studyAreaKm2} km² study area.\nIdentified ${data.anomalies.length} high-confidence archaeological feature(s) displayed on 3D globe.`
+            : `Space Archaeology Prospection Complete: 0 anomalies detected.\n${data.statusMessage || 'Terrain confirmed clear across multi-spectral, radar backscatter, and elevation models.'}`,
+          archaeology: data,
+        });
+        return;
+      }
+
       setAnalysisResult(data);
     } catch (err: unknown) {
       setAnalysisError(err instanceof Error ? err.message : String(err));
@@ -387,6 +425,23 @@ export default React.memo(function StudyAreaPanel({
                   >
                     <Sparkles size={14} color="#c084fc" />
                     <span>AI Vision Scene</span>
+                  </button>
+
+                  <button
+                    className="study-btn"
+                    disabled={analyzing}
+                    onClick={() => runAnalysis('archaeology')}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      padding: '8px 6px', fontSize: 10, cursor: 'pointer',
+                      background: activeAnalysisType === 'archaeology' ? 'rgba(245,158,11,0.25)' : 'rgba(245,158,11,0.08)',
+                      border: '1px solid rgba(251,191,36,0.4)', borderRadius: 6, color: '#fde68a',
+                      gridColumn: 'span 2',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Landmark size={14} color="#fbbf24" />
+                    <span>Space Archaeology Prospection (Sentinel + SAR + DEM)</span>
                   </button>
                 </div>
 

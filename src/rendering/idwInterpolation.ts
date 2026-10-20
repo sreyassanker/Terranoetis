@@ -209,6 +209,96 @@ export function interpolateIDW(
   return { data, variance, width: gridWidth, height: gridHeight, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, valueMin, valueMax };
 }
 
+/**
+ * Continuous 2D Bilinear Resampling for structured matrix grids (e.g. Archaeology Spatial Grids).
+ * Completely eliminates the classical Inverse Distance Weighting (IDW) "bull's-eye" / polka-dot
+ * distance singularity artifacts ($w = 1/d^2$) by performing smooth, continuous sub-pixel
+ * matrix surface interpolation across latitude and longitude.
+ */
+export function interpolateStructuredGrid(
+  points: { lat: number; lon: number; value: number }[],
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+  srcCols: number,
+  srcRows: number,
+  targetWidth: number = 128,
+  targetHeight: number = 128,
+): InterpGrid {
+  const data = new Float32Array(targetWidth * targetHeight);
+  const variance = new Float32Array(targetWidth * targetHeight);
+
+  if (!points || points.length === 0 || srcCols < 2 || srcRows < 2) {
+    data.fill(0.08);
+    return {
+      data,
+      variance,
+      width: targetWidth,
+      height: targetHeight,
+      latMin: bbox.latMin,
+      latMax: bbox.latMax,
+      lonMin: bbox.lonMin,
+      lonMax: bbox.lonMax,
+      valueMin: 0.0,
+      valueMax: 1.0,
+    };
+  }
+
+  const getSrcVal = (r: number, c: number): number => {
+    const clampedR = Math.max(0, Math.min(srcRows - 1, r));
+    const clampedC = Math.max(0, Math.min(srcCols - 1, c));
+    const idx = clampedR * srcCols + clampedC;
+    return points[idx]?.value ?? 0.08;
+  };
+
+  let valueMin = Infinity;
+  let valueMax = -Infinity;
+
+  for (let tr = 0; tr < targetHeight; tr++) {
+    // Relative coordinate in target grid: 0 (south = latMin) to 1 (north = latMax)
+    const v = tr / Math.max(1, targetHeight - 1);
+    const srcR = v * (srcRows - 1);
+    const r0 = Math.floor(srcR);
+    const r1 = Math.min(srcRows - 1, r0 + 1);
+    const fr = srcR - r0;
+
+    for (let tc = 0; tc < targetWidth; tc++) {
+      // Relative coordinate: 0 (west = lonMin) to 1 (east = lonMax)
+      const u = tc / Math.max(1, targetWidth - 1);
+      const srcC = u * (srcCols - 1);
+      const c0 = Math.floor(srcC);
+      const c1 = Math.min(srcCols - 1, c0 + 1);
+      const fc = srcC - c0;
+
+      const v00 = getSrcVal(r0, c0);
+      const v10 = getSrcVal(r0, c1);
+      const v01 = getSrcVal(r1, c0);
+      const v11 = getSrcVal(r1, c1);
+
+      // Continuous 2D bilinear interpolation across the 4 surrounding physical samples
+      const top = v00 * (1 - fc) + v10 * fc;
+      const bot = v01 * (1 - fc) + v11 * fc;
+      const val = top * (1 - fr) + bot * fr;
+
+      const idx = tr * targetWidth + tc;
+      data[idx] = val;
+      if (val < valueMin) valueMin = val;
+      if (val > valueMax) valueMax = val;
+    }
+  }
+
+  return {
+    data,
+    variance,
+    width: targetWidth,
+    height: targetHeight,
+    latMin: bbox.latMin,
+    latMax: bbox.latMax,
+    lonMin: bbox.lonMin,
+    lonMax: bbox.lonMax,
+    valueMin: Number.isFinite(valueMin) ? valueMin : 0.0,
+    valueMax: Number.isFinite(valueMax) ? valueMax : 1.0,
+  };
+}
+
 /** Median nearest-neighbour spacing (meters) among the sample points — the
  *  characteristic measurement spacing. Used to size the IDW influence reach:
  *  the surface may extend only ~half a sample-spacing beyond the last real
@@ -284,7 +374,7 @@ function bilinearAt(grid: InterpGrid, gx: number, gy: number): number {
 
 export function renderGridToCanvas(
   grid: InterpGrid,
-  colorStops: { stop: number; r: number; g: number; b: number }[],
+  colorStops: { stop: number; r: number; g: number; b: number; a?: number }[],
   maskPolygon?: Array<Array<[number, number]>>,
   upscaleOverride?: number,
 ): HTMLCanvasElement {
@@ -339,25 +429,30 @@ export function renderGridToCanvas(
         continue;
       }
       const t = (v - grid.valueMin) / range;
-      let r = 0, g = 0, b = 0;
+      let r = 0, g = 0, b = 0, a = 200;
       for (let s = 0; s < colorStops.length - 1; s++) {
         if (t >= colorStops[s].stop && t <= colorStops[s + 1].stop) {
           const seg = (t - colorStops[s].stop) / (colorStops[s + 1].stop - colorStops[s].stop);
           r = Math.round(colorStops[s].r + (colorStops[s + 1].r - colorStops[s].r) * seg);
           g = Math.round(colorStops[s].g + (colorStops[s + 1].g - colorStops[s].g) * seg);
           b = Math.round(colorStops[s].b + (colorStops[s + 1].b - colorStops[s].b) * seg);
+          const a0 = colorStops[s].a ?? 200;
+          const a1 = colorStops[s + 1].a ?? 200;
+          a = Math.round(a0 + (a1 - a0) * seg);
           break;
         }
       }
       if (t > colorStops[colorStops.length - 1].stop) {
-        r = colorStops[colorStops.length - 1].r;
-        g = colorStops[colorStops.length - 1].g;
-        b = colorStops[colorStops.length - 1].b;
+        const last = colorStops[colorStops.length - 1];
+        r = last.r;
+        g = last.g;
+        b = last.b;
+        a = last.a ?? 200;
       }
       imgData.data[idx] = r;
       imgData.data[idx + 1] = g;
       imgData.data[idx + 2] = b;
-      imgData.data[idx + 3] = 200;
+      imgData.data[idx + 3] = a;
     }
   }
   ctx.putImageData(imgData, 0, 0);

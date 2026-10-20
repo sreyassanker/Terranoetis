@@ -135,7 +135,7 @@ function renderConfidenceToCanvas(
 export function showInterpSurface(
   viewer: Cesium.Viewer,
   grid: InterpGrid,
-  colors: { stop: number; r: number; g: number; b: number }[] = DEFAULT_COLORS,
+  colors: { stop: number; r: number; g: number; b: number; a?: number }[] = DEFAULT_COLORS,
   opacity: number = 0.65,
   showConfidence: boolean = false,
   maskPolygon?: Array<Array<[number, number]>>,

@@ -118,6 +118,14 @@ const ACTIONS: PaletteAction[] = [
     keywords: ['measure', 'ruler', 'distance', 'area', 'geodesic', 'polygon', 'km', 'miles']
   },
   {
+    id: 'space-archaeology',
+    command: 'archaeology',
+    label: 'Space Archaeology & Discovery',
+    description: 'Orthogonal consensus remote sensing (Sentinel-1 SAR, Sentinel-2 Red-Edge, SRTM 30m, SoilGrids)',
+    icon: '🏛️',
+    keywords: ['archaeology', 'space', 'discovery', 'ruins', 'radar', 'sar', 'sentinel', 'ahramat', 'ubar', 'silchester', 'upano', 'tanis', 'satellite']
+  },
+  {
     id: 'time-slider',
     command: 'time-slider',
     label: 'Timeline Replay Scrubber',

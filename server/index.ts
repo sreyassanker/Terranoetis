@@ -173,6 +173,7 @@ import { forkRouter } from './fork/routes';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { kaggleRouter } from './kaggle';
+import { archaeologyRouter } from './archaeology/routes';
 import { registerPowerEngine } from './kaggle/powerSaver';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
@@ -467,6 +468,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/economics/worldbank' || req.path === '/imf' || req.path === '/internet/outages' ||
     req.path === '/supply-chain/trade' || req.path === '/prediction-markets' || req.path === '/coingecko' ||
     req.path === '/population/worldpop' || req.path === '/stac/search' || req.path === '/stac/collections' ||
+    req.path.startsWith('/archaeology') ||
     req.path === '/geospatial/overpass' || req.path === '/sentiment/news' || req.path === '/intelligence/disinformation' ||
     req.path === '/vaac/tokyo' || req.path === '/vaac/anchorage' || req.path === '/vaac/washington' || req.path === '/firms' || req.path === '/lightning' ||
     req.path === '/openflights' || req.path === '/submarine-cables' || req.path === '/electricity-grid' ||
@@ -560,6 +562,7 @@ app.use('/api', foundationModelsRouter);
 app.use('/api/fork', forkRouter);
 app.use('/api/pulse', pulseRouter);
 app.use('/api/kaggle', kaggleRouter);
+app.use('/api/archaeology', archaeologyRouter);
 registerAnalyticalModelsRoutes(app);
 registerOpenApiRoutes(app);
 
