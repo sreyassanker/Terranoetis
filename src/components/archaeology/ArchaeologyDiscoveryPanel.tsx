@@ -27,8 +27,13 @@ import {
   CheckCheck,
   CloudSun,
   Eye,
+  EyeOff,
+  Trash2,
+  Eraser,
   SlidersHorizontal,
   Info,
+  Calendar,
+  Building2,
 } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import { authHeaders } from '@/context/AuthContext';
@@ -39,7 +44,9 @@ import type {
   ArchaeologyScanResult,
   PeerReviewedReferenceSite,
   BenchmarkAuditReport,
+  CadastralHeritageSite,
 } from '../../../server/archaeology/types';
+import { PEER_REVIEWED_REFERENCE_SITES } from '../../../server/archaeology/referenceSites';
 import { inferBiomeFromCoordinates } from '../../../server/archaeology/biomeInference';
 import {
   renderArchaeologyAnomaliesOnGlobe,
@@ -55,10 +62,11 @@ interface ArchaeologyDiscoveryPanelProps {
   activeStudyAreaBbox: StudyAreaBoundingBox | null;
   studyAreaName?: string | null;
   onOpenStudyAreaPanel?: () => void;
+  onClearStudyArea?: () => void;
   zIndex?: number;
 }
 
-type TabType = 'search' | 'dossier' | 'benchmarks';
+type TabType = 'search' | 'dossier';
 
 interface SensorModalInfo {
   id: 's2' | 's1' | 'dem' | 'soil';
@@ -156,58 +164,49 @@ const SITE_FLAGS: Record<string, string> = {
   Ecuador: '🇪🇨',
   Oman: '🇴🇲',
   India: '🇮🇳',
+  Syria: '🇸🇾',
 };
 
-const DISCOVERY_PRESETS = [
-  {
-    name: 'Ahramat Nile Branch',
+const BENCHMARK_SHORT_INFO: Record<string, { shortName: string; location: string }> = {
+  ahramat_giza_harbor: {
+    shortName: 'Ahramat Nile Branch',
     location: 'Giza Plateau, Egypt',
-    biome: 'arid_desert' as BiomeType,
-    bbox: { lonMin: 31.08, latMin: 29.94, lonMax: 31.18, latMax: 30.04 },
-    desc: 'Buried 64km Nile branch underlying pyramid complexes (Ghoneim et al., Nature Comms 2024)',
-    flag: '🇪🇬',
   },
-  {
-    name: 'Silchester Roman Town',
+  silchester_calleva_roman_town: {
+    shortName: 'Silchester Roman Town',
     location: 'Hampshire, UK',
-    biome: 'agricultural_plain' as BiomeType,
-    bbox: { lonMin: -1.105, latMin: 51.350, lonMax: -1.075, latMax: 51.365 },
-    desc: 'Calleva Atrebatum orthogonal insulae street grid via crop stress (Fulford et al., Britannia)',
-    flag: '🇬🇧',
   },
-  {
-    name: 'Tanis Royal Necropolis',
+  tanis_royal_enclosure: {
+    shortName: 'Tanis Royal City',
     location: 'Nile Delta, Egypt',
-    biome: 'alluvial_floodplain' as BiomeType,
-    bbox: { lonMin: 31.870, latMin: 30.970, lonMax: 31.895, latMax: 30.985 },
-    desc: 'Mudbrick temples & tomb structures mapped via thermal/multispectral satellite contrast (Parcak 2009)',
-    flag: '🇪🇬',
   },
-  {
-    name: 'Upano Valley Urban Grid',
+  upano_valley_sangay_mounds: {
+    shortName: 'Upano Valley Grid',
     location: 'Amazonian Andes, Ecuador',
-    biome: 'jungle_canopy' as BiomeType,
-    bbox: { lonMin: -78.180, latMin: -2.350, lonMax: -78.130, latMax: -2.290 },
-    desc: 'Dense 2,500-year-old agrarian urban settlements under canopy (Rostain et al., Science 2024)',
-    flag: '🇪🇨',
   },
-  {
-    name: 'Ubar (Atlantis of the Sands)',
+  lost_city_ubar_shisr: {
+    shortName: 'Ubar (Lost Oasis)',
     location: "Rub' al Khali, Oman",
-    biome: 'arid_desert' as BiomeType,
-    bbox: { lonMin: 53.640, latMin: 18.245, lonMax: 53.670, latMax: 18.270 },
-    desc: 'Desert caravan hub discovered via Shuttle SIR-C / Landsat radar (Blom et al., PNAS 1997)',
-    flag: '🇴🇲',
   },
-  {
-    name: 'Eastfort Negative Control',
-    location: 'Thiruvananthapuram, India',
-    biome: 'tropical_coastal' as BiomeType,
-    bbox: { lonMin: 76.940, latMin: 8.475, lonMax: 76.960, latMax: 8.490 },
-    desc: 'Empirical zero-anomaly negative control: verified zero synthetic false positives',
-    flag: '🇮🇳',
-  },
-];
+};
+
+/**
+ * Calculates surface dimensions (width, height, area) of a bounding box in kilometers.
+ */
+function computeBboxArea(bbox: StudyAreaBoundingBox): { areaKm2: number; widthKm: number; heightKm: number } {
+  const R = 6371; // Earth radius in km
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bbox.latMax - bbox.latMin);
+  const dLon = toRad(bbox.lonMax - bbox.lonMin);
+  const midLat = toRad((bbox.latMin + bbox.latMax) / 2);
+  const heightKm = Math.abs(dLat * R);
+  const widthKm = Math.abs(dLon * R * Math.cos(midLat));
+  return {
+    areaKm2: heightKm * widthKm,
+    widthKm,
+    heightKm,
+  };
+}
 
 export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps> = ({
   viewer,
@@ -216,6 +215,7 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   activeStudyAreaBbox,
   studyAreaName,
   onOpenStudyAreaPanel,
+  onClearStudyArea,
   zIndex = 115,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('search');
@@ -227,19 +227,66 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedCoords, setCopiedCoords] = useState(false);
   const [hoveredSensor, setHoveredSensor] = useState<'s2' | 's1' | 'dem' | 'soil' | null>(null);
+  const [jumpCoordInput, setJumpCoordInput] = useState('');
+
+  // Study Area Scale Metrics & Resolution Limits
+  const studyAreaMetrics = useMemo(() => {
+    if (!activeStudyAreaBbox) return null;
+    return computeBboxArea(activeStudyAreaBbox);
+  }, [activeStudyAreaBbox]);
+
+  const isAreaTooLarge = studyAreaMetrics ? studyAreaMetrics.areaKm2 > 25.0 : false;
+  const isAreaWarning = studyAreaMetrics ? studyAreaMetrics.areaKm2 > 10.0 && studyAreaMetrics.areaKm2 <= 25.0 : false;
+  const isOptimalRange = studyAreaMetrics ? studyAreaMetrics.areaKm2 <= 10.0 : false;
+
+  // Auto-fit to an optimal 4 km² (2x2 km target) centered on the user's selection
+  const handleAutoFitTarget = () => {
+    if (!activeStudyAreaBbox) return;
+    const centerLat = (activeStudyAreaBbox.latMin + activeStudyAreaBbox.latMax) / 2;
+    const centerLon = (activeStudyAreaBbox.lonMin + activeStudyAreaBbox.lonMax) / 2;
+    // 0.009 deg lat is ~1.0 km; delta 0.009 yields 2.0 km width/height (~4.0 km² area)
+    const dLat = 0.009;
+    const cosLat = Math.cos((centerLat * Math.PI) / 180);
+    const dLon = 0.009 / (Math.abs(cosLat) > 0.05 ? cosLat : 1.0);
+    const fittedBbox: StudyAreaBoundingBox = {
+      latMin: centerLat - dLat,
+      latMax: centerLat + dLat,
+      lonMin: centerLon - dLon,
+      lonMax: centerLon + dLon,
+    };
+    const inferred = inferBiomeFromCoordinates(centerLat, centerLon);
+    setSelectedBiome(inferred);
+    setErrorMsg(null);
+
+    const v = effectiveViewer;
+    if (v && !v.isDestroyed()) {
+      v.camera.flyTo({
+        destination: Cesium.Rectangle.fromDegrees(
+          fittedBbox.lonMin - 0.003,
+          fittedBbox.latMin - 0.003,
+          fittedBbox.lonMax + 0.003,
+          fittedBbox.latMax + 0.003,
+        ),
+        duration: 1.2,
+      });
+      v.scene.requestRender();
+    }
+    handleExecuteScan(fittedBbox, inferred);
+  };
 
   // Atmospheric Quality & Date Filters
   const [maxCloudCover, setMaxCloudCover] = useState<number>(5);
-  const [seasonWindow, setSeasonWindow] = useState<'clearest_auto' | 'dry_season' | 'latest'>('clearest_auto');
+  const [seasonWindow, setSeasonWindow] = useState<'clearest_auto' | 'dry_season' | 'latest' | 'multi_temporal_diff'>('clearest_auto');
 
   // 3D IDW Surface Visualization State
   const [showIdwSurface, setShowIdwSurface] = useState<boolean>(true);
+  const [showPins, setShowPins] = useState<boolean>(true);
   const [surfaceOpacity, setSurfaceOpacity] = useState<number>(0.65);
   const [showConfidenceFog, setShowConfidenceFog] = useState<boolean>(true);
   const [hoverProbe, setHoverProbe] = useState<{ lat: number; lon: number; value: number; confidencePct: number } | null>(null);
 
   // Benchmarks state
-  const [benchmarks, setBenchmarks] = useState<PeerReviewedReferenceSite[]>([]);
+  const [benchmarks, setBenchmarks] = useState<PeerReviewedReferenceSite[]>(PEER_REVIEWED_REFERENCE_SITES);
   const [runningBenchmark, setRunningBenchmark] = useState(false);
   const [benchmarkAudit, setBenchmarkAudit] = useState<BenchmarkAuditReport | null>(null);
 
@@ -283,10 +330,26 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
         showIdwSurface,
         surfaceOpacity,
         showConfidenceFog,
+        showPins,
         onProbe: (probe) => setHoverProbe(probe),
       },
     );
-  }, [effectiveViewer, scanResult, showIdwSurface, surfaceOpacity, showConfidenceFog]);
+  }, [effectiveViewer, scanResult, showIdwSurface, surfaceOpacity, showConfidenceFog, showPins]);
+
+  // Professionally clear all archaeological overlays, markers, and IDW surfaces from the 3D globe
+  const handleClearGlobeOverlays = useCallback(() => {
+    if (effectiveViewer) {
+      clearArchaeologyOverlays(effectiveViewer);
+    }
+    setScanResult(null);
+    setSelectedAnomaly(null);
+    setHoverProbe(null);
+    setErrorMsg(null);
+    setActiveTab('search');
+    if (onClearStudyArea) {
+      onClearStudyArea();
+    }
+  }, [effectiveViewer, onClearStudyArea]);
 
   // Clean up overlays on close
   const handleClose = useCallback(() => {
@@ -299,6 +362,15 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     const bboxToUse = overrideBbox || activeStudyAreaBbox;
     if (!bboxToUse) {
       setErrorMsg('Please draw or select a study area on the globe first.');
+      setActiveTab('search');
+      return;
+    }
+
+    const metrics = computeBboxArea(bboxToUse);
+    if (metrics.areaKm2 > 25.0) {
+      setErrorMsg(
+        `Study area is ${metrics.areaKm2 > 999 ? Math.round(metrics.areaKm2).toLocaleString() : metrics.areaKm2.toFixed(1)} km², which exceeds the 25 km² limit for archaeological prospection. High-resolution satellite detection requires 1–3 km (max 10 km²) to resolve physical structures. Click 'Auto-Fit to 4 km²' or resize your box.`
+      );
       setActiveTab('search');
       return;
     }
@@ -364,27 +436,93 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     handleExecuteScan(site.referenceBoundingBox, site.biome);
   };
 
-  // Preset button handler
-  const handleApplyPreset = (preset: typeof DISCOVERY_PRESETS[0]) => {
-    setSelectedBiome(preset.biome);
+  // Direct coordinate jump and study area creation
+  const handleJumpToCoords = () => {
+    const compact = jumpCoordInput.trim();
+    if (!compact) return;
+
+    let targetLat: number | null = null;
+    let targetLon: number | null = null;
+
+    // 1. DMS pattern: e.g. 28°35'56"N 71°9'0"E or 37°00′31″N, 6°19′42″W
+    const dmsRegex = /([0-9.]+)\s*[°ºd]\s*([0-9.]+)?\s*['′]?\s*([0-9.]+)?\s*["″]?\s*([NSEWnsew])\s*[,/ ]?\s*([0-9.]+)\s*[°ºd]\s*([0-9.]+)?\s*['′]?\s*([0-9.]+)?\s*["″]?\s*([NSEWnsew])/i;
+    const dmsMatch = compact.match(dmsRegex);
+    if (dmsMatch) {
+      const parseDms = (deg: string, min?: string, sec?: string, dir?: string) => {
+        let val = parseFloat(deg) + (parseFloat(min || '0') / 60) + (parseFloat(sec || '0') / 3600);
+        if (dir && /^[SW]$/i.test(dir)) val = -val;
+        return val;
+      };
+      const v1 = parseDms(dmsMatch[1], dmsMatch[2], dmsMatch[3], dmsMatch[4]);
+      const v2 = parseDms(dmsMatch[5], dmsMatch[6], dmsMatch[7], dmsMatch[8]);
+      const isV1Lat = /^[NS]$/i.test(dmsMatch[4]);
+      targetLat = isV1Lat ? v1 : v2;
+      targetLon = isV1Lat ? v2 : v1;
+    }
+
+    // 2. Decimal with directional indicators: e.g. 37.0086° N, 6.3283° W or 37.0086N, -6.3283W
+    if (targetLat === null || targetLon === null) {
+      const dirRegex = /(-?[0-9.]+)\s*°?\s*([NSns])?\s*[,/ ]\s*(-?[0-9.]+)\s*°?\s*([EWew])?/i;
+      const dirMatch = compact.match(dirRegex);
+      if (dirMatch && (dirMatch[2] || dirMatch[4])) {
+        let lat = parseFloat(dirMatch[1]);
+        let lon = parseFloat(dirMatch[3]);
+        if (dirMatch[2] && dirMatch[2].toUpperCase() === 'S' && lat > 0) lat = -lat;
+        if (dirMatch[4] && dirMatch[4].toUpperCase() === 'W' && lon > 0) lon = -lon;
+        if (dirMatch[2] && dirMatch[2].toUpperCase() === 'N' && lat < 0) lat = Math.abs(lat);
+        if (dirMatch[4] && dirMatch[4].toUpperCase() === 'E' && lon < 0) lon = Math.abs(lon);
+        targetLat = lat;
+        targetLon = lon;
+      }
+    }
+
+    // 3. Plain decimal pair: e.g. 37.0086, -6.3283 or 37.0086 -6.3283 or lat: 37.0086 lon: -6.3283
+    if (targetLat === null || targetLon === null) {
+      const cleaned = compact.replace(/^(?:lat(?:itude)?\s*:\s*)?(-?[0-9.]+)[, ]+(?:lon(?:gitude)?\s*:\s*)?(-?[0-9.]+)$/i, '$1,$2');
+      const pair = cleaned.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+      if (pair) {
+        const first = Number(pair[1]);
+        const second = Number(pair[2]);
+        if (Number.isFinite(first) && Number.isFinite(second)) {
+          targetLat = Math.abs(first) <= 90 ? first : second;
+          targetLon = Math.abs(first) <= 90 ? second : first;
+        }
+      }
+    }
+
+    if (targetLat === null || targetLon === null || Math.abs(targetLat) > 90 || Math.abs(targetLon) > 180) {
+      setErrorMsg('Could not parse coordinates. Please enter format like: 37.0086, -6.3283 or 37.0086° N, 6.3283° W');
+      return;
+    }
+
     setErrorMsg(null);
+    const dLat = 0.008;
+    const dLon = 0.008;
+    const bbox: StudyAreaBoundingBox = {
+      latMin: targetLat - dLat,
+      latMax: targetLat + dLat,
+      lonMin: targetLon - dLon,
+      lonMax: targetLon + dLon,
+    };
+
+    const inferred = inferBiomeFromCoordinates(targetLat, targetLon);
+    setSelectedBiome(inferred);
+
     const v = effectiveViewer;
     if (v && !v.isDestroyed()) {
-      const { lonMin, latMin, lonMax, latMax } = preset.bbox;
-      const padLon = (lonMax - lonMin) * 0.25;
-      const padLat = (latMax - latMin) * 0.25;
       v.camera.flyTo({
         destination: Cesium.Rectangle.fromDegrees(
-          lonMin - padLon,
-          latMin - padLat,
-          lonMax + padLon,
-          latMax + padLat,
+          bbox.lonMin - 0.005,
+          bbox.latMin - 0.005,
+          bbox.lonMax + 0.005,
+          bbox.latMax + 0.005,
         ),
         duration: 1.5,
       });
       v.scene.requestRender();
     }
-    handleExecuteScan(preset.bbox, preset.biome);
+
+    handleExecuteScan(bbox, inferred);
   };
 
   // Cinematic 3D Orbit / Angle Fly-To
@@ -406,6 +544,30 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
         Cesium.Math.toRadians(30),
         Cesium.Math.toRadians(-42),
         radiusMeters * 2.4,
+      ),
+      duration: 1.8,
+    });
+  };
+
+  // Cinematic 3D Fly-To for Standing Heritage Monument
+  const handleCinematicFlyToHeritage = (heritage: CadastralHeritageSite) => {
+    const v = effectiveViewer;
+    if (!v || v.isDestroyed()) return;
+    const lat = heritage.coordinates.lat;
+    const lon = heritage.coordinates.lon;
+    const elevation = heritage.coordinates.elevationMeters || 0;
+    const radiusMeters = 850;
+
+    const sphere = new Cesium.BoundingSphere(
+      Cesium.Cartesian3.fromDegrees(lon, lat, elevation),
+      radiusMeters,
+    );
+
+    v.camera.flyToBoundingSphere(sphere, {
+      offset: new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians(35),
+        Cesium.Math.toRadians(-38),
+        radiusMeters * 2.2,
       ),
       duration: 1.8,
     });
@@ -507,12 +669,46 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
       }}
     >
       <Panel
-        title="SPACE ARCHAEOLOGY & DISCOVERY INTELLIGENCE"
+        title="ARCHAEOLOGY"
         icon={<Landmark size={15} />}
         accentColor="#f59e0b"
         iconColor="#fbbf24"
         titleColor="#fde68a"
         onClose={handleClose}
+        headerActions={
+          (scanResult || activeStudyAreaBbox) ? (
+            <button
+              type="button"
+              onClick={handleClearGlobeOverlays}
+              title="Clear all archaeological overlays, markers, and study area from 3D Globe"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 4,
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#fca5a5',
+                fontSize: 9.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.28)';
+                e.currentTarget.style.borderColor = '#ef4444';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+              }}
+            >
+              <Eraser size={11} />
+              Clear Globe
+            </button>
+          ) : null
+        }
         style={{
           height: '100%',
           display: 'flex',
@@ -552,10 +748,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
           <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>V3.2 VERIFIED SCIENTIFIC</span>
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Navigation Tabs & Clear Action */}
         <div
           style={{
             display: 'flex',
+            alignItems: 'center',
             background: 'rgba(0,0,0,0.55)',
             borderBottom: '1px solid rgba(251,191,36,0.18)',
             padding: '6px 8px',
@@ -625,29 +822,39 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
             )}
           </button>
 
-          <button
-            onClick={() => setActiveTab('benchmarks')}
-            style={{
-              flex: 1,
-              padding: '7px 4px',
-              fontSize: 10,
-              fontWeight: 700,
-              borderRadius: 6,
-              border: 'none',
-              background: activeTab === 'benchmarks' ? 'linear-gradient(135deg, rgba(245,158,11,0.32), rgba(245,158,11,0.12))' : 'transparent',
-              color: activeTab === 'benchmarks' ? '#fde68a' : 'var(--text-dim)',
-              boxShadow: activeTab === 'benchmarks' ? '0 0 0 1px rgba(245,158,11,0.45)' : 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 5,
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <BookOpen size={12} />
-            Verified (5)
-          </button>
+          {(scanResult || activeStudyAreaBbox) && (
+            <button
+              type="button"
+              onClick={handleClearGlobeOverlays}
+              title="Clear all overlays, markers, and IDW surface from the 3D globe"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '7px 11px',
+                borderRadius: 6,
+                background: 'rgba(239, 68, 68, 0.14)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                color: '#fca5a5',
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)';
+                e.currentTarget.style.borderColor = '#ef4444';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.14)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+              }}
+            >
+              <Trash2 size={11} />
+              Clear Globe
+            </button>
+          )}
         </div>
 
         {/* Content Body */}
@@ -703,110 +910,320 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                       fontWeight: 800,
                       padding: '2px 8px',
                       borderRadius: 12,
-                      background: activeStudyAreaBbox ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                      color: activeStudyAreaBbox ? '#4ade80' : '#f87171',
-                      border: `1px solid ${activeStudyAreaBbox ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                      background: !activeStudyAreaBbox
+                        ? 'rgba(239,68,68,0.15)'
+                        : isAreaTooLarge
+                        ? 'rgba(239,68,68,0.2)'
+                        : isAreaWarning
+                        ? 'rgba(245,158,11,0.2)'
+                        : 'rgba(34,197,94,0.15)',
+                      color: !activeStudyAreaBbox
+                        ? '#f87171'
+                        : isAreaTooLarge
+                        ? '#ef4444'
+                        : isAreaWarning
+                        ? '#f59e0b'
+                        : '#4ade80',
+                      border: `1px solid ${
+                        !activeStudyAreaBbox
+                          ? 'rgba(239,68,68,0.3)'
+                          : isAreaTooLarge
+                          ? 'rgba(239,68,68,0.5)'
+                          : isAreaWarning
+                          ? 'rgba(245,158,11,0.5)'
+                          : 'rgba(34,197,94,0.3)'
+                      }`,
                     }}
                   >
-                    {activeStudyAreaBbox ? 'ZONE DEFINED' : 'NO SELECTION'}
+                    {!activeStudyAreaBbox
+                      ? 'NO SELECTION'
+                      : isAreaTooLarge
+                      ? `EXCEEDS LIMIT (${studyAreaMetrics!.areaKm2 > 999 ? Math.round(studyAreaMetrics!.areaKm2).toLocaleString() : studyAreaMetrics!.areaKm2.toFixed(1)} km²)`
+                      : isAreaWarning
+                      ? `COARSE (${studyAreaMetrics!.areaKm2.toFixed(1)} km²)`
+                      : `OPTIMAL (${studyAreaMetrics!.areaKm2.toFixed(1)} km² · 1–3 km)`}
                   </span>
                 </div>
 
                 {activeStudyAreaBbox ? (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: 6,
-                      fontSize: 10,
-                      color: 'var(--text)',
-                      background: 'rgba(255,255,255,0.02)',
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      border: '1px solid var(--border)',
-                    }}
-                  >
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>Lat Range: </span>
-                      <span style={{ fontWeight: 600 }}>{activeStudyAreaBbox.latMin.toFixed(4)}° → {activeStudyAreaBbox.latMax.toFixed(4)}°</span>
+                  <>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 6,
+                        fontSize: 10,
+                        color: 'var(--text)',
+                        background: 'rgba(255,255,255,0.02)',
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Lat Range: </span>
+                        <span style={{ fontWeight: 600 }}>{activeStudyAreaBbox.latMin.toFixed(4)}° → {activeStudyAreaBbox.latMax.toFixed(4)}°</span>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Lon Range: </span>
+                        <span style={{ fontWeight: 600 }}>{activeStudyAreaBbox.lonMin.toFixed(4)}° → {activeStudyAreaBbox.lonMax.toFixed(4)}°</span>
+                      </div>
                     </div>
-                    <div>
-                      <span style={{ color: 'var(--text-muted)' }}>Lon Range: </span>
-                      <span style={{ fontWeight: 600 }}>{activeStudyAreaBbox.lonMin.toFixed(4)}° → {activeStudyAreaBbox.lonMax.toFixed(4)}°</span>
-                    </div>
-                  </div>
+
+                    {studyAreaMetrics && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, padding: '2px 4px' }}>
+                        <span style={{ color: 'var(--text-dim)' }}>
+                          Span: <strong>{studyAreaMetrics.widthKm.toFixed(1)} km</strong> × <strong>{studyAreaMetrics.heightKm.toFixed(1)} km</strong> ({studyAreaMetrics.areaKm2 > 999 ? Math.round(studyAreaMetrics.areaKm2).toLocaleString() : studyAreaMetrics.areaKm2.toFixed(1)} km²)
+                        </span>
+                        <span style={{ color: isAreaTooLarge ? '#ef4444' : isAreaWarning ? '#f59e0b' : '#4ade80', fontWeight: 600, fontSize: 9 }}>
+                          {isAreaTooLarge ? '⚠️ Limit: 25 km² (Ideal: 1–3 km)' : isAreaWarning ? '⚠️ Coarser detail (>10 km²)' : '✓ Full 10m/30m resolution'}
+                        </span>
+                      </div>
+                    )}
+
+                    {isAreaTooLarge && (
+                      <div
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid rgba(239, 68, 68, 0.35)',
+                          borderRadius: 6,
+                          padding: '9px 11px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          marginTop: 2,
+                        }}
+                      >
+                        <div style={{ fontSize: 10, color: '#fca5a5', lineHeight: 1.4 }}>
+                          <strong>Area exceeds 25 km² limit:</strong> Satellite archaeological sensors resolve buried physical ruins at 1–3 km scale. At {studyAreaMetrics!.areaKm2 > 999 ? Math.round(studyAreaMetrics!.areaKm2).toLocaleString() : studyAreaMetrics!.areaKm2.toFixed(1)} km², features are lost.
+                        </div>
+                        <button
+                          onClick={handleAutoFitTarget}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            padding: '7px 10px',
+                            borderRadius: 5,
+                            background: '#ef4444',
+                            border: 'none',
+                            color: '#fff',
+                            fontWeight: 700,
+                            fontSize: 10,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Maximize2 size={12} />
+                          Auto-Fit to 4 km² Target (2×2 km Centered)
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                     Draw a study area on the 3D globe using the Study Area panel (Point, Rectangle, Polygon, or Circle), or click any discovery preset below.
                   </div>
                 )}
 
-                {onOpenStudyAreaPanel && (
-                  <button
-                    onClick={onOpenStudyAreaPanel}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      background: 'rgba(245,158,11,0.12)',
-                      border: '1px solid rgba(245,158,11,0.35)',
-                      color: '#fde68a',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      fontSize: 11,
-                    }}
-                  >
-                    <Layers size={13} />
-                    {activeStudyAreaBbox ? 'Modify Study Area in Panel' : 'Open Study Area Panel to Draw'}
-                  </button>
-                )}
-              </div>
-
-              {/* Quick Archaeological & Control Presets */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#fde68a', display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Sparkles size={12} color="#f59e0b" />
-                  Discovery Presets & Scientific Controls:
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-                  {DISCOVERY_PRESETS.map(preset => (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {onOpenStudyAreaPanel && (
                     <button
-                      key={preset.name}
-                      onClick={() => handleApplyPreset(preset)}
+                      onClick={onOpenStudyAreaPanel}
                       style={{
+                        flex: 1,
                         display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
                         padding: '8px 10px',
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid var(--border)',
                         borderRadius: 6,
+                        background: 'rgba(245,158,11,0.12)',
+                        border: '1px solid rgba(245,158,11,0.35)',
+                        color: '#fde68a',
+                        fontWeight: 600,
                         cursor: 'pointer',
-                        textAlign: 'left',
-                        gap: 3,
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = '#f59e0b';
-                        e.currentTarget.style.background = 'rgba(245, 158, 11, 0.08)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--border)';
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                        fontSize: 11,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>
-                          {preset.flag} {preset.name}
-                        </span>
-                        <ChevronRight size={11} color="#f59e0b" />
-                      </div>
-                      <span style={{ fontSize: 8, color: 'var(--text-dim)', lineHeight: 1.2 }}>{preset.location}</span>
+                      <Layers size={13} />
+                      {activeStudyAreaBbox ? 'Modify Study Area in Panel' : 'Open Study Area Panel to Draw'}
                     </button>
-                  ))}
+                  )}
+                  {(activeStudyAreaBbox || scanResult) && (
+                    <button
+                      onClick={handleClearGlobeOverlays}
+                      title="Clear study area box and all overlays from 3D Globe"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        background: 'rgba(239,68,68,0.12)',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        color: '#fca5a5',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Trash2 size={12} />
+                      Clear Globe
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Direct Coordinate Jump & Scan */}
+              <div
+                style={{
+                  background: 'rgba(0,0,0,0.35)',
+                  border: '1px solid rgba(245,158,11,0.25)',
+                  borderRadius: 8,
+                  padding: 10,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#fde68a', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Compass size={12} color="#f59e0b" />
+                  Jump to Coordinates & Initiate Scan:
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="e.g. 37.0086, -6.3283 or 37.0086° N, 6.3283° W"
+                    value={jumpCoordInput}
+                    onChange={e => setJumpCoordInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleJumpToCoords();
+                    }}
+                    style={{
+                      flex: 1,
+                      background: 'rgba(0,0,0,0.4)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      padding: '6px 10px',
+                      fontSize: 10,
+                      color: '#f8fafc',
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={handleJumpToCoords}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      background: '#f59e0b',
+                      color: '#000',
+                      fontWeight: 700,
+                      fontSize: 10,
+                      border: 'none',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Fly & Scan
+                  </button>
+                </div>
+              </div>
+
+              {/* Verified Peer-Reviewed Benchmark Sites */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#fde68a', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Sparkles size={12} color="#f59e0b" />
+                    Verified Discovery Presets ({benchmarks.length}):
+                  </div>
+                  <button
+                    disabled={runningBenchmark}
+                    onClick={handleRunValidationBenchmark}
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(34,197,94,0.15)',
+                      border: '1px solid rgba(34,197,94,0.4)',
+                      color: '#4ade80',
+                      fontWeight: 700,
+                      fontSize: 9,
+                      cursor: runningBenchmark ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    {runningBenchmark ? <Loader2 size={10} className="spin" /> : <CheckCircle2 size={10} />}
+                    {runningBenchmark ? 'Auditing...' : 'Run 5-Site Audit'}
+                  </button>
+                </div>
+
+                {benchmarkAudit && (
+                  <div
+                    style={{
+                      background: 'rgba(0,0,0,0.5)',
+                      border: '1px solid rgba(34,197,94,0.4)',
+                      borderRadius: 8,
+                      padding: '6px 10px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ fontSize: 10, fontWeight: 900, color: '#4ade80', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <FileCheck2 size={12} color="#4ade80" />
+                      Audit Score: {benchmarkAudit.benchmarkAccuracyPercentage}% Accuracy
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>
+                      Avg Error: {benchmarkAudit.averageCentroidErrorMeters}m
+                    </span>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                  {benchmarks.map(site => {
+                    const info = BENCHMARK_SHORT_INFO[site.id] || {
+                      shortName: site.name.split('(')[0].trim(),
+                      location: site.country,
+                    };
+                    return (
+                      <button
+                        key={site.id}
+                        onClick={() => handleSelectBenchmark(site)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          padding: '8px 10px',
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          gap: 3,
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#f59e0b';
+                          e.currentTarget.style.background = 'rgba(245, 158, 11, 0.08)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {SITE_FLAGS[site.country] || '🏛️'} {info.shortName}
+                          </span>
+                          <ChevronRight size={11} color="#f59e0b" style={{ flexShrink: 0 }} />
+                        </div>
+                        <span style={{ fontSize: 8, color: 'var(--text-dim)', lineHeight: 1.2 }}>{info.location}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -917,13 +1334,16 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                     }}
                   >
                     <option value="clearest_auto">Clearest Pass (Auto STAC)</option>
-                    <option value="dry_season">Dry Season (Crop Stress)</option>
+                    <option value="multi_temporal_diff">Dual-Date Differential (Summer vs Spring)</option>
+                    <option value="dry_season">Peak Dry Season (Single Date)</option>
                     <option value="latest">Latest Recent Pass</option>
                   </select>
                 </div>
 
                 <div style={{ fontSize: 8, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                  Filters Sentinel-2 L2A STAC archive for scenes under {maxCloudCover}% cloud cover to prevent cloud shadows from obscuring archaeological crop marks.
+                  {seasonWindow === 'multi_temporal_diff'
+                    ? 'Dual-Date Differential compares peak summer drought against spring baseline to amplify transient crop marks while filtering out static manicured gardens and urban noise.'
+                    : `Filters Sentinel-2 L2A STAC archive for scenes under ${maxCloudCover}% cloud cover to prevent cloud shadows from obscuring archaeological crop marks.`}
                 </div>
               </div>
 
@@ -943,18 +1363,29 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Eye size={13} color="#38bdf8" />
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>
-                      3D IDW Surface Classification Map
+                      3D Classification & Globe Overlays
                     </span>
                   </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)' }}>
-                    <input
-                      type="checkbox"
-                      checked={showIdwSurface}
-                      onChange={e => setShowIdwSurface(e.target.checked)}
-                      style={{ accentColor: '#38bdf8' }}
-                    />
-                    <span>Drape on 3D Globe</span>
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)' }}>
+                      <input
+                        type="checkbox"
+                        checked={showPins}
+                        onChange={e => setShowPins(e.target.checked)}
+                        style={{ accentColor: '#f59e0b' }}
+                      />
+                      <span>Pins & Labels</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)' }}>
+                      <input
+                        type="checkbox"
+                        checked={showIdwSurface}
+                        onChange={e => setShowIdwSurface(e.target.checked)}
+                        style={{ accentColor: '#38bdf8' }}
+                      />
+                      <span>Drape Surface</span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* 4-Tier Colormap Legend Bar */}
@@ -1186,29 +1617,39 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
 
               {/* Direct Scan Trigger */}
               <button
-                disabled={!activeStudyAreaBbox || scanning}
+                disabled={!activeStudyAreaBbox || scanning || isAreaTooLarge}
                 onClick={() => handleExecuteScan()}
                 style={{
                   padding: '12px 14px',
                   borderRadius: 8,
-                  background: activeStudyAreaBbox
-                    ? 'linear-gradient(135deg, #f59e0b, #d97706)'
-                    : 'rgba(255,255,255,0.05)',
-                  border: 'none',
-                  color: activeStudyAreaBbox ? '#000' : 'var(--text-muted)',
+                  background: !activeStudyAreaBbox || isAreaTooLarge
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: isAreaTooLarge ? '1px solid rgba(239,68,68,0.4)' : 'none',
+                  color: activeStudyAreaBbox && !isAreaTooLarge ? '#000' : 'var(--text-muted)',
                   fontWeight: 800,
                   fontSize: 12,
                   letterSpacing: 0.5,
-                  cursor: activeStudyAreaBbox && !scanning ? 'pointer' : 'not-allowed',
+                  cursor: activeStudyAreaBbox && !scanning && !isAreaTooLarge ? 'pointer' : 'not-allowed',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 8,
-                  boxShadow: activeStudyAreaBbox ? '0 4px 14px rgba(245,158,11,0.3)' : 'none',
+                  boxShadow: activeStudyAreaBbox && !isAreaTooLarge ? '0 4px 14px rgba(245,158,11,0.3)' : 'none',
                 }}
               >
-                {scanning ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
-                {scanning ? 'ACQUIRING LIVE SATELLITE & ELEVATION FEEDS...' : 'EXECUTE ORTHOGONAL CONSENSUS SCAN'}
+                {scanning ? (
+                  <Loader2 size={16} className="spin" />
+                ) : isAreaTooLarge ? (
+                  <AlertTriangle size={16} color="#ef4444" />
+                ) : (
+                  <Sparkles size={16} />
+                )}
+                {scanning
+                  ? 'ACQUIRING LIVE SATELLITE & ELEVATION FEEDS...'
+                  : isAreaTooLarge
+                  ? 'AREA TOO LARGE (>25 km²) — AUTO-FIT FIRST'
+                  : 'EXECUTE ORTHOGONAL CONSENSUS SCAN'}
               </button>
             </div>
           )}
@@ -1242,18 +1683,29 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Eye size={12} color="#38bdf8" />
                         <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>
-                          3D IDW Classification Surface
+                          3D Classification Surface
                         </span>
                       </div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)' }}>
-                        <input
-                          type="checkbox"
-                          checked={showIdwSurface}
-                          onChange={e => setShowIdwSurface(e.target.checked)}
-                          style={{ accentColor: '#38bdf8' }}
-                        />
-                        <span>Draped on 3D Globe</span>
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 8.5, color: 'var(--text-dim)' }}>
+                          <input
+                            type="checkbox"
+                            checked={showPins}
+                            onChange={e => setShowPins(e.target.checked)}
+                            style={{ accentColor: '#f59e0b' }}
+                          />
+                          <span>Pins</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 8.5, color: 'var(--text-dim)' }}>
+                          <input
+                            type="checkbox"
+                            checked={showIdwSurface}
+                            onChange={e => setShowIdwSurface(e.target.checked)}
+                            style={{ accentColor: '#38bdf8' }}
+                          />
+                          <span>Surface</span>
+                        </label>
+                      </div>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1283,7 +1735,220 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                     )}
                   </div>
 
-                  {scanResult.status === 'NO_ANOMALY_DETECTED' ? (
+                  {scanResult.status === 'STANDING_HERITAGE_VERIFIED' ? (
+                    /* Verified Documented Standing Heritage Monument Panel */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {scanResult.cadastralHeritage?.map((heritage, hIdx) => (
+                        <div
+                          key={heritage.id || hIdx}
+                          style={{
+                            background: 'rgba(245,158,11,0.08)',
+                            border: '1px solid rgba(245,158,11,0.4)',
+                            borderRadius: 10,
+                            padding: 14,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 10,
+                            boxShadow: '0 0 24px rgba(245,158,11,0.12)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div
+                                style={{
+                                  width: 34,
+                                  height: 34,
+                                  borderRadius: '50%',
+                                  background: 'rgba(245,158,11,0.2)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0,
+                                  border: '1px solid #f59e0b',
+                                }}
+                              >
+                                <Landmark size={18} color="#fde68a" />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 900, color: '#fde68a', letterSpacing: 0.5 }}>
+                                  {heritage.name.toUpperCase()}
+                                </div>
+                                <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
+                                  {heritage.heritageDesignation || 'Cataloged World Heritage Monument'}
+                                </div>
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 800,
+                                padding: '3px 8px',
+                                borderRadius: 12,
+                                background: 'rgba(245,158,11,0.25)',
+                                color: '#fde68a',
+                                border: '1px solid #f59e0b',
+                              }}
+                            >
+                              STANDING MONUMENT
+                            </span>
+                          </div>
+
+                          {/* Historical Cadastral Metadata Box */}
+                          <div
+                            style={{
+                              background: 'rgba(0,0,0,0.3)',
+                              border: '1px solid rgba(255,255,255,0.07)',
+                              borderRadius: 6,
+                              padding: 10,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                              fontSize: 9,
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: '#facc15', fontWeight: 600 }}>Period / Epoch:</span>
+                              <span style={{ color: 'var(--text)' }}>{heritage.periodOrEpoch || 'Documented Heritage'}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: '#facc15', fontWeight: 600 }}>Classification:</span>
+                              <span style={{ color: 'var(--text)' }}>{heritage.historicType}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: '#facc15', fontWeight: 600 }}>Cadastral Registry:</span>
+                              <span style={{ color: 'var(--text-muted)' }}>{heritage.source}</span>
+                            </div>
+                            {heritage.architecturalContext && (
+                              <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 4 }}>
+                                {heritage.architecturalContext}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Quick Action Ribbon */}
+                          <button
+                            onClick={() => handleCinematicFlyToHeritage(heritage)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: 'rgba(245,158,11,0.15)',
+                              border: '1px solid rgba(245,158,11,0.4)',
+                              color: '#fde68a',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Navigation size={12} />
+                            Cinematic 3D Fly-To Monument
+                          </button>
+
+                          {/* Subterranean Survey Status Banner */}
+                          <div
+                            style={{
+                              background: 'rgba(34,197,94,0.1)',
+                              border: '1px solid rgba(34,197,94,0.3)',
+                              borderRadius: 6,
+                              padding: '8px 10px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                          >
+                            <ShieldCheck size={16} color="#4ade80" />
+                            <div style={{ fontSize: 9.5, color: '#4ade80', lineHeight: 1.4 }}>
+                              <strong>Subterranean Soil Prospection:</strong> 0 unmapped subterranean anomalies in surrounding terrain. Surface monument cataloged without false subsurface flags.
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Live Telemetry Diagnostic Certificate Panel */}
+                      <div
+                        style={{
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#fde68a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Activity size={13} color="#f59e0b" />
+                          Empirical Remote Sensing Telemetry ({scanResult.studyAreaKm2} km²)
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 9 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                            <span style={{ color: '#38bdf8', fontWeight: 600 }}>Copernicus Sentinel-2 Optical:</span>
+                            <span style={{ color: 'var(--text)' }}>
+                              {scanResult.liveSensors.sentinel2 ? `${scanResult.liveSensors.sentinel2.platform} (Cloud ${scanResult.liveSensors.sentinel2.cloudCoverPercent}%)` : 'Not available'}
+                            </span>
+                          </div>
+
+                          {scanResult.liveSensors.landCover && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                              <span style={{ color: '#a78bfa', fontWeight: 600 }}>ESA WorldCover 10m:</span>
+                              <span style={{ color: '#fde68a' }}>
+                                Built-up {scanResult.liveSensors.landCover.builtUpPercent}%, Cropland {scanResult.liveSensors.landCover.croplandPercent}% [Standing Heritage Fabric Masked]
+                              </span>
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                            <span style={{ color: '#06b6d4', fontWeight: 600 }}>Sentinel-1 C-Band SAR:</span>
+                            <span style={{ color: 'var(--text)' }}>
+                              {scanResult.liveSensors.sentinel1 ? `${scanResult.liveSensors.sentinel1.platform} (${scanResult.liveSensors.sentinel1.polarizations.join('/')})` : 'Not available'}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                            <span style={{ color: '#f97316', fontWeight: 600 }}>SRTM 30m Topography:</span>
+                            <span style={{ color: 'var(--text)' }}>
+                              {scanResult.liveSensors.dem ? `${scanResult.liveSensors.dem.minElevationM}m–${scanResult.liveSensors.dem.maxElevationM}m (Slope ${scanResult.liveSensors.dem.slopeDegrees}°, σ ${scanResult.liveSensors.dem.elevationStdDevM}m)` : 'Not available'}
+                            </span>
+                          </div>
+
+                          {scanResult.liveSensors.soil && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: '#eab308', fontWeight: 600 }}>Subsurface Soil Texture:</span>
+                              <span style={{ color: 'var(--text)' }}>
+                                {scanResult.liveSensors.soil.clayPercent}% Clay, {scanResult.liveSensors.soil.sandPercent}% Sand ({scanResult.liveSensors.soil.textureClass})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={handleDownloadDossierJSON}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--text-dim)',
+                            fontSize: 9,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            marginTop: 4,
+                          }}
+                        >
+                          <Download size={12} />
+                          Download Raw Sensor Telemetry Log (JSON)
+                        </button>
+                      </div>
+                    </div>
+                  ) : scanResult.status === 'NO_ANOMALY_DETECTED' ? (
                 /* Honest Scientific Report when 0 anomalies detected */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div
@@ -1353,6 +2018,24 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                         </span>
                       </div>
 
+                      {scanResult.liveSensors.sentinel2?.multiTemporal && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                          <span style={{ color: '#38bdf8', fontWeight: 600 }}>Dual-Date Differential:</span>
+                          <span style={{ color: '#facc15' }}>
+                            {scanResult.liveSensors.sentinel2.multiTemporal.stressDate} vs {scanResult.liveSensors.sentinel2.multiTemporal.baselineDate} (ΔNDRE {scanResult.liveSensors.sentinel2.multiTemporal.deltaNdre})
+                          </span>
+                        </div>
+                      )}
+
+                      {scanResult.liveSensors.landCover && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
+                          <span style={{ color: '#a78bfa', fontWeight: 600 }}>ESA WorldCover 10m:</span>
+                          <span style={{ color: scanResult.liveSensors.landCover.isUrbanFabric ? '#f87171' : 'var(--text)' }}>
+                            Built-up {scanResult.liveSensors.landCover.builtUpPercent}%, Cropland {scanResult.liveSensors.landCover.croplandPercent}% {scanResult.liveSensors.landCover.isUrbanFabric ? '[Urban Fabric Masked]' : ''}
+                          </span>
+                        </div>
+                      )}
+
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 5 }}>
                         <span style={{ color: '#06b6d4', fontWeight: 600 }}>Sentinel-1 C-Band SAR:</span>
                         <span style={{ color: 'var(--text)' }}>
@@ -1400,8 +2083,8 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                     </button>
                   </div>
                 </div>
-              ) : scanResult.status === 'INSUFFICIENT_DATA' ? (
-                /* Explicit Warning when Live Data is Unavailable */
+              ) : scanResult.status === 'AREA_EXCEEDS_LIMIT' || scanResult.status === 'INSUFFICIENT_DATA' ? (
+                /* Explicit Warning when Area Exceeds Limit or Live Data is Unavailable */
                 <div
                   style={{
                     background: 'rgba(239,68,68,0.12)',
@@ -1410,18 +2093,43 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                     padding: 14,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 8,
+                    gap: 10,
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <AlertTriangle size={18} color="#f87171" />
                     <span style={{ fontSize: 11, fontWeight: 800, color: '#f87171' }}>
-                      INSUFFICIENT REMOTE SENSING DATA
+                      {scanResult.status === 'AREA_EXCEEDS_LIMIT'
+                        ? 'STUDY AREA EXCEEDS RESOLUTION LIMIT (MAX 25 km²)'
+                        : 'INSUFFICIENT REMOTE SENSING DATA'}
                     </span>
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text)', lineHeight: 1.5 }}>
                     {scanResult.statusMessage}
                   </div>
+                  {scanResult.status === 'AREA_EXCEEDS_LIMIT' && (
+                    <button
+                      onClick={handleAutoFitTarget}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        background: '#ef4444',
+                        border: 'none',
+                        color: '#fff',
+                        fontWeight: 700,
+                        fontSize: 10,
+                        cursor: 'pointer',
+                        marginTop: 4,
+                      }}
+                    >
+                      <Maximize2 size={12} />
+                      Auto-Fit to 4 km² Target (2×2 km) & Rescan
+                    </button>
+                  )}
                 </div>
               ) : (
                 /* Confirmed Discoveries Dossier */
@@ -1453,6 +2161,98 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                       </button>
                     </div>
                   </div>
+
+                  {/* Standing Cadastral Heritage Context Ribbon (if site encloses standing monument) */}
+                  {scanResult.cadastralHeritage && scanResult.cadastralHeritage.length > 0 && (
+                    <div
+                      style={{
+                        background: 'rgba(245,158,11,0.09)',
+                        border: '1px solid rgba(245,158,11,0.35)',
+                        borderRadius: 8,
+                        padding: '8px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}
+                    >
+                      <Landmark size={18} color="#f59e0b" />
+                      <div style={{ fontSize: 9.5, color: '#fde68a', lineHeight: 1.4 }}>
+                        <strong>Documented Heritage Landmark:</strong> {scanResult.cadastralHeritage[0].name} ({scanResult.cadastralHeritage[0].periodOrEpoch || 'Standing Monument'}).
+                        Subterranean anomalies listed below represent unmapped subsurface soil features outside the standing monument footprint.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dual-Date Multi-Temporal Differential Card */}
+                  {scanResult.liveSensors.sentinel2?.multiTemporal && (
+                    <div
+                      style={{
+                        background: 'rgba(56,189,248,0.08)',
+                        border: '1px solid rgba(56,189,248,0.3)',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#38bdf8', fontSize: 10, fontWeight: 800 }}>
+                          <Calendar size={13} color="#38bdf8" />
+                          DUAL-DATE PHENOLOGICAL DIFFERENTIAL
+                        </div>
+                        <span style={{ fontSize: 8, color: '#38bdf8', background: 'rgba(56,189,248,0.18)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          +{Math.round((scanResult.liveSensors.sentinel2.multiTemporal.contrastAmplificationRatio - 1) * 100)}% CONTRAST AMPLIFIED
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 8.5 }}>
+                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '4px 6px', borderRadius: 4 }}>
+                          <span style={{ color: 'var(--text-dim)' }}>Stress Pass: </span>
+                          <strong style={{ color: '#facc15' }}>{scanResult.liveSensors.sentinel2.multiTemporal.stressDate}</strong>
+                        </div>
+                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '4px 6px', borderRadius: 4 }}>
+                          <span style={{ color: 'var(--text-dim)' }}>Baseline Pass: </span>
+                          <strong style={{ color: '#4ade80' }}>{scanResult.liveSensors.sentinel2.multiTemporal.baselineDate}</strong>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                        Inter-seasonal separation: {scanResult.liveSensors.sentinel2.multiTemporal.daysSeparation} days · ΔNDRE: {scanResult.liveSensors.sentinel2.multiTemporal.deltaNdre} · ΔNDMI: {scanResult.liveSensors.sentinel2.multiTemporal.deltaNdmi}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Land Cover Classification Card */}
+                  {scanResult.liveSensors.landCover && (
+                    <div
+                      style={{
+                        background: 'rgba(0,0,0,0.3)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 8.5,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#fde68a', fontWeight: 700 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Building2 size={11} color="#f59e0b" />
+                          ESA WorldCover 10m Classification
+                        </span>
+                        <span style={{ color: scanResult.liveSensors.landCover.isUrbanFabric ? '#f87171' : '#4ade80' }}>
+                          {scanResult.liveSensors.landCover.isUrbanFabric ? 'Urban / Surface Fabric' : 'Natural / Rural Arable Soil'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, color: 'var(--text-dim)', flexWrap: 'wrap' }}>
+                        <span>Built-up: {scanResult.liveSensors.landCover.builtUpPercent}%</span>
+                        <span>Cropland: {scanResult.liveSensors.landCover.croplandPercent}%</span>
+                        <span>Trees: {scanResult.liveSensors.landCover.treeCoverPercent}%</span>
+                        <span>Water: {scanResult.liveSensors.landCover.waterPercent}%</span>
+                        <span>Bare: {scanResult.liveSensors.landCover.barePercent}%</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Selected Anomaly Deep Physical Evidence Dossier Card */}
                   {selectedAnomaly && (
@@ -1659,173 +2459,6 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
           )}
         </div>
       )}
-
-          {/* TAB 4: Peer-Reviewed Benchmarks */}
-          {activeTab === 'benchmarks' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                Five real-world archaeological discovery sites documented in peer-reviewed scientific literature
-                (Nature, Science, Britannia, NASA JPL). Click any site to fly the 3D globe and retrieve real satellite telemetry.
-              </div>
-
-              {/* Validation Benchmark Trigger */}
-              <button
-                disabled={runningBenchmark}
-                onClick={handleRunValidationBenchmark}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 8,
-                  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                  border: 'none',
-                  color: '#000',
-                  fontWeight: 900,
-                  fontSize: 11,
-                  letterSpacing: 0.5,
-                  cursor: runningBenchmark ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  boxShadow: '0 4px 16px rgba(34,197,94,0.35)',
-                }}
-              >
-                {runningBenchmark ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-                {runningBenchmark ? 'RUNNING SATELLITE BENCHMARK AUDIT...' : 'RUN BENCHMARK VALIDATION AUDIT (5 SITES)'}
-              </button>
-
-              {/* Audit Results Table */}
-              {benchmarkAudit && (
-                <div
-                  style={{
-                    background: 'rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(34,197,94,0.4)',
-                    borderRadius: 8,
-                    padding: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 900, color: '#4ade80', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <FileCheck2 size={15} color="#4ade80" />
-                      Audit Score: {benchmarkAudit.benchmarkAccuracyPercentage}% Accuracy
-                    </span>
-                    <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>
-                      Avg Error: {benchmarkAudit.averageCentroidErrorMeters}m
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                    Sources: {benchmarkAudit.scientificIntegrityCheck.dataSources}
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 9 }}>
-                    {benchmarkAudit.results.map(r => (
-                      <div
-                        key={r.siteId}
-                        style={{
-                          background: 'rgba(255,255,255,0.03)',
-                          padding: '8px 10px',
-                          borderRadius: 6,
-                          border: '1px solid var(--border)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 3,
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                          <span style={{ color: 'var(--text)' }}>{r.siteName}</span>
-                          <span style={{ color: r.verificationStatus === 'VERIFIED' ? '#4ade80' : '#f87171' }}>
-                            {r.verificationStatus} ({(r.predictedConfidenceScore * 100).toFixed(1)}%)
-                          </span>
-                        </div>
-                        <div style={{ color: 'var(--text-dim)' }}>
-                          Error: {r.centroidErrorDistanceMeters}m · IoU: {(r.spatialIoU * 100).toFixed(0)}% · Elev:{' '}
-                          {r.liveSensorsRetrieved.measuredElevationM ?? 'N/A'}m
-                        </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: 8 }}>
-                          Live S2: {r.liveSensorsRetrieved.s2SceneId ? r.liveSensorsRetrieved.s2SceneId.slice(0, 36) + '...' : 'N/A'}
-                        </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: 8 }}>
-                          {r.evidenceCitation}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* List of the 5 Sites */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {benchmarks.map(site => (
-                  <div
-                    key={site.id}
-                    className="archaeology-benchmark-card"
-                    data-site-id={site.id}
-                    onClick={() => handleSelectBenchmark(site)}
-                    style={{
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 8,
-                      padding: 10,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 5,
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#f59e0b';
-                      e.currentTarget.style.background = 'rgba(245, 158, 11, 0.08)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border)';
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#fde68a' }}>{site.name}</span>
-                      <span
-                        style={{
-                          fontSize: 9,
-                          color: '#38bdf8',
-                          border: '1px solid rgba(56,189,248,0.4)',
-                          padding: '1px 6px',
-                          borderRadius: 12,
-                          background: 'rgba(56,189,248,0.1)',
-                        }}
-                      >
-                        {SITE_FLAGS[site.country] || ''} {site.country}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>
-                      <strong>Citation:</strong> {site.citation.authors} ({site.citation.year}),{' '}
-                      <em>{site.citation.journal}</em>
-                    </div>
-
-                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-                      <strong>Modality:</strong> {site.primaryModality}
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 9 }}>
-                      <span style={{ color: 'var(--text-dim)' }}>
-                        {site.referenceCoordinates.lat.toFixed(4)}°, {site.referenceCoordinates.lon.toFixed(4)}°
-                      </span>
-                      <span style={{ color: '#f59e0b', fontWeight: 700 }}>Fly & Prospect →</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </Panel>
     </div>

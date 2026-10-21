@@ -17,6 +17,11 @@ import { authHeaders } from '@/context/AuthContext';
 
 type TabId = 'upload' | 'draw' | 'manage' | 'analyze' | 'export';
 
+export interface StudyAreaDrawingStats {
+  areaKm2: number;
+  status: 'optimal' | 'coarse' | 'exceeds';
+}
+
 interface StudyAreaPanelProps {
   viewer: Cesium.Viewer | null;
   areas: StudyAreaItem[];
@@ -30,12 +35,16 @@ interface StudyAreaPanelProps {
   activeStudyAreaId: string | null;
   onActivate: (id: string) => void;
   zIndex?: number;
+  isArchaeologyActive?: boolean;
+  drawingStats?: StudyAreaDrawingStats | null;
 }
 
 export default React.memo(function StudyAreaPanel({
   viewer, areas, setAreas, show, onClose,
   onStartDraw, onStopDraw, drawing, setDrawing,
   activeStudyAreaId, onActivate, zIndex = 110,
+  isArchaeologyActive = false,
+  drawingStats = null,
 }: StudyAreaPanelProps) {
   const [tab, setTab] = useState<TabId>('draw');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,6 +257,28 @@ export default React.memo(function StudyAreaPanel({
         {tab === 'draw' && (
           <div className="study-section">
             <div className="study-section-title">Draw on Globe</div>
+
+            {isArchaeologyActive && !drawing && (
+              <div style={{
+                marginBottom: 10,
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'rgba(56, 189, 248, 0.08)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                color: '#93c5fd',
+                lineHeight: 1.4,
+              }}>
+                <Sparkles size={14} color="#38bdf8" style={{ flexShrink: 0 }} />
+                <span>
+                  <strong>Archaeology Target:</strong> 1 to 10 km² is optimal (10–25 km² coarse). Exceeding 25 km² is restricted.
+                </span>
+              </div>
+            )}
+
             {!drawing ? (
               <div className="study-draw-grid">
                 <button className="study-draw-btn" onClick={() => handleDrawStart('POINT')}>
@@ -269,8 +300,68 @@ export default React.memo(function StudyAreaPanel({
               </div>
             ) : (
               <div className="study-draw-active">
-                <div className="study-draw-status">Drawing {(drawShape ?? 'shape').toLowerCase()}...</div>
-                <div className="study-draw-hint">Click to place vertices · Double-click to finish</div>
+                <div className="study-draw-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                  <span>Drawing {(drawShape ?? 'shape').toLowerCase()}...</span>
+                  {drawingStats && (
+                    <span style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: drawingStats.status === 'optimal'
+                        ? 'rgba(16,185,129,0.2)'
+                        : drawingStats.status === 'coarse'
+                        ? 'rgba(245,158,11,0.2)'
+                        : 'rgba(239,68,68,0.2)',
+                      color: drawingStats.status === 'optimal'
+                        ? '#34d399'
+                        : drawingStats.status === 'coarse'
+                        ? '#fbbf24'
+                        : '#f87171',
+                      border: `1px solid ${
+                        drawingStats.status === 'optimal'
+                          ? 'rgba(16,185,129,0.5)'
+                          : drawingStats.status === 'coarse'
+                          ? 'rgba(245,158,11,0.5)'
+                          : 'rgba(239,68,68,0.5)'
+                      }`,
+                    }}>
+                      {drawingStats.areaKm2 < 1 ? drawingStats.areaKm2.toFixed(2) : drawingStats.areaKm2.toFixed(1)} km²
+                    </span>
+                  )}
+                </div>
+
+                <div className="study-draw-hint" style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: isArchaeologyActive
+                    ? (drawingStats?.status === 'optimal'
+                        ? '#34d399'
+                        : drawingStats?.status === 'coarse'
+                        ? '#fbbf24'
+                        : drawingStats?.status === 'exceeds'
+                        ? '#f87171'
+                        : '#38bdf8')
+                    : undefined,
+                }}>
+                  {isArchaeologyActive ? (
+                    drawingStats ? (
+                      drawingStats.status === 'optimal' ? (
+                        '● Optimal range (1–10 km²) · Double-click to finish'
+                      ) : drawingStats.status === 'coarse' ? (
+                        '▲ Coarse resolution (10–25 km²) · Double-click to finish'
+                      ) : (
+                        '✖ Beyond limit (> 25 km²) · Shrink area to scan'
+                      )
+                    ) : (
+                      'Optimal: 1 – 10 km² · Limit: Max 25 km² · Click to place'
+                    )
+                  ) : (
+                    drawingStats
+                      ? `${drawingStats.areaKm2 < 1 ? drawingStats.areaKm2.toFixed(2) : drawingStats.areaKm2.toFixed(1)} km² · Double-click to finish`
+                      : 'Click to place vertices · Double-click to finish'
+                  )}
+                </div>
                 <button className="study-btn danger" onClick={handleDrawStop}>Cancel</button>
               </div>
             )}

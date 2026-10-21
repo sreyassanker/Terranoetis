@@ -5851,3 +5851,23 @@ p { text-align: justify; }
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
   cursor: pointer;
 }
+
+/* Cesium Drawing Tooltip Glassmorphic Styling */
+.cesium-tool-tip {
+  background: rgba(15, 23, 42, 0.94) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-radius: 8px !important;
+  z-index: 99999 !important;
+  line-height: normal !important;
+  padding: 8px 12px !important;
+  min-height: auto !important;
+  pointer-events: none !important;
+}
+
+.cesium-tool-tip:before {
+  border-right-color: rgba(15, 23, 42, 0.94) !important;
+}
+

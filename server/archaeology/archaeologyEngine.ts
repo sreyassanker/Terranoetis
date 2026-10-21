@@ -10,7 +10,7 @@ import type {
   SpatialGridPoint,
 } from './types';
 import { PEER_REVIEWED_REFERENCE_SITES } from './referenceSites';
-import { acquireLiveSensoryTelemetry } from './dataAcquisition';
+import { acquireLiveSensoryTelemetry, fetchCadastralHeritage } from './dataAcquisition';
 import { inferBiomeFromCoordinates } from './biomeInference';
 import { extractAutonomousAnomalies } from './autonomousDetection';
 
@@ -74,8 +74,36 @@ export class ArchaeologyEngine {
     const biome = customBiome || inferBiomeFromCoordinates(centerLat, centerLon);
     const areaKm2 = parseFloat(calculateBboxAreaKm2(studyArea).toFixed(3));
 
-    // 1. Acquire live physical remote sensing data across all independent sensors (respecting cloud & date filters)
-    const liveSensors = await acquireLiveSensoryTelemetry(studyArea, options);
+    // Guardrail: Satellite archaeological prospection resolves physical structures at 1-3 km (~10 km²).
+    // Bounding boxes above 25 km² result in sub-sampling void where ancient ruins are lost.
+    if (areaKm2 > 25.0) {
+      return {
+        scanId: `arch_scan_${Date.now()}_area_exceeded`,
+        studyArea,
+        studyAreaKm2: areaKm2,
+        biome,
+        timestamp: Date.now(),
+        status: 'AREA_EXCEEDS_LIMIT',
+        statusMessage: `Study area is ${areaKm2.toLocaleString()} km², which exceeds the 25 km² archaeological prospection ceiling. Satellite prospection requires a focused study area between 1 km² and 10 km² (~1–3 km across) to resolve subterranean structures. Please constrain your selection or click Auto-Fit.`,
+        anomalies: [],
+        liveSensors: {
+          sentinel2: null,
+          sentinel1: null,
+          dem: null,
+          soil: null,
+          landCover: null,
+        },
+        overallConfidence: 0,
+        highConfidenceCount: 0,
+        insufficientDataWarning: `Study area (${areaKm2.toLocaleString()} km²) exceeds the 25 km² resolution limit for archaeological detection. Please resize to 1–3 km width.`,
+      };
+    }
+
+    // 1. Acquire live physical remote sensing data and query cadastral heritage concurrently
+    const [liveSensors, cadastralHeritage] = await Promise.all([
+      acquireLiveSensoryTelemetry(studyArea, options),
+      fetchCadastralHeritage(studyArea),
+    ]);
 
     // 2. Check data availability: If all sensors failed, halt and report insufficient data
     const hasAnySensoryData = liveSensors.sentinel2 || liveSensors.sentinel1 || liveSensors.dem;
@@ -194,6 +222,7 @@ export class ArchaeologyEngine {
         gridCols,
         gridRows,
         liveSensors,
+        cadastralHeritage,
       );
       if (autonomousDiscoveries.length > 0) {
         anomalies.push(...autonomousDiscoveries);
@@ -237,6 +266,13 @@ export class ArchaeologyEngine {
       } else {
         statusMessage = `Confirmed archaeological anomaly: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence). Cross-referenced with live ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR radar and ${liveSensors.dem?.dataset || 'SRTM DEM'} topography${pixStr}.`;
       }
+      if (cadastralHeritage && cadastralHeritage.length > 0) {
+        statusMessage += ` [Documented Heritage Site in AOI: "${cadastralHeritage[0].name}"]`;
+      }
+    } else if (cadastralHeritage && cadastralHeritage.length > 0) {
+      status = 'STANDING_HERITAGE_VERIFIED';
+      const heritage = cadastralHeritage[0];
+      statusMessage = `Verified Documented Standing Heritage: "${heritage.name}" (${heritage.periodOrEpoch || 'Historical Epoch'}, ${heritage.heritageDesignation || 'Cataloged Monument'}). Footprint cataloged as surface heritage baseline. Multi-sensor prospection on surrounding floodplain/buffer confirms 0 uncharted subterranean anomalies (terrain clear)${pixStr}.`;
     } else {
       status = 'NO_ANOMALY_DETECTED';
       const s2Info = liveSensors.sentinel2
@@ -267,6 +303,7 @@ export class ArchaeologyEngine {
       status,
       statusMessage,
       anomalies,
+      cadastralHeritage,
       liveSensors,
       overallConfidence,
       highConfidenceCount,

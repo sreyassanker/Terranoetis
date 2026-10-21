@@ -116,6 +116,57 @@ async function runLiveAudit() {
   assert('Spatial grid still generates 1,024 physical points from live SRTM', negativeScan.spatialGrid?.points.length === 1024);
 
   // -------------------------------------------------------------
+  // TEST 3.5: Monument Urban Fabric & Cadastral Standing Heritage (Taj Mahal, Agra)
+  // -------------------------------------------------------------
+  console.log('\n--- STEP 3.5: Cadastral Standing Heritage Verification & Subterranean Masking (Taj Mahal, Agra) ---');
+  const tajBbox = { latMin: 27.165, latMax: 27.178, lonMin: 78.038, lonMax: 78.055 };
+  console.log(`Auditing known historical monument to verify Tier 1 Cadastral Heritage cataloging without subterranean false positives...`);
+
+  const tajStart = Date.now();
+  const tajScan = await globalArchaeologyEngine.scanStudyArea(tajBbox);
+  const tajDuration = Date.now() - tajStart;
+
+  console.log(`Taj Mahal scan completed in ${tajDuration}ms.`);
+  console.log(`  - Status: ${tajScan.status}`);
+  console.log(`  - Cadastral Heritage: ${tajScan.cadastralHeritage?.map(h => `${h.name} (${h.periodOrEpoch})`).join(', ')}`);
+  console.log(`  - Subterranean Anomalies Count: ${tajScan.anomalies.length}`);
+  console.log(`  - Land Cover: Built-up ${tajScan.liveSensors.landCover?.builtUpPercent}%, Cropland ${tajScan.liveSensors.landCover?.croplandPercent}%`);
+  console.log(`  - Urban Fabric Flag: ${tajScan.liveSensors.landCover?.isUrbanFabric}`);
+
+  assert('Taj Mahal status confirms STANDING_HERITAGE_VERIFIED', tajScan.status === 'STANDING_HERITAGE_VERIFIED');
+  assert('Taj Mahal cadastral heritage accurately cataloged', Boolean(tajScan.cadastralHeritage?.length && tajScan.cadastralHeritage[0].name.includes('Taj Mahal')));
+  assert('Taj Mahal correctly classified as above-ground standing architecture', tajScan.cadastralHeritage?.[0]?.isAboveGroundStanding === true);
+  assert('Zero false positive subterranean discoveries on Taj Mahal monument', tajScan.anomalies.length === 0);
+  assert('ESA WorldCover correctly flags urban/built-up fabric', tajScan.liveSensors.landCover?.isUrbanFabric === true);
+
+  // -------------------------------------------------------------
+  // TEST 3.6: Dual-Date Multi-Temporal Differential Analysis
+  // -------------------------------------------------------------
+  console.log('\n--- STEP 3.6: Dual-Date Multi-Temporal Differential Prospection ---');
+  const silchesterBbox = { lonMin: -1.105, latMin: 51.350, lonMax: -1.075, latMax: 51.365 };
+  console.log(`Executing dual-date seasonal differential (summer drought vs spring baseline) on Silchester Roman Town...`);
+
+  const multiStart = Date.now();
+  const multiScan = await globalArchaeologyEngine.scanStudyArea(silchesterBbox, 'agricultural_plain', {
+    seasonWindow: 'multi_temporal_diff',
+  });
+  const multiDuration = Date.now() - multiStart;
+
+  console.log(`Dual-date scan completed in ${multiDuration}ms.`);
+  console.log(`  - Status: ${multiScan.status}`);
+  console.log(`  - Confirmed Anomalies: ${multiScan.anomalies.length}`);
+  console.log(`  - Stress Date (Summer): ${multiScan.liveSensors.sentinel2?.multiTemporal?.stressDate}`);
+  console.log(`  - Baseline Date (Spring): ${multiScan.liveSensors.sentinel2?.multiTemporal?.baselineDate}`);
+  console.log(`  - Temporal Separation: ${multiScan.liveSensors.sentinel2?.multiTemporal?.daysSeparation} days`);
+  console.log(`  - Delta NDRE: ${multiScan.liveSensors.sentinel2?.multiTemporal?.deltaNdre}`);
+  console.log(`  - Contrast Amplification: ${multiScan.liveSensors.sentinel2?.multiTemporal?.contrastAmplificationRatio}x`);
+
+  assert('Dual-date differential confirms Silchester anomalies', multiScan.anomalies.length > 0);
+  assert('Multi-temporal telemetry is attached', multiScan.liveSensors.sentinel2?.multiTemporal?.isMultiTemporal === true);
+  assert('Inter-seasonal separation is >= 30 days', (multiScan.liveSensors.sentinel2?.multiTemporal?.daysSeparation ?? 0) >= 30);
+  assert('Delta NDRE differential is positive', (multiScan.liveSensors.sentinel2?.multiTemporal?.deltaNdre ?? 0) > 0);
+
+  // -------------------------------------------------------------
   // TEST 4: Live HTTP REST API Integration
   // -------------------------------------------------------------
   console.log('\n--- STEP 4: Live HTTP Express Server & REST API Verification ---');

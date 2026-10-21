@@ -34,6 +34,7 @@ export interface MultiModalEvidence {
   orthogonalityScore: number;        // Fraction of corner angles at 90° ± 5° (0.0 to 1.0)
   paleoWaterDistanceMeters: number;  // Distance to nearest watercourse/paleochannel
   slopeGradientDegrees: number;      // Local terrain slope (settlements prefer < 15°)
+  multiTemporalDeltaNdre?: number;   // Dual-date phenological differential stress (ΔNDRE across dates)
 }
 
 export interface ArchaeologicalAnomaly {
@@ -77,6 +78,21 @@ export interface LiveSensorAcquisition {
       computedNdre: number;
       computedNdvi: number;
       computedNdmi: number;
+      computedNdbi: number;
+    };
+    multiTemporal?: {
+      isMultiTemporal: boolean;
+      stressDate: string;             // Stressed / peak dry date (YYYY-MM-DD)
+      baselineDate: string;           // Moist / spring baseline date (YYYY-MM-DD)
+      daysSeparation: number;         // Days elapsed between the two scenes
+      stressSceneId: string;
+      baselineSceneId: string;
+      stressNdre: number;
+      baselineNdre: number;
+      deltaNdre: number;              // ΔNDRE differential
+      deltaNdvi: number;              // ΔNDVI differential
+      deltaNdmi: number;              // ΔNDMI moisture differential
+      contrastAmplificationRatio: number; // Factor enhancement e.g. 1.85x
     };
   } | null;
   sentinel1: {
@@ -104,6 +120,35 @@ export interface LiveSensorAcquisition {
     siltPercent: number;
     textureClass: string;
   } | null;
+  landCover?: {
+    dataset: string;
+    builtUpPercent: number;
+    croplandPercent: number;
+    treeCoverPercent: number;
+    grasslandPercent: number;
+    waterPercent: number;
+    barePercent: number;
+    isUrbanFabric: boolean;
+  } | null;
+}
+
+export interface CadastralHeritageSite {
+  id: string;
+  name: string;
+  category: 'standing_monument' | 'historic_complex' | 'archaeological_ruins' | 'world_heritage_site';
+  historicType: string;
+  periodOrEpoch?: string;
+  heritageDesignation?: string;
+  coordinates: {
+    lat: number;
+    lon: number;
+    elevationMeters?: number;
+  };
+  boundingBox?: StudyAreaBoundingBox;
+  polygonCoordinates?: Array<[number, number]>;
+  source: string;
+  architecturalContext?: string;
+  isAboveGroundStanding: boolean;
 }
 
 export interface SpatialGridPoint {
@@ -118,12 +163,17 @@ export interface SpatialGridPoint {
 
 export interface ScanOptions {
   maxCloudCoverPercent?: number;
-  seasonWindow?: 'clearest_auto' | 'dry_season' | 'historical_archive';
+  seasonWindow?: 'clearest_auto' | 'dry_season' | 'latest' | 'multi_temporal_diff' | 'historical_archive';
   startDate?: string;
   endDate?: string;
 }
 
-export type ScanStatus = 'ANOMALY_CONFIRMED' | 'NO_ANOMALY_DETECTED' | 'INSUFFICIENT_DATA';
+export type ScanStatus =
+  | 'ANOMALY_CONFIRMED'
+  | 'STANDING_HERITAGE_VERIFIED'
+  | 'NO_ANOMALY_DETECTED'
+  | 'INSUFFICIENT_DATA'
+  | 'AREA_EXCEEDS_LIMIT';
 
 export interface ArchaeologyScanResult {
   scanId: string;
@@ -134,6 +184,7 @@ export interface ArchaeologyScanResult {
   status: ScanStatus;
   statusMessage: string;
   anomalies: ArchaeologicalAnomaly[];
+  cadastralHeritage?: CadastralHeritageSite[];
   liveSensors: LiveSensorAcquisition;
   overallConfidence: number;
   highConfidenceCount: number;

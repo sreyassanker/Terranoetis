@@ -6,6 +6,7 @@ import type {
   AnomalyCategory,
   SpatialGridPoint,
   LiveSensorAcquisition,
+  CadastralHeritageSite,
 } from './types';
 import { calculateHaversineDistanceMeters } from './archaeologyEngine';
 
@@ -187,6 +188,7 @@ export function extractAutonomousAnomalies(
   gridWidth: number,
   gridHeight: number,
   liveSensors: LiveSensorAcquisition,
+  cadastralHeritage?: CadastralHeritageSite[],
 ): ArchaeologicalAnomaly[] {
   if (!gridPoints || gridPoints.length < gridWidth * gridHeight || gridWidth < 4 || gridHeight < 4) {
     return [];
@@ -287,8 +289,8 @@ export function extractAutonomousAnomalies(
       const pt = gridPoints[r * gridWidth + c];
       const tpi = tpiMatrix[r][c];
       const prominence = Math.abs(tpi) / demStd;
-      // Prominent relative to regional relief (prominence >= 0.35) or significant absolute relief (|TPI| >= 2.0m)
-      const isProminent = prominence >= 0.35 || Math.abs(tpi) >= 2.0;
+      // Prominent relative to regional relief (prominence >= 0.35)
+      const isProminent = prominence >= 0.35;
 
       if (Math.abs(tpi) >= minReliefThreshold && isProminent) {
         candidatePoints.push({
@@ -335,6 +337,71 @@ export function extractAutonomousAnomalies(
     const centroidLon = parseFloat((cluster.reduce((s, p) => s + p.lon, 0) / cluster.length).toFixed(6));
     const centroidElev = parseFloat((cluster.reduce((s, p) => s + p.elevation, 0) / cluster.length).toFixed(1));
     const meanClusterTpi = parseFloat((cluster.reduce((s, p) => s + p.tpi, 0) / cluster.length).toFixed(2));
+
+    // 0. STANDING CADASTRAL HERITAGE BUFFER MASKING:
+    // If a cluster centroid lies within the structural footprint, bounding box, or buffer (< 850m) of a verified
+    // standing heritage monument (e.g. Taj Mahal, Colosseum), reject it from being declared an uncharted
+    // subterranean discovery. Standing monuments are cataloged in Tier 1 Cadastral Heritage, not as new buried discoveries.
+    if (cadastralHeritage && cadastralHeritage.length > 0) {
+      const isStandingMonumentOverlap = cadastralHeritage.some(h => {
+        if (!h.isAboveGroundStanding) return false;
+        const distM = calculateHaversineDistanceMeters(centroidLat, centroidLon, h.coordinates.lat, h.coordinates.lon);
+        if (distM < 850) return true;
+        if (h.boundingBox) {
+          const latTol = 0.003;
+          const lonTol = 0.003;
+          if (
+            centroidLat >= h.boundingBox.latMin - latTol &&
+            centroidLat <= h.boundingBox.latMax + latTol &&
+            centroidLon >= h.boundingBox.lonMin - lonTol &&
+            centroidLon <= h.boundingBox.lonMax + lonTol
+          ) {
+            return true;
+          }
+        }
+        return false;
+      });
+      if (isStandingMonumentOverlap) {
+        continue; // Suppress false subterranean flag over standing historic monument footprint
+      }
+    }
+
+    // 1. ACTIVE SURFACE WATER & RIVERBODY REJECTION:
+    // Active modern surface rivers (e.g. Yamuna, Nile, Thames) have active water coverage (ESA WorldCover Class 80 >= 3% or SWIR NDMI drop).
+    // Active surface rivers/lakes must NOT be misclassified as subterranean buried paleochannels or sunken ancient moats.
+    const activeWater = liveSensors.landCover?.waterPercent ?? 0;
+    const isWaterBody = activeWater >= 3.0 || (liveSensors.sentinel2?.pixelStatistics && liveSensors.sentinel2.pixelStatistics.computedNdmi < -0.15 && meanClusterTpi < -1.0);
+    if ((activeWater >= 3.0 || isWaterBody) && (meanClusterTpi < -1.0)) {
+      continue; // Reject active modern surface riverbed / lake depression
+    }
+
+    // 2. MODERN BUILT-UP & URBAN MONUMENT FABRIC REJECTION:
+    // Built-up urban fabric, paved complexes, and manicured parks (ESA WorldCover Class 50 >= 25% or Built-up >= 15% with Cropland < 5%)
+    // produce sharp surface terrace drops (e.g. Taj Mahal plinth/terrace) and artificial lawn-vs-stone contrast.
+    // In non-hyper-arid biomes, urban surface infrastructure is cleanly rejected from subterranean archaeological prospection.
+    const isUrban = liveSensors.landCover?.isUrbanFabric ?? false;
+    const isHyperArid = biome === 'arid_desert' && (liveSensors.soil?.sandPercent ?? 0) > 40;
+    if (isUrban && !isHyperArid) {
+      continue; // Reject modern urban fabric, active monuments, and paved surfaces
+    }
+
+    // 3. DESERT AEOLIAN DUNE FIELD (ERG) REJECTION:
+    // If the landscape is a natural mobile sand dune sea (sand >= 65%, cropland = 0%, regional demStd >= 6m, and low optical contrast)
+    // undulating dune ridges must not be misclassified as ancient ramparts or caravan routes.
+    const soilSand = liveSensors.soil?.sandPercent ?? 30;
+    const opticalNdre = liveSensors.sentinel2?.pixelStatistics?.computedNdre ?? 0;
+    const prominenceRatio = Math.abs(meanClusterTpi) / demStd;
+    const isMobileDuneSea =
+      biome === 'arid_desert' &&
+      soilSand >= 65 &&
+      (liveSensors.landCover?.croplandPercent ?? 0) === 0 &&
+      demStd >= 6.0 &&
+      Math.abs(opticalNdre) < 0.06 &&
+      prominenceRatio < 0.50;
+
+    if (isMobileDuneSea) {
+      continue; // Reject natural undulating sand dune crests and troughs
+    }
 
     // Bounding Box
     const lats = cluster.map(p => p.lat);
@@ -405,10 +472,8 @@ export function extractAutonomousAnomalies(
     // Dynamic Multi-Modal Evidence & Q1 Biome-Adaptive Proxy Chains
     const cloudCover = liveSensors.sentinel2?.cloudCoverPercent ?? 0;
     const cloudFactor = Math.max(0.65, 1.0 - cloudCover / 100);
-    const opticalNdre = liveSensors.sentinel2?.pixelStatistics?.computedNdre ?? 0;
     const swirNdmi = liveSensors.sentinel2?.pixelStatistics?.computedNdmi ?? 0;
     const soilClay = liveSensors.soil?.clayPercent ?? 20;
-    const soilSand = liveSensors.soil?.sandPercent ?? 30;
     const radarDb = parseFloat((liveSensors.soil ? 3.5 + 0.1 * (liveSensors.soil.clayPercent / 10) : -15.5).toFixed(1));
     const slopeDeg = liveSensors.dem?.slopeDegrees ?? 2.1;
 
@@ -416,19 +481,18 @@ export function extractAutonomousAnomalies(
     let morphScore = 0.15; // baseline cluster coherence
     let opticalScore = 0.0;
     let radarScore = 0.0;
-    const prominenceRatio = Math.abs(meanClusterTpi) / demStd;
 
     if (biome === 'arid_desert' || biome === 'alluvial_floodplain') {
       // 1. DESERT & ALLUVIAL FLOODPLAIN PROXY CHAIN (Ahramat, Tanis, Ubar):
       // In arid conditions without vegetation, decomposed mudbrick & canal silts alter SWIR reflectance (B11 vs B08).
       // Topography manifests as tell mounds (+1.2m to +5m) or sunken paleochannel/harbor basins (-1.5m to -12m).
-      if (Math.abs(meanClusterTpi) >= 1.2) {
-        reliefScore = Math.min(0.35, (Math.abs(meanClusterTpi) / 3.0) * 0.30);
+      if (Math.abs(meanClusterTpi) >= 1.2 && prominenceRatio >= 0.35) {
+        reliefScore = Math.min(0.35, prominenceRatio * 0.30);
       }
-      if (Math.abs(swirNdmi) >= 0.05) {
-        opticalScore = Math.min(0.25, (Math.abs(swirNdmi) / 0.10) * 0.25);
+      if (Math.abs(swirNdmi) >= 0.12) {
+        opticalScore = Math.min(0.25, (Math.abs(swirNdmi) / 0.20) * 0.25);
       }
-      if (soilSand >= 35 || soilClay >= 25 || liveSensors.sentinel1) {
+      if (soilClay >= 25 || (liveSensors.sentinel1 && liveSensors.sentinel1.polarizations.length >= 2)) {
         radarScore = 0.20;
       }
       if (circularity >= 0.45 || eccentricity >= 2.2) {
@@ -461,6 +525,20 @@ export function extractAutonomousAnomalies(
       }
     }
 
+    // 4. Multi-Temporal Phenological Differential Enhancement:
+    const multiTemp = liveSensors.sentinel2?.multiTemporal;
+    if (multiTemp?.isMultiTemporal) {
+      if (multiTemp.deltaNdre >= 0.06) {
+        // Differential multi-date phenology eliminates surface crop noise and amplifies subsurface signal
+        opticalScore = Math.min(0.38, Math.max(opticalScore, (multiTemp.deltaNdre / 0.18) * 0.35));
+      } else if (category === 'linear_foundation' || category === 'enclosure_ditch') {
+        // Invariant static vegetation between dry summer and spring (< 0.03 delta) indicates manicured lawn/irrigated parkland
+        if (multiTemp.deltaNdre < 0.03) {
+          opticalScore *= 0.4;
+        }
+      }
+    }
+
     const spectralContrast = parseFloat(
       (Math.abs(opticalNdre) >= 0.08
         ? (meanClusterTpi > 0 ? opticalNdre * 0.8 : opticalNdre * 1.2)
@@ -476,6 +554,7 @@ export function extractAutonomousAnomalies(
       orthogonalityScore: eccentricity >= 2.0 ? 0.82 : 0.45,
       paleoWaterDistanceMeters: category === 'paleochannel_segment' ? 0 : 350,
       slopeGradientDegrees: slopeDeg,
+      multiTemporalDeltaNdre: multiTemp?.deltaNdre,
     };
 
     const totalEvidence = reliefScore + morphScore + opticalScore + radarScore;
@@ -491,7 +570,10 @@ export function extractAutonomousAnomalies(
     const s2Name = liveSensors.sentinel2?.platform || 'Sentinel-2';
     const s1Name = liveSensors.sentinel1?.platform || 'Sentinel-1';
 
-    const evidenceSummary = `Autonomous multi-sensor discovery: Corroborated ${Math.abs(meanClusterTpi)}m ${meanClusterTpi > 0 ? 'elevated' : 'sunken'} micro-relief over ${areaM2.toLocaleString()} m² (eccentricity ${eccentricity}, circularity ${circularity}). Corroborated with ${s1Name} C-band SAR backscatter (${radarDb} dB) and ${s2Name} optical contrast.`;
+    let evidenceSummary = `Autonomous multi-sensor discovery: Corroborated ${Math.abs(meanClusterTpi)}m ${meanClusterTpi > 0 ? 'elevated' : 'sunken'} micro-relief over ${areaM2.toLocaleString()} m² (eccentricity ${eccentricity}, circularity ${circularity}). Corroborated with ${s1Name} C-band SAR backscatter (${radarDb} dB) and ${s2Name} optical contrast.`;
+    if (multiTemp?.isMultiTemporal) {
+      evidenceSummary += ` Verified dual-date differential (${multiTemp.stressDate} vs ${multiTemp.baselineDate}): ΔNDRE=${multiTemp.deltaNdre} (${Math.round((multiTemp.contrastAmplificationRatio - 1) * 100)}% contrast amplification).`;
+    }
 
     discoveredAnomalies.push({
       id: `auto_${category}_${Date.now()}_${i + 1}`,

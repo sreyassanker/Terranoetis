@@ -96,6 +96,24 @@ function createPinDataUrl(category: string, confidencePct: number): string {
 }
 
 /**
+ * Creates an architectural temple / monument pin SVG for verified standing historical heritage.
+ */
+function createHeritagePinDataUrl(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="68" viewBox="0 0 60 68">
+    <defs>
+      <filter id="glow-gold" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.8"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b" flood-opacity="0.8"/>
+      </filter>
+    </defs>
+    <path d="M30 2C16.8 2 6 12.8 6 26c0 18 24 40 24 40s24-22 24-40c0-13.2-10.8-24-24-24z" fill="#f59e0b" stroke="#ffffff" stroke-width="2.5" filter="url(#glow-gold)"/>
+    <circle cx="30" cy="26" r="16" fill="#0f172a"/>
+    <path d="M22 34h16v-2H22v2zm14-4V22h-3v8h-2V22h-2v8h-2V22h-3v8h-4v2h18v-2h-4zm-6-13l9 4.5V20H21v-1.5l9-4.5z" fill="#fde68a"/>
+  </svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+/**
  * Removes all rendered archaeology entities, IDW surfaces, and screen handlers from the Cesium globe.
  */
 export function clearArchaeologyOverlays(viewer: Cesium.Viewer | null): void {
@@ -122,6 +140,7 @@ export interface ArchaeologyOverlayOptions {
   showIdwSurface?: boolean;
   surfaceOpacity?: number;
   showConfidenceFog?: boolean;
+  showPins?: boolean;
   onProbe?: (probe: { lat: number; lon: number; value: number; confidencePct: number } | null) => void;
 }
 
@@ -305,43 +324,122 @@ export function renderArchaeologyAnomaliesOnGlobe(
     }
 
     // 2d. Discovery Pin Billboard & Informative Label
-    const clampedCentroidLat = Math.max(latMin, Math.min(latMax, anomaly.centroid.lat));
-    const clampedCentroidLon = Math.max(lonMin, Math.min(lonMax, anomaly.centroid.lon));
+    if (options?.showPins !== false) {
+      const clampedCentroidLat = Math.max(latMin, Math.min(latMax, anomaly.centroid.lat));
+      const clampedCentroidLon = Math.max(lonMin, Math.min(lonMax, anomaly.centroid.lon));
 
-    const pinEntity = viewer.entities.add({
-      id: `${ARCHAEOLOGY_ENTITY_PREFIX}pin_${anomaly.id}_${index}`,
-      name: `${anomaly.name} (${confidencePct}% Confidence)`,
-      position: Cesium.Cartesian3.fromDegrees(
-        clampedCentroidLon,
-        clampedCentroidLat,
-        (anomaly.centroid.elevationMeters || 0) + 35,
-      ),
-      billboard: {
-        image: createPinDataUrl(anomaly.category, confidencePct),
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-        scale: 0.9,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      label: {
-        text: `★ ${anomaly.name.toUpperCase()}\n[ ${confidencePct}% CONFIDENCE · ${categoryColors.name.toUpperCase()} ]`,
-        font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.92)'),
-        backgroundPadding: new Cesium.Cartesian2(10, 5),
-        verticalOrigin: Cesium.VerticalOrigin.TOP,
-        pixelOffset: new Cesium.Cartesian2(0, 8),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 300000),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    });
+      const pinEntity = viewer.entities.add({
+        id: `${ARCHAEOLOGY_ENTITY_PREFIX}pin_${anomaly.id}_${index}`,
+        name: `${anomaly.name} (${confidencePct}% Confidence)`,
+        position: Cesium.Cartesian3.fromDegrees(
+          clampedCentroidLon,
+          clampedCentroidLat,
+          (anomaly.centroid.elevationMeters || 0) + 35,
+        ),
+        billboard: {
+          image: createPinDataUrl(anomaly.category, confidencePct),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+          scale: 0.9,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `★ ${anomaly.name.toUpperCase()}\n[ ${confidencePct}% CONFIDENCE · ${categoryColors.name.toUpperCase()} ]`,
+          font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.92)'),
+          backgroundPadding: new Cesium.Cartesian2(10, 5),
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 8),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 300000),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
 
-    (pinEntity as any).__archaeologyAnomaly = anomaly;
+      (pinEntity as any).__archaeologyAnomaly = anomaly;
+    }
   });
+
+  // =========================================================================
+  // 4. RENDER VERIFIED STANDING HERITAGE MONUMENTS (TIER 1 CADASTRAL BASELINE)
+  // =========================================================================
+  if (scanResult?.cadastralHeritage && scanResult.cadastralHeritage.length > 0) {
+    scanResult.cadastralHeritage.forEach((heritage, hIdx) => {
+      const lat = heritage.coordinates.lat;
+      const lon = heritage.coordinates.lon;
+      if (lat < latMin || lat > latMax || lon < lonMin || lon > lonMax) return;
+
+      // Golden boundary polygon
+      if (heritage.polygonCoordinates && heritage.polygonCoordinates.length >= 3) {
+        const degreesArray: number[] = [];
+        heritage.polygonCoordinates.forEach(([pLon, pLat]) => {
+          degreesArray.push(pLon, pLat);
+        });
+
+        viewer.entities.add({
+          id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_fill_${heritage.id}_${hIdx}`,
+          name: `🏛️ ${heritage.name}`,
+          polygon: {
+            hierarchy: Cesium.Cartesian3.fromDegreesArray(degreesArray),
+            material: Cesium.Color.fromCssColorString('rgba(245, 158, 11, 0.25)'),
+            classificationType: Cesium.ClassificationType.TERRAIN,
+          },
+        });
+
+        const closed = [...degreesArray];
+        if (closed[0] !== closed[closed.length - 2] || closed[1] !== closed[closed.length - 1]) {
+          closed.push(closed[0], closed[1]);
+        }
+        viewer.entities.add({
+          id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_glow_${heritage.id}_${hIdx}`,
+          name: `${heritage.name} Perimeter Boundary`,
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(closed),
+            width: 4,
+            material: new Cesium.PolylineGlowMaterialProperty({
+              glowPower: 0.4,
+              taperPower: 1.0,
+              color: Cesium.Color.fromCssColorString('#fbbf24'),
+            }),
+            clampToGround: true,
+          },
+        });
+      }
+
+      // Heritage Billboard Pin & Golden Badge
+      viewer.entities.add({
+        id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_pin_${heritage.id}_${hIdx}`,
+        name: `🏛️ ${heritage.name} (${heritage.periodOrEpoch || 'Standing Heritage'})`,
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, (heritage.coordinates.elevationMeters || 0) + 40),
+        billboard: {
+          image: createHeritagePinDataUrl(),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+          scale: 1.0,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `🏛️ ${heritage.name.toUpperCase()}\n[ ${heritage.periodOrEpoch?.toUpperCase() || 'DOCUMENTED HERITAGE'} ]`,
+          font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          fillColor: Cesium.Color.fromCssColorString('#fde68a'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('rgba(24, 18, 10, 0.95)'),
+          backgroundPadding: new Cesium.Cartesian2(10, 6),
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 8),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400000),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    });
+  }
 
   throttledRender(viewer);
 }

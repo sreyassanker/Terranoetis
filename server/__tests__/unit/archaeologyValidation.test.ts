@@ -242,4 +242,61 @@ describe('Space Archaeology & Validation Engine', () => {
     expect(tell.centroid.lat).toBeCloseTo(35.11, 1);
     expect(tell.centroid.lon).toBeCloseTo(42.11, 1);
   });
+
+  it('accurately catalogs documented standing monuments (Taj Mahal) in Tier 1 Cadastral Heritage while suppressing false subterranean flags', async () => {
+    const tajBbox = {
+      latMin: 27.165,
+      latMax: 27.178,
+      lonMin: 78.038,
+      lonMax: 78.055,
+    };
+
+    const scan = await globalArchaeologyEngine.scanStudyArea(tajBbox);
+
+    // Tier 1: Cadastral standing heritage cataloging
+    expect(scan.status).toBe('STANDING_HERITAGE_VERIFIED');
+    expect(scan.cadastralHeritage).toBeDefined();
+    expect(scan.cadastralHeritage!.length).toBeGreaterThanOrEqual(1);
+    expect(scan.cadastralHeritage![0].name).toContain('Taj Mahal');
+    expect(scan.cadastralHeritage![0].isAboveGroundStanding).toBe(true);
+    expect(scan.statusMessage).toContain('Taj Mahal');
+
+    // Tier 2: Subterranean prospection on surrounding floodplain MUST NOT declare false positive subterranean discoveries
+    expect(scan.anomalies.length).toBe(0);
+    expect(scan.highConfidenceCount).toBe(0);
+
+    // Landcover should detect urban fabric
+    if (scan.liveSensors.landCover) {
+      expect(scan.liveSensors.landCover.isUrbanFabric).toBe(true);
+      expect(scan.liveSensors.landCover.builtUpPercent).toBeGreaterThanOrEqual(20);
+    }
+  }, 20000);
+
+  it('executes dual-date multi-temporal differential prospection (summer vs spring) with contrast amplification', async () => {
+    const silchesterBbox = {
+      lonMin: -1.105,
+      latMin: 51.350,
+      lonMax: -1.075,
+      latMax: 51.365,
+    };
+
+    const scan = await globalArchaeologyEngine.scanStudyArea(silchesterBbox, 'agricultural_plain', {
+      seasonWindow: 'multi_temporal_diff',
+    });
+
+    expect(scan.status).toBe('ANOMALY_CONFIRMED');
+    expect(scan.anomalies.length).toBeGreaterThanOrEqual(1);
+
+    const s2 = scan.liveSensors.sentinel2;
+    expect(s2).toBeDefined();
+    expect(s2?.multiTemporal).toBeDefined();
+    if (s2?.multiTemporal) {
+      expect(s2.multiTemporal.isMultiTemporal).toBe(true);
+      expect(s2.multiTemporal.stressDate).toBeTruthy();
+      expect(s2.multiTemporal.baselineDate).toBeTruthy();
+      expect(s2.multiTemporal.daysSeparation).toBeGreaterThanOrEqual(30);
+      expect(s2.multiTemporal.deltaNdre).toBeGreaterThan(0.01);
+      expect(s2.multiTemporal.contrastAmplificationRatio).toBeGreaterThanOrEqual(1.0);
+    }
+  }, 25000);
 });

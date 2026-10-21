@@ -661,20 +661,59 @@ function normalizeLocationQuery(value: string): string {
 }
 
 function parseCoordinateQuery(query: string): LocalSearchResult | null {
-  const compact = query.trim().replace(/\s+/g, ' ');
-  const pair = compact.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  const split = pair
-    ? pair
-    : compact.match(/^(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)$/);
-  if (!split) return null;
-  const first = Number(split[1]);
-  const second = Number(split[2]);
-  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+  const compact = query.trim();
+  if (!compact) return null;
 
-  const lat = Math.abs(first) <= 90 ? first : second;
-  const lon = Math.abs(first) <= 90 ? second : first;
-  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  return { name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon };
+  // 1. DMS pattern: e.g. 28°35'56"N 71°9'0"E or 37°00′31″N, 6°19′42″W
+  const dmsRegex = /([0-9.]+)\s*[°ºd]\s*([0-9.]+)?\s*['′]?\s*([0-9.]+)?\s*["″]?\s*([NSEWnsew])\s*[,/ ]?\s*([0-9.]+)\s*[°ºd]\s*([0-9.]+)?\s*['′]?\s*([0-9.]+)?\s*["″]?\s*([NSEWnsew])/i;
+  const dmsMatch = compact.match(dmsRegex);
+  if (dmsMatch) {
+    const parseDms = (deg: string, min?: string, sec?: string, dir?: string) => {
+      let val = parseFloat(deg) + (parseFloat(min || '0') / 60) + (parseFloat(sec || '0') / 3600);
+      if (dir && /^[SW]$/i.test(dir)) val = -val;
+      return val;
+    };
+    const v1 = parseDms(dmsMatch[1], dmsMatch[2], dmsMatch[3], dmsMatch[4]);
+    const v2 = parseDms(dmsMatch[5], dmsMatch[6], dmsMatch[7], dmsMatch[8]);
+    const isV1Lat = /^[NS]$/i.test(dmsMatch[4]);
+    const lat = isV1Lat ? v1 : v2;
+    const lon = isV1Lat ? v2 : v1;
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return { name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon };
+    }
+  }
+
+  // 2. Decimal with directional indicators: e.g. 37.0086° N, 6.3283° W or 37.0086N, -6.3283W
+  const dirRegex = /(-?[0-9.]+)\s*°?\s*([NSns])?\s*[,/ ]\s*(-?[0-9.]+)\s*°?\s*([EWew])?/i;
+  const dirMatch = compact.match(dirRegex);
+  if (dirMatch && (dirMatch[2] || dirMatch[4])) {
+    let lat = parseFloat(dirMatch[1]);
+    let lon = parseFloat(dirMatch[3]);
+    if (dirMatch[2] && dirMatch[2].toUpperCase() === 'S' && lat > 0) lat = -lat;
+    if (dirMatch[4] && dirMatch[4].toUpperCase() === 'W' && lon > 0) lon = -lon;
+    if (dirMatch[2] && dirMatch[2].toUpperCase() === 'N' && lat < 0) lat = Math.abs(lat);
+    if (dirMatch[4] && dirMatch[4].toUpperCase() === 'E' && lon < 0) lon = Math.abs(lon);
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return { name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon };
+    }
+  }
+
+  // 3. Plain decimal pair: e.g. 37.0086, -6.3283 or 37.0086 -6.3283 or lat: 37.0086 lon: -6.3283
+  const cleaned = compact.replace(/^(?:lat(?:itude)?\s*:\s*)?(-?[0-9.]+)[, ]+(?:lon(?:gitude)?\s*:\s*)?(-?[0-9.]+)$/i, '$1,$2');
+  const pair = cleaned.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (pair) {
+    const first = Number(pair[1]);
+    const second = Number(pair[2]);
+    if (Number.isFinite(first) && Number.isFinite(second)) {
+      const lat = Math.abs(first) <= 90 ? first : second;
+      const lon = Math.abs(first) <= 90 ? second : first;
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon };
+      }
+    }
+  }
+
+  return null;
 }
 
 function findLocalLocationMatches(query: string, limit = 6): LocalSearchResult[] {
@@ -1479,6 +1518,10 @@ export default function App() {
   const [showFirstRun, setShowFirstRun] = useState<boolean>(() => isFirstRun());
   const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
   const [showArchaeologyPanel, setShowArchaeologyPanel] = useState(false);
+  const showArchaeologyPanelRef = useRef(showArchaeologyPanel);
+  useEffect(() => {
+    showArchaeologyPanelRef.current = showArchaeologyPanel;
+  }, [showArchaeologyPanel]);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // CMD+K keyboard shortcut
   useEffect(() => {
@@ -1966,6 +2009,10 @@ export default function App() {
   const studyAreasRef = useRef<StudyAreaItem[]>([]);
   const [studyAreas, setStudyAreas] = useState<StudyAreaItem[]>([]);
   const [studyDrawing, setStudyDrawing] = useState(false);
+  const [drawingStats, setDrawingStats] = useState<{
+    areaKm2: number;
+    status: 'optimal' | 'coarse' | 'exceeds';
+  } | null>(null);
   const drawerRef = useRef<any>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const virtualizedChatRef = useRef<VirtualizedMessageListHandle>(null);
@@ -10689,6 +10736,129 @@ case 'openPanel':
     throttledRender(v);
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
+  const computeDrawingRectangleAreaKm2 = (positions: Cesium.Cartesian3[]): number => {
+    if (positions.length < 2) return 0;
+    const p1 = Cesium.Cartographic.fromCartesian(positions[0]);
+    const p2 = Cesium.Cartographic.fromCartesian(positions[1]);
+    const lon1 = Cesium.Math.toDegrees(p1.longitude);
+    const lat1 = Cesium.Math.toDegrees(p1.latitude);
+    const lon2 = Cesium.Math.toDegrees(p2.longitude);
+    const lat2 = Cesium.Math.toDegrees(p2.latitude);
+
+    const midLat = (lat1 + lat2) / 2;
+    const widthKm = Math.abs(lon2 - lon1) * (111.32 * Math.cos(midLat * Math.PI / 180));
+    const heightKm = Math.abs(lat2 - lat1) * 110.574;
+    return widthKm * heightKm;
+  };
+
+  const computeDrawingCircleAreaKm2 = (positions: Cesium.Cartesian3[]): number => {
+    if (positions.length < 2) return 0;
+    const radiusM = Cesium.Cartesian3.distance(positions[0], positions[1]);
+    return (Math.PI * radiusM * radiusM) / 1e6;
+  };
+
+  const computeDrawingPolygonAreaKm2 = (positions: Cesium.Cartesian3[]): number => {
+    if (positions.length < 3) return 0;
+    const coords = positions.map(p => {
+      const c = Cesium.Cartographic.fromCartesian(p);
+      return {
+        lon: Cesium.Math.toDegrees(c.longitude),
+        lat: Cesium.Math.toDegrees(c.latitude),
+      };
+    });
+    const centerLat = coords.reduce((s, c) => s + c.lat, 0) / coords.length;
+    const cosLat = Math.cos(centerLat * Math.PI / 180);
+    const kmCoords = coords.map(c => ({
+      x: c.lon * 111.32 * cosLat,
+      y: c.lat * 110.574,
+    }));
+    let sum = 0;
+    for (let i = 0; i < kmCoords.length; i++) {
+      const j = (i + 1) % kmCoords.length;
+      sum += kmCoords[i].x * kmCoords[j].y - kmCoords[j].x * kmCoords[i].y;
+    }
+    return Math.abs(sum) / 2;
+  };
+
+  const formatArchDrawingTooltip = (areaKm2: number) => {
+    if (areaKm2 <= 0) {
+      return {
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
+          <div style="font-weight: 700; color: #38bdf8;">Click to place initial vertex</div>
+          <div style="color: #94a3b8; font-size: 10px;">Optimal: 1 – 10 km² · Limit: Max 25 km²</div>
+        </div>`,
+        text: 'Click to place vertex (Optimal: 1–10 km²)',
+        status: 'optimal' as const,
+      };
+    }
+
+    if (areaKm2 <= 10.0) {
+      const areaFmt = areaKm2 < 1 ? areaKm2.toFixed(2) : areaKm2.toFixed(1);
+      return {
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: #34d399; font-weight: 800; font-size: 13px;">● ${areaFmt} km²</span>
+            <span style="background: rgba(16,185,129,0.25); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">OPTIMAL RANGE</span>
+          </div>
+          <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px;">
+            Sentinel 10m High-Res · Double-click to finish
+          </div>
+        </div>`,
+        text: `${areaFmt} km² [OPTIMAL RANGE] · Double-click to finish`,
+        status: 'optimal' as const,
+      };
+    }
+
+    if (areaKm2 <= 25.0) {
+      return {
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: #fbbf24; font-weight: 800; font-size: 13px;">▲ ${areaKm2.toFixed(1)} km²</span>
+            <span style="background: rgba(245,158,11,0.25); color: #fde68a; border: 1px solid rgba(245,158,11,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">COARSE RESOLUTION</span>
+          </div>
+          <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px;">
+            Micro-relief degraded · Double-click to finish
+          </div>
+        </div>`,
+        text: `${areaKm2.toFixed(1)} km² [COARSE RESOLUTION] · Double-click to finish`,
+        status: 'coarse' as const,
+      };
+    }
+
+    return {
+      html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="color: #f87171; font-weight: 800; font-size: 13px;">✖ ${areaKm2.toFixed(1)} km²</span>
+          <span style="background: rgba(239,68,68,0.25); color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">BEYOND LIMIT</span>
+        </div>
+        <div style="color: #fca5a5; font-size: 10px; margin-top: 2px; font-weight: 600;">
+          Exceeds max 25 km² limit · Shrink selection to scan
+        </div>
+      </div>`,
+      text: `${areaKm2.toFixed(1)} km² [BEYOND 25 km² LIMIT] · Shrink selection`,
+      status: 'exceeds' as const,
+    };
+  };
+
+  const formatGenDrawingTooltip = (areaKm2: number) => {
+    if (areaKm2 <= 0) {
+      return {
+        html: 'Click to place vertex · Double-click to finish',
+        text: 'Click to place vertex · Double-click to finish',
+        status: 'optimal' as const,
+      };
+    }
+    const areaFmt = areaKm2 < 1 ? areaKm2.toFixed(2) : areaKm2.toFixed(1);
+    return {
+      html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
+        <span style="color: #38bdf8; font-weight: 800; font-size: 12px;">${areaFmt} km²</span>
+        <span style="color: #94a3b8; font-size: 10px; margin-left: 6px;">Double-click to finish</span>
+      </div>`,
+      text: `${areaFmt} km² · Double-click to finish`,
+      status: 'optimal' as const,
+    };
+  };
+
   const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT') => {
     const v = viewerRef.current;
     if (!v) return;
@@ -10745,6 +10915,7 @@ case 'openPanel':
         setActiveStudyAreaId(area.id);
         flyToStudyAreaTopDown(v, area);
         setStudyDrawing(false);
+        setDrawingStats(null);
         throttledRender(v);
       };
       handler.setInputAction(handleClick, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -10754,14 +10925,51 @@ case 'openPanel':
     try {
       const Drawer = (await import('@cesium-extends/drawer')).default;
       if (drawerRef.current) { drawerRef.current.destroy(); drawerRef.current = null; }
+
+      const isArch = showArchaeologyPanelRef.current;
+      const initialTooltip = isArch ? formatArchDrawingTooltip(0) : formatGenDrawingTooltip(0);
+
       const drawer = new Drawer(v, {
         terrain: false,
-        tips: { init: 'Click to place the point', start: 'Click to place · Double-click to finish', end: '' },
+        tips: {
+          init: initialTooltip.html,
+          start: initialTooltip.html,
+          end: '',
+        },
       });
       drawerRef.current = drawer;
+
+      if (drawer.mouseTooltip) {
+        drawer.mouseTooltip.content = initialTooltip.html;
+      }
+
       drawer.start({
         type,
         oneInstance: false,
+        onPointsChange: (points: Cesium.Cartesian3[]) => {
+          if (!points || points.length < 2) return;
+          let areaKm2 = 0;
+          if (type === 'RECTANGLE') {
+            areaKm2 = computeDrawingRectangleAreaKm2(points);
+          } else if (type === 'CIRCLE') {
+            areaKm2 = computeDrawingCircleAreaKm2(points);
+          } else if (type === 'POLYGON') {
+            areaKm2 = computeDrawingPolygonAreaKm2(points);
+          }
+
+          const archActive = showArchaeologyPanelRef.current;
+          const info = archActive ? formatArchDrawingTooltip(areaKm2) : formatGenDrawingTooltip(areaKm2);
+
+          if (drawer && drawer.mouseTooltip) {
+            (drawer as any)._tips.start = info.html;
+            drawer.mouseTooltip.content = info.html;
+          }
+
+          setDrawingStats({
+            areaKm2,
+            status: info.status,
+          });
+        },
         finalOptions: type === 'RECTANGLE' ? {
           material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
           outline: true, outlineColor: Cesium.Color.LIME, outlineWidth: 2,
@@ -10773,6 +10981,7 @@ case 'openPanel':
           outline: true, outlineColor: Cesium.Color.LIME, outlineWidth: 2,
         },
         onEnd: (entity: any, positions: Cesium.Cartesian3[]) => {
+          setDrawingStats(null);
           if (!v || !positions?.length) return;
           const typeLabel = type === 'RECTANGLE' ? 'rectangle' : 'polygon';
           const name = `${typeLabel} ${studyAreasRef.current.length + 1}`;
@@ -10852,6 +11061,7 @@ case 'openPanel':
       });
     } catch (err) {
       console.warn('Drawer init failed:', err);
+      setDrawingStats(null);
       setStudyDrawing(false);
     }
   }, [analyticalNeedsTwoPoints]);
@@ -10875,6 +11085,7 @@ case 'openPanel':
       drawerRef.current.reset();
       drawerRef.current = null;
     }
+    setDrawingStats(null);
     setStudyDrawing(false);
   }, []);
 
@@ -11470,7 +11681,7 @@ case 'openPanel':
             active={showArchaeologyPanel}
             items={[
               {
-                label: 'Space Archaeology',
+                label: 'Archaeology',
                 icon: <Landmark size={15} />,
                 active: showArchaeologyPanel,
                 onClick: () => {
@@ -11686,6 +11897,8 @@ case 'openPanel':
         onStopDraw={stopStudyDraw}
         drawing={studyDrawing}
         setDrawing={setStudyDrawing}
+        isArchaeologyActive={showArchaeologyPanel}
+        drawingStats={drawingStats}
       />}
 
       {/* Analytics Panel */}
@@ -12933,6 +13146,11 @@ case 'openPanel':
             activeStudyAreaBbox={activeBbox}
             studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name}
             onOpenStudyAreaPanel={() => setShowStudyArea(true)}
+            onClearStudyArea={() => {
+              clearStudyArea();
+              setActiveStudyAreaId(null);
+              useChatStore.getState().setStudyAreaBbox(null);
+            }}
             zIndex={getPanelZIndex('archaeology', 115)}
           />
         </PanelSuspense>

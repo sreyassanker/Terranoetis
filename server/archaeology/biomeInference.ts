@@ -10,6 +10,11 @@ export function inferBiomeFromCoordinates(lat: number, lon: number): BiomeType {
     return 'alluvial_floodplain';
   }
 
+  // Indo-Gangetic alluvial plain and river basin (e.g. Yamuna, Ganges)
+  if (lat >= 24.0 && lat <= 30.5 && lon >= 75.0 && lon <= 88.5) {
+    return 'alluvial_floodplain';
+  }
+
   // Hyper-arid desert belts (Sahara, Arabian Peninsula, Atacama, Rub' al Khali)
   if (
     (lat >= 14 && lat <= 33 && lon >= -17 && lon <= 58) ||
