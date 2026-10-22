@@ -184,7 +184,38 @@ import { bayFireDetector } from './foundation-models/bayFireDetector';
 import { weatherForecaster } from './foundation-models/weatherForecaster';
 import { agricultureMonitor } from './foundation-models/agricultureMonitor';
 import { localAiManager } from './localAiManager';
-dotenv.config();
+function loadEnvironment(): void {
+  // 1. Standard process.cwd() .env
+  dotenv.config();
+
+  // 2. In desktop mode or bundled runtime, search AppData and repo parents if key env vars are missing
+  const needsEnv = !process.env.GMAIL_SMTP_USER || !process.env.JWT_SECRET;
+  if (needsEnv) {
+    const platform = process.platform;
+    const baseDir = platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support', 'Terranoetis')
+      : platform === 'win32'
+      ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming', 'Terranoetis'))
+      : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config', 'terranoetis'));
+
+    const appDataEnv = path.join(baseDir, '.env');
+    if (fs.existsSync(appDataEnv)) {
+      dotenv.config({ path: appDataEnv });
+    }
+
+    // 3. Search upward for project .env until root
+    let cur = path.resolve(import.meta.dirname || process.cwd());
+    while (cur && cur !== path.dirname(cur)) {
+      const candidate = path.join(cur, '.env');
+      if (fs.existsSync(candidate)) {
+        dotenv.config({ path: candidate });
+        break;
+      }
+      cur = path.dirname(cur);
+    }
+  }
+}
+loadEnvironment();
 // Initialize dynamic encrypted key storage (AppData at rest + env injection)
 keyManager.init();
 keyManager.onChange((changedKeys) => {
@@ -9982,7 +10013,15 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
   try { areaName = await reverseGeocode(midLat, midLon, bbox); } catch { areaName = null; }
   const region = areaName || regionName || studyAreaName
     || `Region ${bbox.latMin.toFixed(1)}-${bbox.latMax.toFixed(1)}N, ${bbox.lonMin.toFixed(1)}-${bbox.lonMax.toFixed(1)}E`;
-  const emailTo = process.env.GMAIL_REPORT_TO || '';
+  const emailTo = (
+    (req.body as any).recipientEmail ||
+    (req.body as any).to ||
+    process.env.GMAIL_REPORT_TO ||
+    keyManager.get('GMAIL_REPORT_TO') ||
+    process.env.GMAIL_SMTP_USER ||
+    keyManager.get('GMAIL_SMTP_USER') ||
+    ''
+  ).trim();
 
   // Preferred path: the chain's ACTUAL step results — identical numbers to
   // the workbench panel. Falls back to an independent server-side assessment
@@ -9997,8 +10036,10 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
         subject: `Disaster Assessment Report: ${region} — ${new Date().toISOString().slice(0, 10)}`,
         html,
       });
-      if (!emailResult.ok) return res.status(500).json({ error: emailResult.error });
-      return res.json({ ok: true, summary: `Chain report emailed for ${region} (${steps!.length} steps).`, messageId: emailResult.messageId });
+      if (!emailResult.ok) {
+        return res.status(500).json({ error: emailResult.error, html, region });
+      }
+      return res.json({ ok: true, summary: `Chain report emailed to ${emailTo} (${steps!.length} steps).`, recipient: emailTo, messageId: emailResult.messageId, html });
     }
 
     // Reuse the full assessment pipeline so the report is identical to the
@@ -10035,8 +10076,10 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
       html,
     });
 
-    if (!emailResult.ok) return res.status(500).json({ error: emailResult.error });
-    return res.json({ ok: true, summary: result.summary, messageId: emailResult.messageId });
+    if (!emailResult.ok) {
+      return res.status(500).json({ error: emailResult.error, html, region });
+    }
+    return res.json({ ok: true, summary: result.summary, recipient: emailTo, messageId: emailResult.messageId, html });
   } catch (e) {
     logger.warn({ err: e }, 'Workbench email report failed');
     return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

@@ -863,6 +863,18 @@ export const API_METADATA: ApiConfig[] = [
     rateLimit: 'Depends on push service',
     status: 'authenticated',
   },
+  {
+    id: 'gmail_smtp',
+    name: 'Gmail SMTP (Executive Reports)',
+    category: 'Notifications',
+    description: 'Gmail SMTP credentials used to deliver automated disaster assessments and multi-hazard workbench reports.',
+    registrationUrl: 'https://myaccount.google.com/apppasswords',
+    docsUrl: 'https://support.google.com/mail/answer/185833',
+    envKeys: ['GMAIL_SMTP_USER', 'GMAIL_SMTP_PASS', 'GMAIL_REPORT_TO', 'GMAIL_SMTP_HOST', 'GMAIL_SMTP_PORT'],
+    free: true,
+    rateLimit: '500 emails/day (standard Gmail free tier)',
+    status: 'authenticated',
+  },
 
   // AUTH & SECURITY
   {

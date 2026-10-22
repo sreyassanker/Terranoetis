@@ -50,7 +50,6 @@ const TOOL_META: Record<string, { code: string; color: string }> = {
   seismic_events: { code: 'SE', color: '#d97706' },
   radar_fetch: { code: 'RD', color: '#8b5cf6' },
   sentiment_analyze: { code: 'SN', color: '#ec4899' },
-  predict: { code: 'PR', color: '#a855f7' },
   flood_forecast: { code: 'FF', color: '#0891b2' },
   marine: { code: 'MA', color: '#0ea5e9' },
   weather_ensemble: { code: 'EN', color: '#6366f1' },
@@ -279,8 +278,8 @@ const DIRECT_API: Record<string, DirectApiEntry> = {
   /* predict is handled as a special case in executeChain — synthesizes from cumulative evidence */
 };
 
-/* Skip: predict (synthesis), radar_fetch (tile-only, no points), space_weather (global) */
-const TOOL_WORKBENCH_SKIPPED_TOOLS = new Set(['predict', 'radar_fetch', 'space_weather']);
+/* Skip: radar_fetch (tile-only, no points), space_weather (global) */
+const TOOL_WORKBENCH_SKIPPED_TOOLS = new Set(['radar_fetch', 'space_weather']);
 
 /** Tools in causal topological order — data flows downstream */
 const AVAILABLE_TOOLS: Tool[] = [
@@ -308,7 +307,6 @@ const AVAILABLE_TOOLS: Tool[] = [
   { name: 'population', category: 'environment', description: 'Population density estimates (WorldPop)' },
   { name: 'infrastructure', category: 'environment', description: 'Buildings, roads, landuse (OSM Overpass)' },
   { name: 'space_weather', category: 'multimodal', description: 'Solar flares, CMEs, geomagnetic storms' },
-  { name: 'predict', category: 'ml', description: 'Multi-hazard risk prediction' },
 ];
 
 interface MultiHazardPanelProps {
@@ -387,7 +385,7 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
     : undefined;
 
   /* Auto-populate chain in topological order when bbox appears */
-  /* Skip: predict (synthesis), radar_fetch (tile-only, no points), space_weather (global) */
+  /* Skip: radar_fetch (tile-only, no points), space_weather (global) */
   useEffect(() => {
     if (autoMode && bbox && !autoPopulatedRef.current) {
       autoPopulatedRef.current = true;
@@ -587,27 +585,6 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
       }
 
       try {
-        // predict: synthesize from chain evidence instead of calling external ML API
-        if (step.tool === 'predict') {
-          const preds = Object.entries(cumulativeEvidence)
-            .filter(([k]) => !k.startsWith('_'))
-            .map(([key, val]) => {
-              const p = typeof val === 'number' ? val : 0.5;
-              return {
-                hazardType: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-                probability: Math.min(0.99, Math.max(0.01, p)),
-                severity: p > 0.6 ? 'high' : p > 0.3 ? 'medium' : 'low',
-                timeframe: 'now',
-                confidence: 0.85,
-                source: 'chain-evidence',
-              };
-            })
-            .sort((a, b) => b.probability - a.probability);
-          const synData = { predictions: preds, source: 'chain-evidence' };
-          setFormattedResults(prev => ({ ...prev, [step.id]: formatStepResult(step.tool, synData, 0) }));
-          continue; // skip to next step — no points to extract from predict
-        }
-
         const direct = DIRECT_API[step.tool];
         let data: Record<string, unknown>;
         let directData: Record<string, unknown> | null = null;
@@ -748,18 +725,57 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
   }
 }
 
-  function exportChain() {
-    const blob = new Blob([JSON.stringify(chain, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `toolchain-${Date.now()}.json`; a.click();
-    setShowSaveDialog(true);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-
   // Email the current chain's fused risk as an executive report (same format
   // as the AI "disaster assessment ... email me" command).
   const [emailing, setEmailing] = useState(false);
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [reportHtml, setReportHtml] = useState<string | null>(null);
+  const [reportRegion, setReportRegion] = useState<string | null>(null);
+
+  function getSuitableFilename(resolvedRegion?: string | null): string {
+    let cleanName = (resolvedRegion || reportRegion || '').trim();
+    const isGeneric = !cleanName || /^rectangle[_\s-]?\d*$/i.test(cleanName) || /^polygon[_\s-]?\d*$/i.test(cleanName) || /^study[_\s-]?area/i.test(cleanName);
+
+    if (isGeneric && studyAreaName && !/^rectangle[_\s-]?\d*$/i.test(studyAreaName) && !/^polygon[_\s-]?\d*$/i.test(studyAreaName)) {
+      cleanName = studyAreaName.trim();
+    }
+    if (!cleanName || isGeneric) {
+      if (bbox) {
+        const midLat = ((bbox.latMin + bbox.latMax) / 2).toFixed(1);
+        const midLon = ((bbox.lonMin + bbox.lonMax) / 2).toFixed(1);
+        cleanName = `AOI_${midLat}N_${midLon}E`;
+      } else {
+        cleanName = 'Global';
+      }
+    }
+    const safeRegion = cleanName.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    return `Terranoetis_Disaster_Dossier_${safeRegion}_${dateStr}_${timeStr}.html`;
+  }
+
+  function exportChain() {
+    const blob = new Blob([JSON.stringify(chain, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = getSuitableFilename().replace(/\.html$/, '.json').replace('Disaster_Dossier', 'Toolchain');
+    a.click();
+    setShowSaveDialog(true);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function downloadHtmlReport(htmlContent: string) {
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = getSuitableFilename();
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
   async function emailReport() {
     if (!bbox) { setEmailMsg('Draw a study area first.'); setTimeout(() => setEmailMsg(null), 3000); return; }
     setEmailing(true);
@@ -794,13 +810,21 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
         }),
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-      setEmailMsg(`Report emailed ✓`);
+      if (data?.html) {
+        setReportHtml(data.html);
+      }
+      if (data?.region) {
+        setReportRegion(data.region);
+      }
+      if (!resp.ok) {
+        throw new Error(data?.error || `HTTP ${resp.status}`);
+      }
+      setEmailMsg(`Report emailed to ${data.recipient || 'recipient'} ✓`);
+      setTimeout(() => setEmailMsg(null), 5000);
     } catch (e) {
       setEmailMsg(`Email failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setEmailing(false);
-      setTimeout(() => setEmailMsg(null), 4000);
     }
   }
 
@@ -1104,36 +1128,62 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
               </div>
             )}
             {/* Actions */}
-            <div style={{ padding: '6px 10px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-              <button onClick={executeChain} disabled={chain.length === 0 || executing}
-                style={{ padding: '4px 12px', fontSize: 10, fontWeight: 600,
-                  cursor: chain.length === 0 || executing ? 'default' : 'pointer',
-                  background: 'linear-gradient(135deg, var(--accent), var(--purple))', border: 'none',
-                  borderRadius: 6, color: '#fff', opacity: chain.length === 0 || executing ? 0.5 : 1 }}>
-                {executing ? '⏳ Executing...' : '▶ Run Chain'}
-              </button>
-              <button onClick={exportChain} disabled={chain.length === 0}
-                style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-dim)',
-                  cursor: chain.length === 0 ? 'default' : 'pointer', opacity: chain.length === 0 ? 0.3 : 1 }}>
-                Export
-              </button>
-              <button onClick={emailReport} disabled={emailing || Object.keys(causalProbs).length === 0}
-                title="Email the fused risk report"
-                style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(34,197,94,0.08)',
-                  border: '1px solid rgba(34,197,94,0.25)', borderRadius: 6, color: emailing ? '#64748b' : '#4ade80',
-                  cursor: emailing || Object.keys(causalProbs).length === 0 ? 'default' : 'pointer',
-                  opacity: Object.keys(causalProbs).length === 0 ? 0.4 : 1 }}>
-                {emailing ? '⏳ Sending…' : '✉ Email Report'}
-              </button>
-              {emailMsg && <span style={{ fontSize: 9, color: emailMsg.includes('✓') ? '#4ade80' : '#f87171', alignSelf: 'center' }}>{emailMsg}</span>}
-              <button onClick={() => { setChain([]); autoPopulatedRef.current = false; setFormattedResults({});
-                setPhysicsInline({}); setCausalProbs({}); setCausalState(null); setScenarioDiffs([]); setSelectedScenario(null);
-                onClear?.(); }}
-                style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(239,68,68,0.08)',
-                  border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, color: 'var(--danger)', cursor: 'pointer' }}>
-                Clear
-              </button>
+            <div style={{ padding: '6px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {emailMsg && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '4px 8px', borderRadius: 4, fontSize: 9,
+                  background: emailMsg.includes('✓') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                  border: `1px solid ${emailMsg.includes('✓') ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  color: emailMsg.includes('✓') ? '#4ade80' : '#f87171'
+                }}>
+                  <span style={{ flex: 1, marginRight: 6, lineHeight: 1.3 }}>{emailMsg}</span>
+                  {reportHtml && (
+                    <button
+                      onClick={() => downloadHtmlReport(reportHtml)}
+                      style={{
+                        padding: '2px 8px', fontSize: 9, fontWeight: 600,
+                        background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.4)',
+                        borderRadius: 4, color: '#60a5fa', cursor: 'pointer', whiteSpace: 'nowrap'
+                      }}
+                      title="Download the full HTML executive dossier"
+                    >
+                      ⤓ Download Report (HTML)
+                    </button>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={executeChain} disabled={chain.length === 0 || executing}
+                  style={{ padding: '4px 12px', fontSize: 10, fontWeight: 600,
+                    cursor: chain.length === 0 || executing ? 'default' : 'pointer',
+                    background: 'linear-gradient(135deg, var(--accent), var(--purple))', border: 'none',
+                    borderRadius: 6, color: '#fff', opacity: chain.length === 0 || executing ? 0.5 : 1 }}>
+                  {executing ? '⏳ Executing...' : '▶ Run Chain'}
+                </button>
+                <button onClick={exportChain} disabled={chain.length === 0}
+                  style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-dim)',
+                    cursor: chain.length === 0 ? 'default' : 'pointer', opacity: chain.length === 0 ? 0.3 : 1 }}>
+                  Export
+                </button>
+                <button onClick={emailReport} disabled={emailing || Object.keys(causalProbs).length === 0}
+                  title="Email the fused risk report"
+                  style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(34,197,94,0.08)',
+                    border: '1px solid rgba(34,197,94,0.25)', borderRadius: 6, color: emailing ? '#64748b' : '#4ade80',
+                    cursor: emailing || Object.keys(causalProbs).length === 0 ? 'default' : 'pointer',
+                    opacity: Object.keys(causalProbs).length === 0 ? 0.4 : 1 }}>
+                  {emailing ? '⏳ Sending…' : '✉ Email Report'}
+                </button>
+                <button onClick={() => { setChain([]); autoPopulatedRef.current = false; setFormattedResults({});
+                  setPhysicsInline({}); setCausalProbs({}); setCausalState(null); setScenarioDiffs([]); setSelectedScenario(null);
+                  setEmailMsg(null); setReportHtml(null);
+                  onClear?.(); }}
+                  style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(239,68,68,0.08)',
+                    border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, color: 'var(--danger)', cursor: 'pointer', marginLeft: 'auto' }}>
+                  Clear
+                </button>
+              </div>
             </div>
           </div>
         </div>
