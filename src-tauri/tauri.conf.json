@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Terranoetis — Geospatial Intelligence",
+        "title": "Terranoetis",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
@@ -21,7 +21,14 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "devtools": true
+        "devtools": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "decorations": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 25
+        }
       }
     ],
     "security": {

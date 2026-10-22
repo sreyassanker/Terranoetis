@@ -156,18 +156,38 @@ p { text-align: justify; }
     top: 0;
     left: 0;
     right: 0;
+    height: 64px;
     min-height: 64px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 0 16px;
     gap: 12px;
     z-index: 100;
     backdrop-filter: saturate(180%);
     -webkit-backdrop-filter: saturate(180%);
     flex-wrap: nowrap;
     overflow: visible;
+    -webkit-app-region: drag;
+  }
+  .topbar.is-desktop-mac {
+    padding-left: 96px;
+  }
+  @media all and (display-mode: fullscreen) {
+    .topbar.is-desktop-mac {
+      padding-left: 16px;
+    }
+  }
+  .topbar button,
+  .topbar input,
+  .topbar select,
+  .topbar a,
+  .topbar .status-pill,
+  .topbar .search-box,
+  .topbar-menu,
+  .topbar-right {
+    -webkit-app-region: no-drag;
   }
   .topbar.hidden {
     display: none !important;
@@ -176,20 +196,19 @@ p { text-align: justify; }
   .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text);
     flex-shrink: 0;
+    user-select: none;
+    height: 100%;
   }
 
-  .brand-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: pulse-dot 2s ease-in-out infinite;
+  .brand-logo {
+    height: 17px;
+    width: auto;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-drag: none;
+    display: block;
+    pointer-events: none;
   }
 
   @keyframes pulse-dot {
@@ -204,17 +223,22 @@ p { text-align: justify; }
 
   .topbar-sep {
     width: 1px;
-    height: 24px;
+    height: 16px;
     background: var(--border);
     flex-shrink: 0;
+    align-self: center;
   }
 
   .utc-clock {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
     color: #7dd3fc;
     letter-spacing: 0.05em;
     flex-shrink: 0;
+    height: 100%;
   }
 
   .topbar-right {

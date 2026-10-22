@@ -46,6 +46,7 @@ import type { InterpGrid, InterpPoint } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
 import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS } from '@/rendering/surfaceRenderer';
 import { COLORMAPS } from '@/components/kaggle/shared';
+import terranoetisLogo from '@/assets/terranoetis-wordmark.png';
 import {
   loadAirspaces,
   addSpaceDebrisEntities,
@@ -11701,10 +11702,23 @@ case 'openPanel':
 
 
       {/* Top Bar */}
-      <div className={`topbar glass-panel ${heliFlying ? 'hidden' : ''}`}>
-        <div className="brand">
-          <div className="brand-dot" />
-          <span>Terranoetis</span>
+      <div
+        className={`topbar glass-panel ${
+          typeof window !== 'undefined' &&
+          (Boolean((window as any).isTauri) || Boolean((window as any).__TAURI_INTERNALS__) || Boolean((window as any).__TAURI__)) &&
+          /Macintosh|Mac OS X/i.test(navigator.userAgent)
+            ? 'is-desktop-mac'
+            : ''
+        } ${heliFlying ? 'hidden' : ''}`}
+        data-tauri-drag-region
+      >
+        <div className="brand" data-tauri-drag-region>
+          <img
+            src={terranoetisLogo}
+            alt="Terranoetis"
+            className="brand-logo"
+            draggable={false}
+          />
         </div>
         <div className="topbar-sep" />
         <div className="utc-clock">{utcTime}</div>
