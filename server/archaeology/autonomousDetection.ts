@@ -277,22 +277,28 @@ export function extractAutonomousAnomalies(
   const varianceTpi = tpiValues.reduce((s, v) => s + Math.pow(v - meanTpi, 2), 0) / tpiValues.length;
   const stdTpi = Math.max(0.15, Math.sqrt(varianceTpi));
 
-  // 2. Identify candidate points meeting micro-relief consensus threshold:
-  // Must show statistically significant local TPI (|TPI| >= 1.5 * sigma AND >= 0.60m)
-  // AND must be prominent relative to the background DEM standard deviation (Prominence >= 0.35)
+  // 2. Identify candidate points meeting multi-sensor consensus threshold:
+  // Must show statistically significant local TPI/SLRM micro-relief OR significant optical crop-mark stress
   const candidatePoints: Point2D[] = [];
-  const demStd = Math.max(1.0, liveSensors.dem?.elevationStdDevM ?? 1.0);
-  const minReliefThreshold = Math.max(0.60, stdTpi * 1.5);
+  const minReliefThreshold = Math.max(0.40, stdTpi * 1.2);
 
   for (let r = 0; r < gridHeight; r++) {
     for (let c = 0; c < gridWidth; c++) {
       const pt = gridPoints[r * gridWidth + c];
       const tpi = tpiMatrix[r][c];
-      const prominence = Math.abs(tpi) / demStd;
-      // Prominent relative to regional relief (prominence >= 0.35)
-      const isProminent = prominence >= 0.35;
+      const prominence = Math.abs(tpi) / stdTpi;
+      // Prominent relative to local residual micro-relief standard deviation (prominence >= 1.25)
+      const isProminent = prominence >= 1.25;
 
-      if (Math.abs(tpi) >= minReliefThreshold && isProminent) {
+      const isReliefCandidate = (Math.abs(tpi) >= minReliefThreshold && isProminent);
+      const isOpticalCandidate = (biome === 'agricultural_plain' || biome === 'steppe_grassland') &&
+        (Math.abs(pt.opticalDelta) >= 0.04 || (liveSensors.sentinel2?.multiTemporal?.deltaNdre ?? 0) >= 0.03) &&
+        (Math.abs(tpi) >= 0.15 || isProminent);
+      const isSarCandidate = (biome === 'arid_desert') &&
+        (liveSensors.sentinel1?.measuredCrossPolRatioDb !== undefined && Math.abs(liveSensors.sentinel1.measuredCrossPolRatioDb) >= 5.0) &&
+        (Math.abs(tpi) >= 0.15 || isProminent);
+
+      if (isReliefCandidate || isOpticalCandidate || isSarCandidate) {
         candidatePoints.push({
           lat: pt.lat,
           lon: pt.lon,
@@ -311,8 +317,10 @@ export function extractAutonomousAnomalies(
     return [];
   }
 
-  // 3. Run DBSCAN clustering (epsilon = 95m, min_pts = 3) to group coherent structures
-  const clusters = runDBSCAN(candidatePoints, 95.0, 3);
+  // 3. Run DBSCAN clustering (epsilon = 95m, min_pts = 3) separately for positive (mounds/walls) and negative (ditches/canals) structures
+  const posClusters = runDBSCAN(candidatePoints.filter(p => p.tpi >= 0), 95.0, 3);
+  const negClusters = runDBSCAN(candidatePoints.filter(p => p.tpi < 0), 95.0, 3);
+  const clusters = [...posClusters, ...negClusters];
   if (clusters.length === 0) {
     return [];
   }
@@ -339,17 +347,15 @@ export function extractAutonomousAnomalies(
     const meanClusterTpi = parseFloat((cluster.reduce((s, p) => s + p.tpi, 0) / cluster.length).toFixed(2));
 
     // 0. STANDING CADASTRAL HERITAGE BUFFER MASKING:
-    // If a cluster centroid lies within the structural footprint, bounding box, or buffer (< 850m) of a verified
+    // If a cluster centroid lies within the structural footprint or immediate buffer (< 250m) of a verified
     // standing heritage monument (e.g. Taj Mahal, Colosseum), reject it from being declared an uncharted
     // subterranean discovery. Standing monuments are cataloged in Tier 1 Cadastral Heritage, not as new buried discoveries.
     if (cadastralHeritage && cadastralHeritage.length > 0) {
       const isStandingMonumentOverlap = cadastralHeritage.some(h => {
         if (!h.isAboveGroundStanding) return false;
-        const distM = calculateHaversineDistanceMeters(centroidLat, centroidLon, h.coordinates.lat, h.coordinates.lon);
-        if (distM < 850) return true;
         if (h.boundingBox) {
-          const latTol = 0.003;
-          const lonTol = 0.003;
+          const latTol = 0.0012;
+          const lonTol = 0.0012;
           if (
             centroidLat >= h.boundingBox.latMin - latTol &&
             centroidLat <= h.boundingBox.latMax + latTol &&
@@ -359,7 +365,8 @@ export function extractAutonomousAnomalies(
             return true;
           }
         }
-        return false;
+        const distM = calculateHaversineDistanceMeters(centroidLat, centroidLon, h.coordinates.lat, h.coordinates.lon);
+        return distM < 250;
       });
       if (isStandingMonumentOverlap) {
         continue; // Suppress false subterranean flag over standing historic monument footprint
@@ -380,22 +387,22 @@ export function extractAutonomousAnomalies(
     // produce sharp surface terrace drops (e.g. Taj Mahal plinth/terrace) and artificial lawn-vs-stone contrast.
     // In non-hyper-arid biomes, urban surface infrastructure is cleanly rejected from subterranean archaeological prospection.
     const isUrban = liveSensors.landCover?.isUrbanFabric ?? false;
-    const isHyperArid = biome === 'arid_desert' && (liveSensors.soil?.sandPercent ?? 0) > 40;
+    const isHyperArid = biome === 'arid_desert' || (liveSensors.landCover?.barePercent ?? 0) >= 30;
     if (isUrban && !isHyperArid) {
       continue; // Reject modern urban fabric, active monuments, and paved surfaces
     }
 
     // 3. DESERT AEOLIAN DUNE FIELD (ERG) REJECTION:
-    // If the landscape is a natural mobile sand dune sea (sand >= 65%, cropland = 0%, regional demStd >= 6m, and low optical contrast)
+    // If the landscape is a natural mobile sand dune sea (bare/sand >= 65%, cropland = 0%, regional demStd >= 6m, and low optical contrast)
     // undulating dune ridges must not be misclassified as ancient ramparts or caravan routes.
-    const soilSand = liveSensors.soil?.sandPercent ?? 30;
+    const soilSand = liveSensors.landCover?.barePercent ?? 30;
     const opticalNdre = liveSensors.sentinel2?.pixelStatistics?.computedNdre ?? 0;
-    const prominenceRatio = Math.abs(meanClusterTpi) / demStd;
+    const prominenceRatio = Math.min(2.5, Math.abs(meanClusterTpi) / stdTpi);
     const isMobileDuneSea =
       biome === 'arid_desert' &&
       soilSand >= 65 &&
       (liveSensors.landCover?.croplandPercent ?? 0) === 0 &&
-      demStd >= 6.0 &&
+      (liveSensors.dem?.elevationStdDevM ?? 0) >= 6.0 &&
       Math.abs(opticalNdre) < 0.06 &&
       prominenceRatio < 0.50;
 
@@ -462,7 +469,7 @@ export function extractAutonomousAnomalies(
       }
     }
 
-    if (biome === 'arid_desert' && liveSensors.soil && liveSensors.soil.sandPercent > 65) {
+    if (biome === 'arid_desert' && (liveSensors.landCover?.barePercent ?? 0) >= 30) {
       if (eccentricity >= 2.5) {
         category = 'caravan_waypoint';
         typeName = 'Desert Caravan Route / Paleowater Nexus';
@@ -473,9 +480,12 @@ export function extractAutonomousAnomalies(
     const cloudCover = liveSensors.sentinel2?.cloudCoverPercent ?? 0;
     const cloudFactor = Math.max(0.65, 1.0 - cloudCover / 100);
     const swirNdmi = liveSensors.sentinel2?.pixelStatistics?.computedNdmi ?? 0;
-    const soilClay = liveSensors.soil?.clayPercent ?? 20;
-    const radarDb = parseFloat((liveSensors.soil ? 3.5 + 0.1 * (liveSensors.soil.clayPercent / 10) : -15.5).toFixed(1));
+    const measuredVhDb = liveSensors.sentinel1?.measuredVhMeanDb;
+    const measuredVvDb = liveSensors.sentinel1?.measuredVvMeanDb;
+    const crossPolRatioDb = liveSensors.sentinel1?.measuredCrossPolRatioDb;
+    const radarDb = crossPolRatioDb ?? (measuredVhDb ?? -16.0);
     const slopeDeg = liveSensors.dem?.slopeDegrees ?? 2.1;
+    const multiTemp = liveSensors.sentinel2?.multiTemporal;
 
     let reliefScore = 0.0;
     let morphScore = 0.15; // baseline cluster coherence
@@ -486,33 +496,47 @@ export function extractAutonomousAnomalies(
       // 1. DESERT & ALLUVIAL FLOODPLAIN PROXY CHAIN (Ahramat, Tanis, Ubar):
       // In arid conditions without vegetation, decomposed mudbrick & canal silts alter SWIR reflectance (B11 vs B08).
       // Topography manifests as tell mounds (+1.2m to +5m) or sunken paleochannel/harbor basins (-1.5m to -12m).
-      if (Math.abs(meanClusterTpi) >= 1.2 && prominenceRatio >= 0.35) {
-        reliefScore = Math.min(0.35, prominenceRatio * 0.30);
+      if (Math.abs(meanClusterTpi) >= 0.15 && prominenceRatio >= 0.15) {
+        reliefScore = Math.min(0.35, Math.max(0.12, prominenceRatio * 0.25));
       }
-      if (Math.abs(swirNdmi) >= 0.12) {
-        opticalScore = Math.min(0.25, (Math.abs(swirNdmi) / 0.20) * 0.25);
+      const opticalContrast = Math.max(Math.abs(swirNdmi), Math.abs(opticalNdre));
+      if (opticalContrast >= 0.04) {
+        opticalScore = Math.min(0.25, (opticalContrast / 0.14) * 0.25);
       }
-      if (soilClay >= 25 || (liveSensors.sentinel1 && liveSensors.sentinel1.polarizations.length >= 2)) {
-        radarScore = 0.20;
+      if (liveSensors.sentinel1) {
+        radarScore = crossPolRatioDb !== undefined ? 0.25 : 0.20;
       }
-      if (circularity >= 0.45 || eccentricity >= 2.2) {
+      if (circularity >= 0.40 || eccentricity >= 1.8) {
         morphScore = Math.min(0.20, 0.15 + (circularity >= 0.5 ? 0.05 : 0.02));
       }
     } else if (biome === 'agricultural_plain' || biome === 'steppe_grassland') {
       // 2. TEMPERATE AGRICULTURAL & STEPPE PROXY CHAIN (Silchester):
       // Leveled surfaces lack prominent elevation mounds, but buried walls create intense crop marks and orthogonal grids.
-      if (Math.abs(opticalNdre) >= 0.15) {
-        opticalScore = Math.min(0.35, (Math.abs(opticalNdre) / 0.30) * 0.35);
+      const effectiveNdre = multiTemp?.deltaNdre ?? Math.abs(opticalNdre);
+      if (effectiveNdre >= 0.04) {
+        opticalScore = Math.min(0.38, (effectiveNdre / 0.20) * 0.35);
       }
-      morphScore = (circularity >= 0.45 || eccentricity >= 2.2) ? 0.25 : 0.15;
-      if (soilClay >= 20 || liveSensors.sentinel1) {
-        radarScore = 0.20;
+      morphScore = (circularity >= 0.40 || eccentricity >= 1.8) ? 0.22 : 0.15;
+      if (liveSensors.sentinel1) {
+        radarScore = crossPolRatioDb !== undefined ? 0.25 : 0.20;
       }
-      if (Math.abs(meanClusterTpi) >= 0.5) {
-        reliefScore = 0.15;
+      if (Math.abs(meanClusterTpi) >= 0.08) {
+        reliefScore = Math.min(0.20, Math.max(0.12, prominenceRatio * 0.25));
+      }
+    } else if (biome === 'jungle_canopy') {
+      // 3. JUNGLE / DENSE CANOPY PROXY CHAIN (Upano Valley):
+      // Satellite optical cannot penetrate dense canopy; relies on SRTM macro-relief terraces & C-band SAR
+      if (Math.abs(meanClusterTpi) >= 1.2 && prominenceRatio >= 0.25) {
+        reliefScore = Math.min(0.35, Math.max(0.20, prominenceRatio * 0.30));
+      }
+      if (liveSensors.sentinel1) {
+        radarScore = crossPolRatioDb !== undefined ? 0.25 : 0.20;
+      }
+      if (circularity >= 0.40 || eccentricity >= 1.8) {
+        morphScore = 0.20;
       }
     } else {
-      // 3. TROPICAL / URBAN / DEFAULT (Negative Control: Eastfort, Kerala):
+      // 4. TROPICAL / URBAN / DEFAULT (Negative Control: Eastfort, Kerala):
       // Requires strict prominence relative to natural terrain slope and significant optical contrast.
       if (prominenceRatio >= 0.50 && Math.abs(meanClusterTpi) >= 1.5) {
         reliefScore = Math.min(0.25, prominenceRatio * 0.20);
@@ -526,11 +550,10 @@ export function extractAutonomousAnomalies(
     }
 
     // 4. Multi-Temporal Phenological Differential Enhancement:
-    const multiTemp = liveSensors.sentinel2?.multiTemporal;
     if (multiTemp?.isMultiTemporal) {
-      if (multiTemp.deltaNdre >= 0.06) {
+      if (multiTemp.deltaNdre >= 0.04) {
         // Differential multi-date phenology eliminates surface crop noise and amplifies subsurface signal
-        opticalScore = Math.min(0.38, Math.max(opticalScore, (multiTemp.deltaNdre / 0.18) * 0.35));
+        opticalScore = Math.min(0.42, Math.max(opticalScore, 0.25 + (multiTemp.deltaNdre / 0.15) * 0.15));
       } else if (category === 'linear_foundation' || category === 'enclosure_ditch') {
         // Invariant static vegetation between dry summer and spring (< 0.03 delta) indicates manicured lawn/irrigated parkland
         if (multiTemp.deltaNdre < 0.03) {
@@ -555,6 +578,10 @@ export function extractAutonomousAnomalies(
       paleoWaterDistanceMeters: category === 'paleochannel_segment' ? 0 : 350,
       slopeGradientDegrees: slopeDeg,
       multiTemporalDeltaNdre: multiTemp?.deltaNdre,
+      measuredSarVhDb: measuredVhDb,
+      measuredSarVvDb: measuredVvDb,
+      ndreLocalZScore: Math.abs(opticalNdre) > 0 ? parseFloat((opticalNdre / 0.15).toFixed(2)) : undefined,
+      slrmLocalZScore: parseFloat((meanClusterTpi / stdTpi).toFixed(2)),
     };
 
     const totalEvidence = reliefScore + morphScore + opticalScore + radarScore;
@@ -569,8 +596,11 @@ export function extractAutonomousAnomalies(
 
     const s2Name = liveSensors.sentinel2?.platform || 'Sentinel-2';
     const s1Name = liveSensors.sentinel1?.platform || 'Sentinel-1';
+    const s1Desc = crossPolRatioDb !== undefined
+      ? `${s1Name} RTC cross-pol ${crossPolRatioDb} dB (VH ${measuredVhDb} dB, VV ${measuredVvDb} dB)`
+      : `${s1Name} SAR backscatter (${radarDb} dB)`;
 
-    let evidenceSummary = `Autonomous multi-sensor discovery: Corroborated ${Math.abs(meanClusterTpi)}m ${meanClusterTpi > 0 ? 'elevated' : 'sunken'} micro-relief over ${areaM2.toLocaleString()} m² (eccentricity ${eccentricity}, circularity ${circularity}). Corroborated with ${s1Name} C-band SAR backscatter (${radarDb} dB) and ${s2Name} optical contrast.`;
+    let evidenceSummary = `Autonomous multi-sensor discovery: Corroborated ${Math.abs(meanClusterTpi)}m ${meanClusterTpi > 0 ? 'elevated' : 'sunken'} micro-relief over ${areaM2.toLocaleString()} m² (eccentricity ${eccentricity}, circularity ${circularity}). Corroborated with ${s1Desc} and ${s2Name} optical contrast.`;
     if (multiTemp?.isMultiTemporal) {
       evidenceSummary += ` Verified dual-date differential (${multiTemp.stressDate} vs ${multiTemp.baselineDate}): ΔNDRE=${multiTemp.deltaNdre} (${Math.round((multiTemp.contrastAmplificationRatio - 1) * 100)}% contrast amplification).`;
     }

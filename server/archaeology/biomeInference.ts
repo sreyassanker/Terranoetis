@@ -15,9 +15,10 @@ export function inferBiomeFromCoordinates(lat: number, lon: number): BiomeType {
     return 'alluvial_floodplain';
   }
 
-  // Hyper-arid desert belts (Sahara, Arabian Peninsula, Atacama, Rub' al Khali)
+  // Hyper-arid desert belts (Sahara, Arabian Peninsula, Atacama, Rub' al Khali, Thar & Rann of Kachchh)
   if (
     (lat >= 14 && lat <= 33 && lon >= -17 && lon <= 58) ||
+    (lat >= 22 && lat <= 32 && lon >= 68 && lon <= 76) ||
     (lat >= -30 && lat <= -18 && lon >= -75 && lon <= -65) ||
     (lat >= 18 && lat <= 28 && lon >= 45 && lon <= 56)
   ) {

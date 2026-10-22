@@ -40,6 +40,30 @@ export function calculateHaversineDistanceMeters(
 }
 
 /**
+ * Calculates 2D spatial Intersection-over-Union (IoU) of two bounding boxes.
+ */
+export function calculateBboxIoU(
+  boxA: StudyAreaBoundingBox,
+  boxB: StudyAreaBoundingBox,
+): number {
+  const interLatMin = Math.max(boxA.latMin, boxB.latMin);
+  const interLatMax = Math.min(boxA.latMax, boxB.latMax);
+  const interLonMin = Math.max(boxA.lonMin, boxB.lonMin);
+  const interLonMax = Math.min(boxA.lonMax, boxB.lonMax);
+
+  if (interLatMax <= interLatMin || interLonMax <= interLonMin) {
+    return 0.0;
+  }
+
+  const interArea = (interLatMax - interLatMin) * (interLonMax - interLonMin);
+  const areaA = (boxA.latMax - boxA.latMin) * (boxA.lonMax - boxA.lonMin);
+  const areaB = (boxB.latMax - boxB.latMin) * (boxB.lonMax - boxB.lonMin);
+  const unionArea = areaA + areaB - interArea;
+
+  return unionArea > 0 ? parseFloat((interArea / unionArea).toFixed(4)) : 0.0;
+}
+
+/**
  * Calculates the geodesic surface area of a bounding box in square kilometers.
  */
 export function calculateBboxAreaKm2(bbox: StudyAreaBoundingBox): number {
@@ -128,34 +152,23 @@ export class ArchaeologyEngine {
 
     const anomalies: ArchaeologicalAnomaly[] = [];
 
-    // 3. Check if study area encompasses any known peer-reviewed benchmark discovery sites
-    for (const ref of PEER_REVIEWED_REFERENCE_SITES) {
-      const isInside =
-        ref.referenceCoordinates.lat >= studyArea.latMin &&
-        ref.referenceCoordinates.lat <= studyArea.latMax &&
-        ref.referenceCoordinates.lon >= studyArea.lonMin &&
-        ref.referenceCoordinates.lon <= studyArea.lonMax;
-
-      if (isInside) {
-        const detected = this.evaluateBenchmarkSiteSignature(ref, studyArea, liveSensors);
-        if (detected) {
-          anomalies.push(detected);
-        }
-      }
-    }
-
-    // 4. Generate high-density Spatial Evaluation Grid for IDW Surface Interpolation (1,024 points, 32x32 resolution)
-    // Truly derived from the real physical elevation matrix (SRTM 30m) and sensor telemetry
-    const gridCols = 32;
-    const gridRows = 32;
+    // 3. Generate high-density Spatial Evaluation Grid for continuous surface drape
+    // Dynamically scales with physical ground distance (~25m ground resolution per pixel cell)
+    // Avoids downsampling distortion across both compact urban features and landscape paleochannels
+    const latMidRad = (((studyArea.latMin + studyArea.latMax) / 2) * Math.PI) / 180;
+    const heightM = (studyArea.latMax - studyArea.latMin) * 111320;
+    const widthM = (studyArea.lonMax - studyArea.lonMin) * 111320 * Math.cos(latMidRad);
+    const TARGET_CELL_METERS = 25;
+    const gridCols = Math.max(32, Math.min(80, Math.round(widthM / TARGET_CELL_METERS)));
+    const gridRows = Math.max(32, Math.min(80, Math.round(heightM / TARGET_CELL_METERS)));
     const dLat = (studyArea.latMax - studyArea.latMin) / Math.max(1, gridRows - 1);
     const dLon = (studyArea.lonMax - studyArea.lonMin) / Math.max(1, gridCols - 1);
     const cloudCover = liveSensors.sentinel2?.cloudCoverPercent ?? 0;
     const baseCertainty = Math.max(0.1, 1.0 - cloudCover / 100);
 
     const elevGrid = liveSensors.dem?.elevationGrid;
-    const demRows = liveSensors.dem?.gridRows ?? 5;
-    const demCols = liveSensors.dem?.gridCols ?? 5;
+    const demRows = liveSensors.dem?.gridRows ?? 9;
+    const demCols = liveSensors.dem?.gridCols ?? 9;
     const meanElev = liveSensors.dem?.meanElevationM ?? 0;
     const stdDevElev = Math.max(0.5, liveSensors.dem?.elevationStdDevM ?? 1.0);
 
@@ -177,6 +190,9 @@ export class ArchaeologyEngine {
       return (p00 * (1 - fc) + p10 * fc) * (1 - fr) + (p01 * (1 - fc) + p11 * fc) * fr;
     };
 
+    const measuredSarDb = liveSensors.sentinel1?.measuredCrossPolRatioDb ?? (liveSensors.sentinel1?.measuredVhMeanDb ?? -16.0);
+    const measuredOpticalDelta = liveSensors.sentinel2?.multiTemporal?.deltaNdre ?? (liveSensors.sentinel2?.pixelStatistics?.computedNdre ?? 0.02);
+
     const points: SpatialGridPoint[] = [];
 
     for (let r = 0; r < gridRows; r++) {
@@ -195,9 +211,6 @@ export class ArchaeologyEngine {
         const reliefContrast = Math.min(1.0, Math.abs(microReliefM) / (3.0 * stdDevElev));
         const pointValue = 0.08 + 0.15 * reliefContrast;
 
-        // Physical sensor telemetry at this point
-        const opticalDelta = 0.02;
-        const radarDb = (liveSensors.soil ? 3.0 + 0.1 * (liveSensors.soil.clayPercent / 10) : -16.0);
         const slope = liveSensors.dem?.slopeDegrees ?? 1.5;
 
         points.push({
@@ -205,31 +218,48 @@ export class ArchaeologyEngine {
           lon: parseFloat(lon.toFixed(6)),
           value: parseFloat(pointValue.toFixed(4)),
           confidence: parseFloat(baseCertainty.toFixed(3)),
-          opticalDelta: parseFloat(opticalDelta.toFixed(3)),
-          radarDb: parseFloat(radarDb.toFixed(1)),
+          opticalDelta: parseFloat(measuredOpticalDelta.toFixed(3)),
+          radarDb: parseFloat(measuredSarDb.toFixed(1)),
           slopeDegrees: parseFloat(slope.toFixed(1)),
         });
       }
     }
 
-    // 5. Autonomous Multi-Sensor Discovery:
-    // If no cataloged benchmark site was matched, evaluate the physical terrain autonomously
-    if (anomalies.length === 0) {
-      const autonomousDiscoveries = extractAutonomousAnomalies(
-        studyArea,
-        biome,
-        points,
-        gridCols,
-        gridRows,
-        liveSensors,
-        cadastralHeritage,
-      );
-      if (autonomousDiscoveries.length > 0) {
-        anomalies.push(...autonomousDiscoveries);
+    // 4. Autonomous Multi-Sensor Discovery (Blind Unsupervised Evaluation):
+    const autonomousDiscoveries = extractAutonomousAnomalies(
+      studyArea,
+      biome,
+      points,
+      gridCols,
+      gridRows,
+      liveSensors,
+      cadastralHeritage,
+    );
+
+    // 5. Cross-reference discovered anomalies against peer-reviewed ground truth
+    for (const anomaly of autonomousDiscoveries) {
+      for (const ref of PEER_REVIEWED_REFERENCE_SITES) {
+        const distM = calculateHaversineDistanceMeters(anomaly.centroid.lat, anomaly.centroid.lon, ref.referenceCoordinates.lat, ref.referenceCoordinates.lon);
+        const inRefBbox =
+          anomaly.centroid.lat >= ref.referenceBoundingBox.latMin - 0.005 &&
+          anomaly.centroid.lat <= ref.referenceBoundingBox.latMax + 0.005 &&
+          anomaly.centroid.lon >= ref.referenceBoundingBox.lonMin - 0.005 &&
+          anomaly.centroid.lon <= ref.referenceBoundingBox.lonMax + 0.005;
+
+        if (distM <= 500 || inRefBbox) {
+          anomaly.id = `anomaly_${ref.id}_${anomaly.category}_${anomalies.length + 1}`;
+          anomaly.name = `${ref.name} (${anomaly.name.replace('Autonomous Discovery: ', '')})`;
+          anomaly.blindIoU = calculateBboxIoU(anomaly.boundingBox, ref.referenceBoundingBox);
+          anomaly.centroidDisplacementMeters = parseFloat(distM.toFixed(1));
+          anomaly.culturalContext = `${ref.name}: ${ref.historicalSignificance}`;
+          anomaly.evidenceSummary += ` [Ground-Truth Reference: ${ref.citation.authors} (${ref.citation.year}), ${ref.citation.journal}; centroid offset ${Math.round(distM)}m, IoU ${(anomaly.blindIoU * 100).toFixed(1)}%]`;
+          break;
+        }
       }
+      anomalies.push(anomaly);
     }
 
-    // 6. If anomalies are confirmed (benchmark or autonomous), apply spatial proximity weighting
+    // 6. If anomalies are confirmed, apply continuous spatial proximity weighting
     if (anomalies.length > 0) {
       for (const pt of points) {
         for (const a of anomalies) {
@@ -260,18 +290,14 @@ export class ArchaeologyEngine {
     if (anomalies.length > 0) {
       status = 'ANOMALY_CONFIRMED';
       const a = anomalies[0];
-      if (a.id.startsWith('auto_')) {
-        const sign = a.evidence.microReliefDepthMeters >= 0 ? '+' : '';
-        statusMessage = `Autonomous multi-sensor anomaly confirmed: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence, ${Math.round(a.areaM2 || 0).toLocaleString()} m²). Micro-relief TPI (${sign}${a.evidence.microReliefDepthMeters.toFixed(2)}m) and spatial DBSCAN clustering indicate coherent anthropogenic morphology cross-referenced with live ${liveSensors.dem?.dataset || 'SRTM DEM'} and ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR${pixStr}.`;
-      } else {
-        statusMessage = `Confirmed archaeological anomaly: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence). Cross-referenced with live ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR radar and ${liveSensors.dem?.dataset || 'SRTM DEM'} topography${pixStr}.`;
-      }
+      const sign = a.evidence.microReliefDepthMeters >= 0 ? '+' : '';
+      statusMessage = `Empirical multi-sensor anomaly confirmed: "${a.name}" (${(a.confidenceScore * 100).toFixed(1)}% confidence, ${Math.round(a.areaM2 || 0).toLocaleString()} m²). Micro-relief TPI (${sign}${a.evidence.microReliefDepthMeters.toFixed(2)}m) and spatial DBSCAN clustering indicate coherent anthropogenic morphology cross-referenced with live ${liveSensors.dem?.dataset || 'SRTM DEM'} and ${liveSensors.sentinel1?.platform || 'Sentinel-1'} SAR${pixStr}.`;
       if (cadastralHeritage && cadastralHeritage.length > 0) {
         statusMessage += ` [Documented Heritage Site in AOI: "${cadastralHeritage[0].name}"]`;
       }
-    } else if (cadastralHeritage && cadastralHeritage.length > 0) {
+    } else if (cadastralHeritage && cadastralHeritage.some(h => h.isAboveGroundStanding)) {
       status = 'STANDING_HERITAGE_VERIFIED';
-      const heritage = cadastralHeritage[0];
+      const heritage = cadastralHeritage.find(h => h.isAboveGroundStanding)!;
       statusMessage = `Verified Documented Standing Heritage: "${heritage.name}" (${heritage.periodOrEpoch || 'Historical Epoch'}, ${heritage.heritageDesignation || 'Cataloged Monument'}). Footprint cataloged as surface heritage baseline. Multi-sensor prospection on surrounding floodplain/buffer confirms 0 uncharted subterranean anomalies (terrain clear)${pixStr}.`;
     } else {
       status = 'NO_ANOMALY_DETECTED';
@@ -288,7 +314,7 @@ export class ArchaeologyEngine {
       statusMessage = `Multi-sensor prospection completed across ${areaKm2} km² [${s2Info}; ${s1Info}; ${demInfo}${pixStr}]. Terrain micro-relief (TPI) and radar backscatter across this area do not show coherent orthogonal foundations, ditch enclosures, or tell mound signatures above the consensus threshold. No archaeological anomalies detected.`;
     }
 
-    const highConfidenceCount = anomalies.filter(a => a.confidenceScore >= 0.95).length;
+    const highConfidenceCount = anomalies.filter(a => a.confidenceScore >= 0.75).length;
     const overallConfidence =
       anomalies.length > 0
         ? parseFloat((anomalies.reduce((acc, a) => acc + a.confidenceScore, 0) / anomalies.length).toFixed(4))
@@ -314,153 +340,6 @@ export class ArchaeologyEngine {
         cloudThresholdUsed: options?.maxCloudCoverPercent ?? 5,
         dateUsed: liveSensors.sentinel2?.acquisitionDate,
       },
-    };
-  }
-
-  /**
-   * Synthesizes live satellite telemetry with independently published ground-truth
-   * geometry from peer-reviewed archaeological surveys.
-   */
-  private evaluateBenchmarkSiteSignature(
-    ref: typeof PEER_REVIEWED_REFERENCE_SITES[0],
-    studyArea: StudyAreaBoundingBox,
-    liveSensors: ReturnType<typeof acquireLiveSensoryTelemetry> extends Promise<infer T> ? T : never,
-  ): ArchaeologicalAnomaly | null {
-    const lat = ref.referenceCoordinates.lat;
-    const lon = ref.referenceCoordinates.lon;
-
-    if (lat < studyArea.latMin || lat > studyArea.latMax || lon < studyArea.lonMin || lon > studyArea.lonMax) {
-      return null;
-    }
-
-    // 1. Live DEM Topographic & Micro-Relief Metrics (from live SRTM 30m)
-    const measuredSlope = liveSensors.dem?.slopeDegrees ?? 1.5;
-    const measuredElevation = liveSensors.dem?.meanElevationM ?? ref.referenceCoordinates.elevationMeters;
-    const elevStd = liveSensors.dem?.elevationStdDevM ?? 0.8;
-    const elevationSpan = Math.abs((liveSensors.dem?.maxElevationM ?? measuredElevation) - (liveSensors.dem?.minElevationM ?? measuredElevation));
-
-    // Dynamic contouring: adapt boundary polygon to live SRTM terrain rugosity and slope orientation
-    const slopeRad = (measuredSlope * Math.PI) / 180;
-    const contourDispLon = (elevStd * 0.000015) * Math.cos(slopeRad);
-    const contourDispLat = (elevStd * 0.000015) * Math.sin(slopeRad);
-
-    const polygonCoordinates: Array<[number, number]> = ref.documentedSurveyBounds.map(([pLon, pLat], pIdx) => {
-      const phase = (pIdx / (ref.documentedSurveyBounds.length || 1)) * Math.PI * 2;
-      const adaptedLon = pLon + contourDispLon * Math.sin(phase);
-      const adaptedLat = pLat + contourDispLat * Math.cos(phase);
-      return [
-        Math.max(studyArea.lonMin, Math.min(studyArea.lonMax, parseFloat(adaptedLon.toFixed(6)))),
-        Math.max(studyArea.latMin, Math.min(studyArea.latMax, parseFloat(adaptedLat.toFixed(6)))),
-      ];
-    });
-
-    // Compute polygon area (approximate geodesic planar projection)
-    let areaM2 = 25000;
-    if (polygonCoordinates.length >= 3) {
-      let sum = 0;
-      for (let i = 0; i < polygonCoordinates.length - 1; i++) {
-        const [x1, y1] = polygonCoordinates[i];
-        const [x2, y2] = polygonCoordinates[i + 1];
-        sum += x1 * y2 - x2 * y1;
-      }
-      const latM = 111320;
-      const lonM = 111320 * Math.cos((lat * Math.PI) / 180);
-      areaM2 = Math.round(Math.abs(sum / 2) * latM * lonM);
-    }
-    const perimeterMeters = Math.round(Math.sqrt(areaM2) * 4);
-
-    // 2. Real SoilGrids & SAR Backscatter (from live ISRIC SoilGrids and Copernicus Sentinel-1)
-    const clay = liveSensors.soil?.clayPercent ?? 28;
-    const sand = liveSensors.soil?.sandPercent ?? 48;
-    // Dobson semi-empirical soil dielectric permittivity: eps = 3.2 + 0.12*clay% - 0.02*sand%
-    const dielectric = 3.2 + 0.12 * (clay / 10) - 0.02 * (sand / 10);
-    const sarBonus = liveSensors.sentinel1 ? (liveSensors.sentinel1.polarizations.includes('VH') ? 0.7 : 0.3) : 0;
-    const radarBackscatterRatioDb = parseFloat((dielectric * 0.82 + sarBonus).toFixed(1));
-
-    // 3. Real Sentinel-2 Cloud Factor & Optical Contrast (from live TiTiler pixel statistics)
-    const cloudCover = liveSensors.sentinel2?.cloudCoverPercent ?? 0;
-    const cloudFactor = Math.max(0.75, 1.0 - cloudCover / 200);
-
-    // Micro-relief depth: positive for mounds, negative for sunken paleochannels / ditch enclosures
-    const isMound = ref.expectedCategory === 'settlement_mound';
-    const microReliefDepthMeters = parseFloat(
-      (isMound
-        ? Math.max(0.6, Math.min(4.2, elevStd * 1.5 + elevationSpan * 0.12))
-        : -Math.max(0.8, Math.min(4.8, elevStd * 1.8 + elevationSpan * 0.15))
-      ).toFixed(2)
-    );
-
-    // Optical spectral contrast delta: negative for buried stone under crops, positive for alluvial silt / vegetation
-    const isStoneFoundation = ref.expectedCategory === 'linear_foundation';
-    const measuredNdre = liveSensors.sentinel2?.pixelStatistics?.computedNdre;
-    const spectralContrastDelta = typeof measuredNdre === 'number'
-      ? parseFloat((isStoneFoundation ? -(Math.abs(measuredNdre) + 0.15) * cloudFactor : (Math.abs(measuredNdre) + 0.08) * cloudFactor).toFixed(2))
-      : parseFloat((isStoneFoundation ? -0.28 * cloudFactor : 0.15 * cloudFactor).toFixed(2));
-
-    // Orthogonality and Circularity derived from geometric category and live terrain slope
-    const orthogonalityScore = parseFloat(
-      (isStoneFoundation || ref.expectedCategory === 'paleochannel_segment'
-        ? Math.min(0.96, 0.86 + 0.05 * Math.cos(slopeRad))
-        : 0.65).toFixed(2)
-    );
-    const circularityScore = parseFloat(
-      (ref.expectedCategory === 'caravan_waypoint' || ref.expectedCategory === 'settlement_mound'
-        ? 0.72 + 0.08 * Math.sin(slopeRad)
-        : 0.38).toFixed(2)
-    );
-
-    const evidence: MultiModalEvidence = {
-      spectralContrastDelta,
-      microReliefDepthMeters,
-      radarBackscatterRatioDb,
-      circularityScore,
-      orthogonalityScore,
-      paleoWaterDistanceMeters: ref.expectedCategory === 'paleochannel_segment' ? 0 : 250,
-      slopeGradientDegrees: measuredSlope,
-    };
-
-    // 4. Truly Dynamic Multi-Modal Consensus Confidence Score
-    // Integrates live optical quality, radar telemetry, and DEM micro-relief
-    const s2Weight = liveSensors.sentinel2 ? (1.0 - Math.min(0.2, cloudCover / 100)) : 0.6;
-    const s1Weight = liveSensors.sentinel1 ? 1.0 : 0.6;
-    const demWeight = liveSensors.dem ? 1.0 : 0.6;
-    const sensorConsensus = (s2Weight * 0.35 + s1Weight * 0.40 + demWeight * 0.25);
-    const confidenceScore = parseFloat(
-      Math.min(0.985, Math.max(0.952, 0.942 + 0.038 * sensorConsensus * cloudFactor)).toFixed(3)
-    );
-
-    const s2Platform = liveSensors.sentinel2?.platform || 'Sentinel-2';
-    const s1Platform = liveSensors.sentinel1?.platform || 'Sentinel-1';
-    const s1Pol = liveSensors.sentinel1?.polarizations.join('/') || 'VV/VH';
-    const pixAnalyzed = liveSensors.sentinel2?.pixelStatistics?.validPixelsAnalyzed;
-    const pixStr = pixAnalyzed ? ` (${pixAnalyzed.toLocaleString()} live COG pixels analyzed)` : '';
-
-    const evidenceSummary = `Multi-sensor prospection: ${s1Platform} C-band SAR (${s1Pol}, ${radarBackscatterRatioDb} dB dielectric contrast) corroborates ${ref.name.toLowerCase()} at ${measuredElevation}m elevation. Modulated by ${s2Platform} optical telemetry${pixStr} (${(confidenceScore * 100).toFixed(1)}% live multi-modal consensus confidence, cloud ceiling ${cloudCover}%).`;
-
-    return {
-      id: `anomaly_${ref.id}`,
-      category: ref.expectedCategory,
-      name: ref.name,
-      confidenceScore,
-      centroid: {
-        lat: ref.referenceCoordinates.lat,
-        lon: ref.referenceCoordinates.lon,
-        elevationMeters: measuredElevation,
-      },
-      boundingBox: {
-        latMin: Math.min(...polygonCoordinates.map(p => p[1])),
-        latMax: Math.max(...polygonCoordinates.map(p => p[1])),
-        lonMin: Math.min(...polygonCoordinates.map(p => p[0])),
-        lonMax: Math.max(...polygonCoordinates.map(p => p[0])),
-      },
-      polygonCoordinates,
-      areaM2,
-      perimeterMeters,
-      estimatedAgeRange: 'Ancient / Classical Antiquity',
-      culturalContext: ref.historicalSignificance,
-      evidence,
-      evidenceSummary,
-      detectionTimestamp: Date.now(),
     };
   }
 }

@@ -2849,6 +2849,10 @@ export default function App() {
       const picked = v.scene.pick(click.position);
       if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
         const ent = picked.id as Cesium.Entity;
+        // Space Archaeology features have dedicated interactive dossier & fly-to handling; ignore here to prevent unwanted generic 150km tracking zoom
+        if (typeof ent.id === 'string' && ent.id.startsWith('arch_entity_')) {
+          return;
+        }
         showInfoPanel(ent);
         const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
         const layer = String(p?.layer ?? '');
@@ -9460,6 +9464,77 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     throttledRender(v);
   }, []);
 
+  const handleSetArchaeologyStudyArea = useCallback((
+    bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+    label?: string,
+  ) => {
+    const v = viewerRef.current;
+    if (!v || !bbox) return;
+
+    // Clean up any existing study areas on the globe to avoid overlapping boxes
+    clearStudyArea();
+    studyAreasRef.current.forEach(a => {
+      removeStudyAreaFromGlobe(v, a);
+    });
+    studyAreasRef.current = [];
+
+    const areaId = `study_area_${Date.now()}`;
+    const name = label || 'Archaeological Study Area';
+    const rect = Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax);
+    const positions = [
+      Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMax),
+      Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMax),
+      Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMin),
+      Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMin),
+    ];
+
+    const toDeg = (p: Cesium.Cartesian3): [number, number] => {
+      const carto = Cesium.Cartographic.fromCartesian(p);
+      return [Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)];
+    };
+    const ringCoords = positions.map(toDeg);
+
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[...ringCoords, ringCoords[0]]],
+        },
+        properties: { name, type: 'rectangle' },
+      }],
+    };
+
+    const area: StudyAreaItem = {
+      id: areaId,
+      name,
+      type: 'rectangle',
+      visible: true,
+      active: true,
+      entity: v.entities.add({
+        id: `${areaId}_entity`,
+        rectangle: {
+          coordinates: rect,
+          material: new Cesium.Color(245 / 255, 158 / 255, 11 / 255, 0.08),
+        },
+        name,
+      }),
+      positions,
+      geojson,
+      color: '#f59e0b',
+      width: 3,
+      source: 'archaeology',
+    };
+
+    updateStudyAreaStyle(v, area, '#f59e0b', 3);
+    studyAreasRef.current = [area];
+    setStudyAreas(studyAreasRef.current);
+    setActiveStudyAreaId(area.id);
+    useChatStore.getState().setStudyAreaBbox(bbox);
+    throttledRender(v);
+  }, []);
+
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
     if (!v) return;
@@ -13148,9 +13223,15 @@ case 'openPanel':
             onOpenStudyAreaPanel={() => setShowStudyArea(true)}
             onClearStudyArea={() => {
               clearStudyArea();
+              if (viewerRef.current) {
+                studyAreasRef.current.forEach(a => removeStudyAreaFromGlobe(viewerRef.current!, a));
+              }
+              studyAreasRef.current = [];
+              setStudyAreas([]);
               setActiveStudyAreaId(null);
               useChatStore.getState().setStudyAreaBbox(null);
             }}
+            onSetStudyAreaBbox={handleSetArchaeologyStudyArea}
             zIndex={getPanelZIndex('archaeology', 115)}
           />
         </PanelSuspense>

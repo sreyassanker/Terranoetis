@@ -16,7 +16,7 @@ export interface StudyAreaItem {
   color: string;
   width: number;
   outlinePrimitive?: Cesium.GroundPolylinePrimitive;
-  source?: 'draw' | 'chat' | 'import';
+  source?: 'draw' | 'chat' | 'import' | 'archaeology';
 }
 
 let areaIdCounter = 0;
@@ -444,7 +444,7 @@ export function setStudyAreaActive(
 ): void {
   item.active = active;
   if (active) {
-    updateStudyAreaStyle(viewer, item, '#22c55e', 4);
+    updateStudyAreaStyle(viewer, item, item.color || '#22c55e', 4);
   } else {
     updateStudyAreaStyle(viewer, item, '#6b7280', 1);
   }

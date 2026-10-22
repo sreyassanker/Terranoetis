@@ -109,7 +109,7 @@ export default React.memo(function StudyAreaPanel({
 
       if (type === 'archaeology' && data.anomalies) {
         if (viewer) {
-          renderArchaeologyAnomaliesOnGlobe(viewer, data.anomalies, activeBbox);
+          renderArchaeologyAnomaliesOnGlobe(viewer, data, activeBbox);
           // Frame the camera smoothly over the study area
           const padLon = (activeBbox.lonMax - activeBbox.lonMin) * 0.20;
           const padLat = (activeBbox.latMax - activeBbox.latMin) * 0.20;

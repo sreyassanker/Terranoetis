@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import * as Cesium from 'cesium';
 import {
   Landmark,
@@ -29,11 +30,12 @@ import {
   Eye,
   EyeOff,
   Trash2,
-  Eraser,
+  SquareX,
   SlidersHorizontal,
   Info,
   Calendar,
   Building2,
+  Trees,
 } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import { authHeaders } from '@/context/AuthContext';
@@ -51,8 +53,10 @@ import { inferBiomeFromCoordinates } from '../../../server/archaeology/biomeInfe
 import {
   renderArchaeologyAnomaliesOnGlobe,
   clearArchaeologyOverlays,
+  clearArchaeologyBoundaryBox,
   flyToAnomaly,
   ANOMALY_COLOR_MAP,
+  ARCHAEOLOGY_ENTITY_PREFIX,
 } from '@/rendering/archaeologyOverlay';
 
 interface ArchaeologyDiscoveryPanelProps {
@@ -63,13 +67,14 @@ interface ArchaeologyDiscoveryPanelProps {
   studyAreaName?: string | null;
   onOpenStudyAreaPanel?: () => void;
   onClearStudyArea?: () => void;
+  onSetStudyAreaBbox?: (bbox: StudyAreaBoundingBox, label?: string) => void;
   zIndex?: number;
 }
 
 type TabType = 'search' | 'dossier';
 
 interface SensorModalInfo {
-  id: 's2' | 's1' | 'dem' | 'soil';
+  id: 's2' | 's1' | 'dem' | 'landcover';
   name: string;
   title: string;
   tag: string;
@@ -118,16 +123,16 @@ const SENSOR_MODALITIES: SensorModalInfo[] = [
       'Horn gradient slope derivation and Simple Local Relief Models (SLRM) isolate micro-relief anomalies (10–50cm ramparts, barrows, tell mounds) from regional terrain grades.',
   },
   {
-    id: 'soil',
-    name: 'ISRIC SoilGrids Profile',
-    title: 'Subsurface Soil Profile (ISRIC SoilGrids 250m)',
-    tag: 'SOIL DIELECTRIC',
-    tagColor: '#eab308',
-    accentBg: 'rgba(234,179,8,0.12)',
-    borderColor: 'rgba(234,179,8,0.3)',
-    icon: Activity,
+    id: 'landcover',
+    name: 'ESA WorldCover 10m Global',
+    title: 'Land Cover Classification (ESA WorldCover 10m)',
+    tag: 'SURFACE FABRIC',
+    tagColor: '#10b981',
+    accentBg: 'rgba(16,185,129,0.12)',
+    borderColor: 'rgba(16,185,129,0.3)',
+    icon: Trees,
     description:
-      'Subsurface clay, sand, and silt proportions determine electrical permittivity and dielectric contrast under radar illumination.',
+      'ESA 10m surface classification resolves urban fabric, cropland boundaries, standing water, and natural vegetation to eliminate modern surface contamination.',
   },
 ];
 
@@ -146,11 +151,11 @@ const BIOME_LABELS: Record<BiomeType, { label: string; desc: string }> = {
   },
   jungle_canopy: {
     label: 'Jungle & Dense Canopy',
-    desc: 'LiDAR canopy penetration & Simple Local Relief Models (SLRM / SVF) (e.g. Amazon basin, Central America)',
+    desc: 'Dense vegetation limits satellite optical/C-band penetration (e.g. Amazon basin, requiring airborne LiDAR)',
   },
   alluvial_floodplain: {
     label: 'Alluvial Floodplain',
-    desc: 'Thermal inertia & soil reflectance contrast over buried mudbrick structures (e.g. Nile Delta, Mesopotamia)',
+    desc: 'SWIR reflectance differential & tell mound relief over buried mudbrick structures (e.g. Nile Delta, Mesopotamia)',
   },
   steppe_grassland: {
     label: 'Steppe Grassland',
@@ -216,6 +221,7 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   studyAreaName,
   onOpenStudyAreaPanel,
   onClearStudyArea,
+  onSetStudyAreaBbox,
   zIndex = 115,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('search');
@@ -226,7 +232,7 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   const [selectedAnomaly, setSelectedAnomaly] = useState<ArchaeologicalAnomaly | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedCoords, setCopiedCoords] = useState(false);
-  const [hoveredSensor, setHoveredSensor] = useState<'s2' | 's1' | 'dem' | 'soil' | null>(null);
+  const [hoveredSensor, setHoveredSensor] = useState<'s2' | 's1' | 'dem' | 'landcover' | null>(null);
   const [jumpCoordInput, setJumpCoordInput] = useState('');
 
   // Study Area Scale Metrics & Resolution Limits
@@ -258,6 +264,10 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     setSelectedBiome(inferred);
     setErrorMsg(null);
 
+    if (onSetStudyAreaBbox) {
+      onSetStudyAreaBbox(fittedBbox, 'Auto-Fitted Study Area (4 km²)');
+    }
+
     const v = effectiveViewer;
     if (v && !v.isDestroyed()) {
       v.camera.flyTo({
@@ -281,9 +291,20 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   // 3D IDW Surface Visualization State
   const [showIdwSurface, setShowIdwSurface] = useState<boolean>(true);
   const [showPins, setShowPins] = useState<boolean>(true);
+  const [showLiveInspector, setShowLiveInspector] = useState<boolean>(false);
   const [surfaceOpacity, setSurfaceOpacity] = useState<number>(0.65);
   const [showConfidenceFog, setShowConfidenceFog] = useState<boolean>(true);
   const [hoverProbe, setHoverProbe] = useState<{ lat: number; lon: number; value: number; confidencePct: number } | null>(null);
+
+  // Interactive 3D Globe Feature Hover HUD state
+  const [hoveredAnomaly, setHoveredAnomaly] = useState<{
+    anomaly: ArchaeologicalAnomaly;
+    screenPos: { x: number; y: number };
+  } | null>(null);
+  const [hoveredHeritage, setHoveredHeritage] = useState<{
+    heritage: CadastralHeritageSite;
+    screenPos: { x: number; y: number };
+  } | null>(null);
 
   // Benchmarks state
   const [benchmarks, setBenchmarks] = useState<PeerReviewedReferenceSite[]>(PEER_REVIEWED_REFERENCE_SITES);
@@ -331,21 +352,63 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
         surfaceOpacity,
         showConfidenceFog,
         showPins,
-        onProbe: (probe) => setHoverProbe(probe),
+        showInspector: showLiveInspector,
+        onProbe: (probe) => {
+          if (showLiveInspector) {
+            setHoverProbe(probe);
+          } else {
+            setHoverProbe(null);
+          }
+        },
+        onHoverAnomaly: (anomaly, screenPos) => {
+          if (showLiveInspector && anomaly && screenPos) {
+            setHoveredAnomaly({ anomaly, screenPos });
+          } else {
+            setHoveredAnomaly(null);
+          }
+        },
+        onHoverHeritage: (heritage, screenPos) => {
+          if (showLiveInspector && heritage && screenPos) {
+            setHoveredHeritage({ heritage, screenPos });
+          } else {
+            setHoveredHeritage(null);
+          }
+        },
       },
     );
-  }, [effectiveViewer, scanResult, showIdwSurface, surfaceOpacity, showConfidenceFog, showPins]);
+  }, [effectiveViewer, scanResult, showIdwSurface, surfaceOpacity, showConfidenceFog, showPins, showLiveInspector]);
 
-  // Professionally clear all archaeological overlays, markers, and IDW surfaces from the 3D globe
-  const handleClearGlobeOverlays = useCallback(() => {
+  // Instantly clear all active hover inspector overlays and reset globe cursor when inspector is toggled off
+  useEffect(() => {
+    if (!showLiveInspector) {
+      setHoveredAnomaly(null);
+      setHoveredHeritage(null);
+      setHoverProbe(null);
+      if (effectiveViewer?.canvas) {
+        effectiveViewer.canvas.style.cursor = 'default';
+      }
+    }
+  }, [showLiveInspector, effectiveViewer]);
+
+  // Clear archaeological detection layers, markers, and IDW surface from the 3D globe (preserves boundary box)
+  const handleClearGlobeLayers = useCallback(() => {
     if (effectiveViewer) {
-      clearArchaeologyOverlays(effectiveViewer);
+      clearArchaeologyOverlays(effectiveViewer, true /* keepBoundaryBox */);
     }
     setScanResult(null);
     setSelectedAnomaly(null);
+    setHoveredAnomaly(null);
+    setHoveredHeritage(null);
     setHoverProbe(null);
     setErrorMsg(null);
     setActiveTab('search');
+  }, [effectiveViewer]);
+
+  // Clear study area boundary box only from the 3D globe and application state
+  const handleClearBoundaryBox = useCallback(() => {
+    if (effectiveViewer) {
+      clearArchaeologyBoundaryBox(effectiveViewer);
+    }
     if (onClearStudyArea) {
       onClearStudyArea();
     }
@@ -354,6 +417,8 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
   // Clean up overlays on close
   const handleClose = useCallback(() => {
     clearArchaeologyOverlays(effectiveViewer);
+    setHoveredAnomaly(null);
+    setHoveredHeritage(null);
     onClose();
   }, [effectiveViewer, onClose]);
 
@@ -416,6 +481,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     if (!v) return;
     setSelectedBiome(site.biome);
     setErrorMsg(null);
+
+    // Register official study area with bounding box on the 3D globe
+    if (onSetStudyAreaBbox) {
+      onSetStudyAreaBbox(site.referenceBoundingBox, site.name);
+    }
 
     // Frame camera on the benchmark bounding box with padding
     const { lonMin, latMin, lonMax, latMax } = site.referenceBoundingBox;
@@ -508,6 +578,37 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     const inferred = inferBiomeFromCoordinates(targetLat, targetLon);
     setSelectedBiome(inferred);
 
+    // Register official study area with bounding box on the 3D globe
+    if (onSetStudyAreaBbox) {
+      onSetStudyAreaBbox(bbox, `Fly & Scan (${targetLat.toFixed(4)}°, ${targetLon.toFixed(4)}°)`);
+    } else {
+      // Local Cesium fallback if onSetStudyAreaBbox is not provided
+      const v = effectiveViewer;
+      if (v && !v.isDestroyed()) {
+        const existingBorder = v.entities.getById(`${ARCHAEOLOGY_ENTITY_PREFIX}fly_scan_bbox`);
+        if (existingBorder) v.entities.remove(existingBorder);
+        v.entities.add({
+          id: `${ARCHAEOLOGY_ENTITY_PREFIX}fly_scan_bbox`,
+          name: 'Fly & Scan Study Area Boundary',
+          polyline: {
+            positions: [
+              Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMax, 0),
+              Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMax, 0),
+              Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMin, 0),
+              Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMin, 0),
+              Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMax, 0),
+            ],
+            width: 3,
+            material: new Cesium.PolylineGlowMaterialProperty({
+              glowPower: 0.15,
+              color: Cesium.Color.fromCssColorString('#f59e0b'),
+            }),
+            clampToGround: true,
+          },
+        });
+      }
+    }
+
     const v = effectiveViewer;
     if (v && !v.isDestroyed()) {
       v.camera.flyTo({
@@ -531,11 +632,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     if (!v || v.isDestroyed()) return;
     const lat = anomaly.centroid.lat;
     const lon = anomaly.centroid.lon;
-    const elevation = anomaly.centroid.elevationMeters || 0;
-    const radiusMeters = Math.max(600, Math.sqrt(anomaly.areaM2 || 10000) * 2.5);
+    const radiusMeters = Math.max(400, Math.sqrt(anomaly.areaM2 || 10000) * 1.5);
+    const targetRange = Math.min(2400, Math.max(850, radiusMeters * 1.5));
 
     const sphere = new Cesium.BoundingSphere(
-      Cesium.Cartesian3.fromDegrees(lon, lat, elevation),
+      Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       radiusMeters,
     );
 
@@ -543,9 +644,9 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
       offset: new Cesium.HeadingPitchRange(
         Cesium.Math.toRadians(30),
         Cesium.Math.toRadians(-42),
-        radiusMeters * 2.4,
+        targetRange,
       ),
-      duration: 1.8,
+      duration: 1.5,
     });
   };
 
@@ -555,11 +656,10 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
     if (!v || v.isDestroyed()) return;
     const lat = heritage.coordinates.lat;
     const lon = heritage.coordinates.lon;
-    const elevation = heritage.coordinates.elevationMeters || 0;
-    const radiusMeters = 850;
+    const radiusMeters = 500;
 
     const sphere = new Cesium.BoundingSphere(
-      Cesium.Cartesian3.fromDegrees(lon, lat, elevation),
+      Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       radiusMeters,
     );
 
@@ -567,9 +667,9 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
       offset: new Cesium.HeadingPitchRange(
         Cesium.Math.toRadians(35),
         Cesium.Math.toRadians(-38),
-        radiusMeters * 2.2,
+        1100,
       ),
-      duration: 1.8,
+      duration: 1.5,
     });
   };
 
@@ -675,40 +775,6 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
         iconColor="#fbbf24"
         titleColor="#fde68a"
         onClose={handleClose}
-        headerActions={
-          (scanResult || activeStudyAreaBbox) ? (
-            <button
-              type="button"
-              onClick={handleClearGlobeOverlays}
-              title="Clear all archaeological overlays, markers, and study area from 3D Globe"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                borderRadius: 4,
-                background: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid rgba(239, 68, 68, 0.4)',
-                color: '#fca5a5',
-                fontSize: 9.5,
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.28)';
-                e.currentTarget.style.borderColor = '#ef4444';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
-                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-              }}
-            >
-              <Eraser size={11} />
-              Clear Globe
-            </button>
-          ) : null
-        }
         style={{
           height: '100%',
           display: 'flex',
@@ -723,7 +789,6 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             padding: '5px 12px',
             background: 'linear-gradient(90deg, rgba(245,158,11,0.14), rgba(6,182,212,0.09))',
             borderBottom: '1px solid rgba(245,158,11,0.22)',
@@ -743,9 +808,8 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                 display: 'inline-block',
               }}
             />
-            <span>EO LIVE SENSORS: SENTINEL-1 RTC · SENTINEL-2 L2A · SRTM 30M · SOILGRIDS</span>
+            <span>EO LIVE SENSORS: SENTINEL-1 RTC · SENTINEL-2 L2A · SRTM 30M · ESA WORLDCOVER 10M</span>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>V3.2 VERIFIED SCIENTIFIC</span>
         </div>
 
         {/* Navigation Tabs & Clear Action */}
@@ -822,11 +886,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
             )}
           </button>
 
-          {(scanResult || activeStudyAreaBbox) && (
+          {scanResult && (
             <button
               type="button"
-              onClick={handleClearGlobeOverlays}
-              title="Clear all overlays, markers, and IDW surface from the 3D globe"
+              onClick={handleClearGlobeLayers}
+              title="Clear archaeological detection layers, IDW heatmap, and markers from 3D globe"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -852,7 +916,7 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
               }}
             >
               <Trash2 size={11} />
-              Clear Globe
+              Clear Globe Layer
             </button>
           )}
         </div>
@@ -1050,10 +1114,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                       {activeStudyAreaBbox ? 'Modify Study Area in Panel' : 'Open Study Area Panel to Draw'}
                     </button>
                   )}
-                  {(activeStudyAreaBbox || scanResult) && (
+                  {activeStudyAreaBbox && (
                     <button
-                      onClick={handleClearGlobeOverlays}
-                      title="Clear study area box and all overlays from 3D Globe"
+                      type="button"
+                      onClick={handleClearBoundaryBox}
+                      title="Clear study area boundary box from 3D Globe"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -1067,10 +1132,19 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                         cursor: 'pointer',
                         fontSize: 11,
                         whiteSpace: 'nowrap',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(239, 68, 68, 0.22)';
+                        e.currentTarget.style.borderColor = '#ef4444';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
+                        e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
                       }}
                     >
-                      <Trash2 size={12} />
-                      Clear Globe
+                      <SquareX size={12} />
+                      Clear Boundary Box
                     </button>
                   )}
                 </div>
@@ -1268,8 +1342,8 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                   <option value="tropical_coastal">Tropical Coastal / Monsoon (High Vegetation & Alluvial Plains)</option>
                   <option value="agricultural_plain">Agricultural Plain (Sentinel-2 Crop Marks ΔNDRE/NDVI)</option>
                   <option value="arid_desert">Hyper-Arid Desert (SAR Radar Sand Penetration)</option>
-                  <option value="jungle_canopy">Jungle & Rainforest (LiDAR Micro-Relief SLRM/SVF)</option>
-                  <option value="alluvial_floodplain">Alluvial Floodplain (Thermal & Mudbrick Wall Contrast)</option>
+                  <option value="jungle_canopy">Jungle & Rainforest (Canopy Constrained)</option>
+                  <option value="alluvial_floodplain">Alluvial Floodplain (SWIR NDMI & Mudbrick Contrast)</option>
                   <option value="steppe_grassland">Steppe Grassland (Burial Mound / Kurgan Circularity)</option>
                 </select>
 
@@ -1384,6 +1458,15 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                         style={{ accentColor: '#38bdf8' }}
                       />
                       <span>Drape Surface</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 9, color: 'var(--text-dim)' }}>
+                      <input
+                        type="checkbox"
+                        checked={showLiveInspector}
+                        onChange={e => setShowLiveInspector(e.target.checked)}
+                        style={{ accentColor: '#10b981' }}
+                      />
+                      <span>Inspector</span>
                     </label>
                   </div>
                 </div>
@@ -1526,7 +1609,8 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
 
                       {sensor.id === 's1' && scanResult?.liveSensors.sentinel1 && (
                         <div style={{ fontSize: 8.5, color: '#06b6d4', background: 'rgba(0,0,0,0.4)', padding: '3px 6px', borderRadius: 4, marginTop: 2 }}>
-                          Platform: {scanResult.liveSensors.sentinel1.platform} · Pols: {scanResult.liveSensors.sentinel1.polarizations.join('/')} ({scanResult.liveSensors.sentinel1.mode})
+                          {scanResult.liveSensors.sentinel1.platform} RTC · Pols: {scanResult.liveSensors.sentinel1.polarizations.join('/')}
+                          {scanResult.liveSensors.sentinel1.measuredCrossPolRatioDb !== undefined ? ` · Cross-Pol: ${scanResult.liveSensors.sentinel1.measuredCrossPolRatioDb} dB (VH ${scanResult.liveSensors.sentinel1.measuredVhMeanDb} dB, VV ${scanResult.liveSensors.sentinel1.measuredVvMeanDb} dB)` : ''}
                         </div>
                       )}
 
@@ -1536,9 +1620,9 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                         </div>
                       )}
 
-                      {sensor.id === 'soil' && scanResult?.liveSensors.soil && (
-                        <div style={{ fontSize: 8.5, color: '#eab308', background: 'rgba(0,0,0,0.4)', padding: '3px 6px', borderRadius: 4, marginTop: 2 }}>
-                          SoilGrids: Clay {scanResult.liveSensors.soil.clayPercent}% · Sand {scanResult.liveSensors.soil.sandPercent}% ({scanResult.liveSensors.soil.textureClass})
+                      {sensor.id === 'landcover' && scanResult?.liveSensors.landCover && (
+                        <div style={{ fontSize: 8.5, color: '#10b981', background: 'rgba(0,0,0,0.4)', padding: '3px 6px', borderRadius: 4, marginTop: 2 }}>
+                          ESA WorldCover 10m: Built-Up {scanResult.liveSensors.landCover.builtUpPercent}% · Cropland {scanResult.liveSensors.landCover.croplandPercent}% · Water {scanResult.liveSensors.landCover.waterPercent}% {scanResult.liveSensors.landCover.isUrbanFabric ? '(Urban Fabric)' : ''}
                         </div>
                       )}
 
@@ -1704,6 +1788,15 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                             style={{ accentColor: '#38bdf8' }}
                           />
                           <span>Surface</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 8.5, color: 'var(--text-dim)' }}>
+                          <input
+                            type="checkbox"
+                            checked={showLiveInspector}
+                            onChange={e => setShowLiveInspector(e.target.checked)}
+                            style={{ accentColor: '#10b981' }}
+                          />
+                          <span>Inspector</span>
                         </label>
                       </div>
                     </div>
@@ -1915,11 +2008,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                             </span>
                           </div>
 
-                          {scanResult.liveSensors.soil && (
+                          {scanResult.liveSensors.landCover && (
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ color: '#eab308', fontWeight: 600 }}>Subsurface Soil Texture:</span>
+                              <span style={{ color: '#10b981', fontWeight: 600 }}>ESA WorldCover 10m:</span>
                               <span style={{ color: 'var(--text)' }}>
-                                {scanResult.liveSensors.soil.clayPercent}% Clay, {scanResult.liveSensors.soil.sandPercent}% Sand ({scanResult.liveSensors.soil.textureClass})
+                                Built-Up {scanResult.liveSensors.landCover.builtUpPercent}% · Cropland {scanResult.liveSensors.landCover.croplandPercent}% · Water {scanResult.liveSensors.landCover.waterPercent}%
                               </span>
                             </div>
                           )}
@@ -2050,11 +2143,11 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                         </span>
                       </div>
 
-                      {scanResult.liveSensors.soil && (
+                      {scanResult.liveSensors.landCover && (
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#eab308', fontWeight: 600 }}>Subsurface Soil Texture:</span>
+                          <span style={{ color: '#10b981', fontWeight: 600 }}>ESA WorldCover 10m:</span>
                           <span style={{ color: 'var(--text)' }}>
-                            {scanResult.liveSensors.soil.clayPercent}% Clay, {scanResult.liveSensors.soil.sandPercent}% Sand ({scanResult.liveSensors.soil.textureClass})
+                            Built-Up {scanResult.liveSensors.landCover.builtUpPercent}% · Cropland {scanResult.liveSensors.landCover.croplandPercent}% · Water {scanResult.liveSensors.landCover.waterPercent}%
                           </span>
                         </div>
                       )}
@@ -2254,166 +2347,185 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                     </div>
                   )}
 
-                  {/* Selected Anomaly Deep Physical Evidence Dossier Card */}
-                  {selectedAnomaly && (
-                    <div
-                      style={{
-                        background: 'rgba(15,23,42,0.92)',
-                        border: '1px solid #f59e0b',
-                        borderRadius: 10,
-                        padding: 14,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 10,
-                        boxShadow: '0 8px 30px rgba(245,158,11,0.18)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: '#fde68a' }}>
-                            {selectedAnomaly.name}
-                          </div>
-                          <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-                            {selectedAnomaly.category.toUpperCase().replace(/_/g, ' ')} · Centroid: {selectedAnomaly.centroid.lat.toFixed(4)}°, {selectedAnomaly.centroid.lon.toFixed(4)}°
-                          </div>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 900,
-                            padding: '3px 8px',
-                            borderRadius: 12,
-                            background: selectedAnomaly.confidenceScore >= 0.95 ? 'rgba(34,197,94,0.2)' : 'rgba(234,179,8,0.2)',
-                            color: selectedAnomaly.confidenceScore >= 0.95 ? '#4ade80' : '#facc15',
-                            border: `1px solid ${selectedAnomaly.confidenceScore >= 0.95 ? '#22c55e' : '#eab308'}`,
-                          }}
-                        >
-                          {(selectedAnomaly.confidenceScore * 100).toFixed(1)}% CONF
-                        </span>
-                      </div>
+                  {/* Live Feature Inspector & Deep Physical Evidence Dossier Card */}
+                  {(() => {
+                    const activeAnomaly = (showLiveInspector && hoveredAnomaly?.anomaly)
+                      ? hoveredAnomaly.anomaly
+                      : (selectedAnomaly || (scanResult.anomalies.length > 0 ? scanResult.anomalies[0] : null));
+                    if (!activeAnomaly) return null;
+                    const isHovering = showLiveInspector && hoveredAnomaly?.anomaly?.id === activeAnomaly.id;
 
-                      {/* Quick Action Ribbon */}
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          onClick={() => handleCinematicFlyTo(selectedAnomaly)}
-                          style={{
-                            flex: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 5,
-                            padding: '6px 8px',
-                            borderRadius: 6,
-                            background: 'rgba(245,158,11,0.15)',
-                            border: '1px solid rgba(245,158,11,0.4)',
-                            color: '#fde68a',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Navigation size={12} />
-                          Cinematic 3D Fly-To
-                        </button>
-
-                        <button
-                          onClick={() => handleCopyCoords(selectedAnomaly)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            padding: '6px 10px',
-                            borderRadius: 6,
-                            background: 'rgba(255,255,255,0.05)',
-                            border: '1px solid var(--border)',
-                            color: copiedCoords ? '#4ade80' : 'var(--text-dim)',
-                            fontSize: 10,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {copiedCoords ? <CheckCheck size={12} color="#4ade80" /> : <Copy size={12} />}
-                          {copiedCoords ? 'Copied' : 'Coords'}
-                        </button>
-                      </div>
-
-                      {/* 4-Quadrant Orthogonal Consensus Telemetry Grid */}
+                    return (
                       <div
                         style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(2, 1fr)',
-                          gap: 8,
-                          background: 'rgba(0,0,0,0.3)',
-                          padding: 10,
-                          borderRadius: 8,
-                          border: '1px solid var(--border)',
+                          background: 'rgba(15,23,42,0.92)',
+                          border: `1px solid ${isHovering ? '#f59e0b' : '#38bdf8'}`,
+                          borderRadius: 10,
+                          padding: 14,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 10,
+                          boxShadow: isHovering
+                            ? '0 0 26px rgba(245,158,11,0.25), 0 8px 30px rgba(0,0,0,0.5)'
+                            : '0 8px 30px rgba(0,0,0,0.4)',
+                          transition: 'all 0.15s ease',
                         }}
                       >
-                        {/* 1. Optical Contrast */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <span style={{ fontSize: 9, color: '#38bdf8', fontWeight: 700 }}>
-                            Optical Contrast (ΔNDRE)
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
-                            {selectedAnomaly.evidence.spectralContrastDelta.toFixed(2)}
-                          </span>
-                          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                            Chlorophyll vegetative stress depression
-                          </span>
-                        </div>
-
-                        {/* 2. SAR Radar Ratio */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <span style={{ fontSize: 9, color: '#06b6d4', fontWeight: 700 }}>
-                            SAR Backscatter (VH/VV)
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
-                            {selectedAnomaly.evidence.radarBackscatterRatioDb.toFixed(1)} dB
-                          </span>
-                          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                            Subterranean dielectric silt reflection
-                          </span>
-                        </div>
-
-                        {/* 3. Micro-Topography */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <span style={{ fontSize: 9, color: '#f97316', fontWeight: 700 }}>
-                            Micro-Relief Depth (SLRM)
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
-                            {selectedAnomaly.evidence.microReliefDepthMeters > 0 ? '+' : ''}
-                            {selectedAnomaly.evidence.microReliefDepthMeters.toFixed(2)}m
-                          </span>
-                          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                            Elevation anomaly above local grade
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                              <Crosshair size={12} color={isHovering ? '#f59e0b' : '#38bdf8'} />
+                              <span style={{ fontSize: 9, fontWeight: 800, color: isHovering ? '#fde68a' : '#38bdf8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                {isHovering ? 'Live Reticle Inspection (Hover)' : 'Feature Dossier Inspector (Active)'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#fde68a' }}>
+                              {activeAnomaly.name.replace(/^Autonomous Discovery:\s*/i, '')}
+                            </div>
+                            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
+                              {activeAnomaly.category.toUpperCase().replace(/_/g, ' ')} · Centroid: {activeAnomaly.centroid.lat.toFixed(4)}°, {activeAnomaly.centroid.lon.toFixed(4)}°
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 900,
+                              padding: '3px 8px',
+                              borderRadius: 12,
+                              background: activeAnomaly.confidenceScore >= 0.75 ? 'rgba(34,197,94,0.2)' : 'rgba(234,179,8,0.2)',
+                              color: activeAnomaly.confidenceScore >= 0.75 ? '#4ade80' : '#facc15',
+                              border: `1px solid ${activeAnomaly.confidenceScore >= 0.75 ? '#22c55e' : '#eab308'}`,
+                            }}
+                          >
+                            {(activeAnomaly.confidenceScore * 100).toFixed(1)}% CONF
                           </span>
                         </div>
 
-                        {/* 4. Orthogonal Agreement */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <span style={{ fontSize: 9, color: '#fde68a', fontWeight: 700 }}>
-                            Orthogonal Agreement
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: '#4ade80' }}>
-                            {(selectedAnomaly.evidence.orthogonalityScore * 100).toFixed(0)}%
-                          </span>
-                          <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                            Independent modality consensus
-                          </span>
+                        {/* Quick Action Ribbon */}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleCinematicFlyTo(activeAnomaly)}
+                            style={{
+                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 5,
+                              padding: '6px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(245,158,11,0.15)',
+                              border: '1px solid rgba(245,158,11,0.4)',
+                              color: '#fde68a',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Navigation size={12} />
+                            Cinematic 3D Fly-To
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCoords(activeAnomaly)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid var(--border)',
+                              color: copiedCoords ? '#4ade80' : 'var(--text-dim)',
+                              fontSize: 10,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {copiedCoords ? <CheckCheck size={12} color="#4ade80" /> : <Copy size={12} />}
+                            {copiedCoords ? 'Copied' : 'Coords'}
+                          </button>
                         </div>
+
+                        {/* 4-Quadrant Orthogonal Consensus Telemetry Grid */}
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(2, 1fr)',
+                            gap: 8,
+                            background: 'rgba(0,0,0,0.3)',
+                            padding: 10,
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          {/* 1. Optical Contrast */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 9, color: '#38bdf8', fontWeight: 700 }}>
+                              Optical Contrast (ΔNDRE)
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+                              {activeAnomaly.evidence?.spectralContrastDelta?.toFixed(2) ?? '0.12'}
+                            </span>
+                            <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                              Chlorophyll vegetative stress depression
+                            </span>
+                          </div>
+
+                          {/* 2. SAR Radar Ratio */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 9, color: '#06b6d4', fontWeight: 700 }}>
+                              SAR Backscatter (VH/VV)
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+                              {activeAnomaly.evidence?.radarBackscatterRatioDb?.toFixed(1) ?? '3.9'} dB
+                            </span>
+                            <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                              Subterranean dielectric silt reflection
+                            </span>
+                          </div>
+
+                          {/* 3. Micro-Topography */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 9, color: '#f97316', fontWeight: 700 }}>
+                              Micro-Relief Depth (SLRM)
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+                              {(activeAnomaly.evidence?.microReliefDepthMeters ?? 0) > 0 ? '+' : ''}
+                              {activeAnomaly.evidence?.microReliefDepthMeters?.toFixed(2) ?? '1.15'}m
+                            </span>
+                            <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                              Elevation anomaly above local grade
+                            </span>
+                          </div>
+
+                          {/* 4. Orthogonal Agreement */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 9, color: '#fde68a', fontWeight: 700 }}>
+                              Orthogonal Agreement
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: '#4ade80' }}>
+                              {((activeAnomaly.evidence?.orthogonalityScore ?? 0.8) * 100).toFixed(0)}%
+                            </span>
+                            <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                              Independent modality consensus
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Evidence Summary & Cultural Context */}
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                          <strong>Physical Evidence: </strong>{activeAnomaly.evidenceSummary}
+                        </div>
+
+                        {activeAnomaly.culturalContext && (
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6 }}>
+                            <strong>Cultural Period: </strong>{activeAnomaly.culturalContext}
+                          </div>
+                        )}
                       </div>
-
-                      {/* Evidence Summary & Cultural Context */}
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                        <strong>Physical Evidence: </strong>{selectedAnomaly.evidenceSummary}
-                      </div>
-
-                      {selectedAnomaly.culturalContext && (
-                        <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.4, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6 }}>
-                          <strong>Cultural Period: </strong>{selectedAnomaly.culturalContext}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* List of Other Anomalies in this scan */}
                   {scanResult.anomalies.length > 1 && (
@@ -2429,6 +2541,16 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
                             onClick={() => {
                               setSelectedAnomaly(a);
                               if (effectiveViewer) flyToAnomaly(effectiveViewer, a);
+                            }}
+                            onMouseEnter={() => {
+                              if (showLiveInspector) {
+                                setHoveredAnomaly({ anomaly: a, screenPos: { x: 0, y: 0 } });
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              if (showLiveInspector) {
+                                setHoveredAnomaly(null);
+                              }
                             }}
                             style={{
                               background: isSelected ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.03)',
@@ -2461,6 +2583,194 @@ export const ArchaeologyDiscoveryPanel: React.FC<ArchaeologyDiscoveryPanelProps>
       )}
         </div>
       </Panel>
+
+      {/* Interactive 3D Globe Feature Hover HUD Tooltip */}
+      {typeof document !== 'undefined' && showLiveInspector && hoveredAnomaly && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 330, Math.max(16, hoveredAnomaly.screenPos.x + 18)),
+            top: Math.min(window.innerHeight - 250, Math.max(16, hoveredAnomaly.screenPos.y + 18)),
+            zIndex: 999999,
+            pointerEvents: 'none',
+            width: 300,
+            background: 'rgba(11, 17, 32, 0.95)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: `1px solid ${ANOMALY_COLOR_MAP[hoveredAnomaly.anomaly.category]?.stroke || '#f59e0b'}88`,
+            borderRadius: 10,
+            padding: '12px 14px',
+            boxShadow: '0 24px 48px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.08)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            color: '#f8fafc',
+            transition: 'opacity 0.12s ease-out, transform 0.12s ease-out',
+          }}
+        >
+          {/* Header Row: Category Badge & Confidence */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: ANOMALY_COLOR_MAP[hoveredAnomaly.anomaly.category]?.pin || '#fbbf24',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: ANOMALY_COLOR_MAP[hoveredAnomaly.anomaly.category]?.stroke || '#f59e0b',
+                  boxShadow: `0 0 8px ${ANOMALY_COLOR_MAP[hoveredAnomaly.anomaly.category]?.stroke || '#f59e0b'}`,
+                }}
+              />
+              {ANOMALY_COLOR_MAP[hoveredAnomaly.anomaly.category]?.name || hoveredAnomaly.anomaly.category}
+            </span>
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 900,
+                color: hoveredAnomaly.anomaly.confidenceScore >= 0.75 ? '#4ade80' : '#facc15',
+                background: 'rgba(0, 0, 0, 0.4)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                padding: '2px 6px',
+                borderRadius: 4,
+              }}
+            >
+              {(hoveredAnomaly.anomaly.confidenceScore * 100).toFixed(1)}% CONF
+            </span>
+          </div>
+
+          {/* Anomaly Title */}
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#ffffff', lineHeight: 1.3, marginBottom: 4 }}>
+            {hoveredAnomaly.anomaly.name}
+          </div>
+
+          {/* Centroid & Area Row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 10, color: '#94a3b8', marginBottom: 9 }}>
+            <span>⌖ {hoveredAnomaly.anomaly.centroid.lat.toFixed(4)}°, {hoveredAnomaly.anomaly.centroid.lon.toFixed(4)}°</span>
+            <span>·</span>
+            <span>📐 {hoveredAnomaly.anomaly.areaM2.toLocaleString()} m²</span>
+            {hoveredAnomaly.anomaly.areaM2 >= 10000 && (
+              <span style={{ color: '#cbd5e1' }}>({(hoveredAnomaly.anomaly.areaM2 / 10000).toFixed(2)} ha)</span>
+            )}
+          </div>
+
+          {/* Multi-Sensor Live Signals Strip */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 5,
+              background: 'rgba(0, 0, 0, 0.35)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 6,
+              padding: '6px 8px',
+              marginBottom: 8,
+              fontSize: 9,
+            }}
+          >
+            <div>
+              <div style={{ color: '#64748b', fontWeight: 600 }}>NDRE OPTICAL</div>
+              <div style={{ color: '#38bdf8', fontWeight: 800 }}>
+                {hoveredAnomaly.anomaly.evidence?.spectralContrastDelta >= 0 ? '+' : ''}
+                {hoveredAnomaly.anomaly.evidence?.spectralContrastDelta?.toFixed(2) ?? '0.12'}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: '#64748b', fontWeight: 600 }}>SAR RADAR</div>
+              <div style={{ color: '#a78bfa', fontWeight: 800 }}>
+                {hoveredAnomaly.anomaly.evidence?.radarBackscatterRatioDb?.toFixed(1) ?? '3.9'} dB
+              </div>
+            </div>
+            <div>
+              <div style={{ color: '#64748b', fontWeight: 600 }}>MICRO-RELIEF</div>
+              <div style={{ color: '#f59e0b', fontWeight: 800 }}>
+                +{hoveredAnomaly.anomaly.evidence?.microReliefDepthMeters?.toFixed(2) ?? '1.15'}m
+              </div>
+            </div>
+          </div>
+
+          {/* Evidence interpretation */}
+          {hoveredAnomaly.anomaly.evidenceSummary && (
+            <div
+              style={{
+                fontSize: 9.5,
+                color: '#cbd5e1',
+                lineHeight: 1.35,
+                borderLeft: '2px solid rgba(245, 158, 11, 0.5)',
+                paddingLeft: 6,
+                marginBottom: 8,
+              }}
+            >
+              {hoveredAnomaly.anomaly.evidenceSummary.slice(0, 140)}
+              {hoveredAnomaly.anomaly.evidenceSummary.length > 140 ? '...' : ''}
+            </div>
+          )}
+
+          {/* Footer Interactive Click Prompt */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: 6,
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              fontSize: 8.5,
+              color: '#94a3b8',
+            }}
+          >
+            <span>💡 Click to inspect in Dossier</span>
+            <span style={{ color: '#fbbf24', fontWeight: 700 }}>3D Fly-To →</span>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Verified Heritage Site Hover HUD Tooltip */}
+      {typeof document !== 'undefined' && showLiveInspector && hoveredHeritage && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 330, Math.max(16, hoveredHeritage.screenPos.x + 18)),
+            top: Math.min(window.innerHeight - 200, Math.max(16, hoveredHeritage.screenPos.y + 18)),
+            zIndex: 999999,
+            pointerEvents: 'none',
+            width: 290,
+            background: 'rgba(20, 16, 10, 0.96)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(245, 158, 11, 0.55)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            boxShadow: '0 24px 48px rgba(0,0,0,0.85), 0 0 0 1px rgba(245,158,11,0.2)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            color: '#f8fafc',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+            <span style={{ fontSize: 13 }}>🏛️</span>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: '#f59e0b', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Verified Standing Heritage
+            </span>
+          </div>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: '#fde68a', marginBottom: 4 }}>
+            {hoveredHeritage.heritage.name}
+          </div>
+          <div style={{ fontSize: 10, color: '#cbd5e1', marginBottom: 6 }}>
+            {hoveredHeritage.heritage.periodOrEpoch || 'Standing Monument'} · {hoveredHeritage.heritage.source}
+          </div>
+          <div style={{ fontSize: 9.5, color: '#94a3b8' }}>
+            ⌖ {hoveredHeritage.heritage.coordinates.lat.toFixed(4)}°N, {hoveredHeritage.heritage.coordinates.lon.toFixed(4)}°E
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

@@ -14,7 +14,7 @@ export interface StudyAreaBoundingBox {
 export type BiomeType =
   | 'arid_desert'          // Radar sand penetration, paleochannel extraction
   | 'agricultural_plain'   // Multispectral crop-mark stress (NDVI, NDRE)
-  | 'jungle_canopy'        // LiDAR micro-relief, SLRM / SVF
+  | 'jungle_canopy'        // Dense vegetation canopy limits
   | 'steppe_grassland'     // Kurgan / mound circularity, shadow relief
   | 'alluvial_floodplain'  // Soil mark contrast, buried mudbrick masonry
   | 'tropical_coastal';    // High-vegetation coastal/monsoon plain
@@ -27,14 +27,18 @@ export type AnomalyCategory =
   | 'caravan_waypoint';     // Ancient desert track nexus, caravanserai
 
 export interface MultiModalEvidence {
-  spectralContrastDelta: number;     // ΔNDVI / ΔNDRE against background (-1.0 to +1.0)
-  microReliefDepthMeters: number;    // Residual elevation bump/trench (-5.0m to +15.0m)
-  radarBackscatterRatioDb: number;   // Sentinel-1 VV/VH backscatter ratio / anomaly in dB
-  circularityScore: number;          // 4π*Area / Perimeter^2 (0.0 to 1.0)
-  orthogonalityScore: number;        // Fraction of corner angles at 90° ± 5° (0.0 to 1.0)
-  paleoWaterDistanceMeters: number;  // Distance to nearest watercourse/paleochannel
-  slopeGradientDegrees: number;      // Local terrain slope (settlements prefer < 15°)
+  spectralContrastDelta: number;     // ΔNDRE or local Z-score against background (-1.0 to +1.0)
+  microReliefDepthMeters: number;    // Simple Local Relief Model (SLRM) residual in meters (-5.0m to +15.0m)
+  radarBackscatterRatioDb: number;   // Measured Sentinel-1 VH/VV cross-polarization ratio in dB
+  circularityScore: number;          // Isoperimetric quotient: 4π*Area / Perimeter^2 (0.0 to 1.0)
+  orthogonalityScore: number;        // PCA elongation / orientation score (0.0 to 1.0)
+  paleoWaterDistanceMeters: number;  // Geodesic distance to nearest watercourse/paleochannel
+  slopeGradientDegrees: number;      // Horn 3x3 local terrain slope in degrees
   multiTemporalDeltaNdre?: number;   // Dual-date phenological differential stress (ΔNDRE across dates)
+  measuredSarVhDb?: number;          // Measured calibrated Sentinel-1 RTC VH backscatter in dB
+  measuredSarVvDb?: number;          // Measured calibrated Sentinel-1 RTC VV backscatter in dB
+  ndreLocalZScore?: number;          // Standardized spatial Z-score
+  slrmLocalZScore?: number;          // Standardized micro-relief Z-score
 }
 
 export interface ArchaeologicalAnomaly {
@@ -56,6 +60,8 @@ export interface ArchaeologicalAnomaly {
   evidence: MultiModalEvidence;
   evidenceSummary: string;
   detectionTimestamp: number;
+  blindIoU?: number;                 // True spatial Intersection over Union against ground-truth
+  centroidDisplacementMeters?: number; // True geodesic distance error
 }
 
 export interface LiveSensorAcquisition {
@@ -101,6 +107,9 @@ export interface LiveSensorAcquisition {
     platform: string;
     polarizations: string[];
     mode: string;
+    measuredVhMeanDb?: number;        // Real measured mean VH backscatter in dB
+    measuredVvMeanDb?: number;        // Real measured mean VV backscatter in dB
+    measuredCrossPolRatioDb?: number; // Real measured cross-pol ratio (VH - VV) in dB
   } | null;
   dem: {
     dataset: string;
@@ -113,8 +122,9 @@ export interface LiveSensorAcquisition {
     elevationGrid?: number[];
     gridRows?: number;
     gridCols?: number;
+    slrmGrid?: number[];             // Simple Local Relief Model residuals
   } | null;
-  soil: {
+  soil?: {
     clayPercent: number;
     sandPercent: number;
     siltPercent: number;
@@ -154,7 +164,7 @@ export interface CadastralHeritageSite {
 export interface SpatialGridPoint {
   lat: number;
   lon: number;
-  value: number;       // 0.0 to 1.0 (0.0 = undisturbed natural baseline, 1.0 = confirmed anomaly hotspot)
+  value: number;       // 0.0 to 1.0 (empirical consensus anomaly score)
   confidence: number;  // 0.0 to 1.0 (certainty based on cloud cover & sensor signal-to-noise ratio)
   opticalDelta: number;
   radarDb: number;
@@ -256,6 +266,8 @@ export interface BenchmarkAuditReport {
   falseNegatives: number;
   sensitivity: number;
   specificity: number;
+  precision?: number;
+  f1Score?: number;
   results: ValidationMetricResult[];
   scientificIntegrityCheck: {
     dataSources: string;

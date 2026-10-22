@@ -4,6 +4,13 @@ import type {
   ScanOptions,
   CadastralHeritageSite,
 } from './types';
+import {
+  computeHornSlope,
+  computeTPI,
+  computeSLRM,
+} from './rasterMath';
+import { queryHeritageGazetteer } from './gazetteer';
+import { calculateHaversineDistanceMeters } from './archaeologyEngine';
 
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -381,12 +388,66 @@ export async function fetchLiveSentinel1(
       ? props['sar:polarizations']
       : ['VV', 'VH'];
 
+    let measuredVhMeanDb: number | undefined;
+    let measuredVvMeanDb: number | undefined;
+    let measuredCrossPolRatioDb: number | undefined;
+
+    try {
+      const statsPayload = {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [bbox.lonMin, bbox.latMin],
+              [bbox.lonMax, bbox.latMin],
+              [bbox.lonMax, bbox.latMax],
+              [bbox.lonMin, bbox.latMax],
+              [bbox.lonMin, bbox.latMin],
+            ]],
+          },
+        }],
+      };
+
+      const coll = feature.collection || (feature.id.includes('_rtc') ? 'sentinel-1-rtc' : 'sentinel-1-grd');
+      const statsUrl = `https://planetarycomputer.microsoft.com/api/data/v1/item/statistics?collection=${coll}&item=${feature.id}&assets=vh&assets=vv`;
+      const sResp = await fetchWithTimeout(statsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(statsPayload),
+      }, 5000);
+
+      if (sResp.ok) {
+        const sJson = await sResp.json();
+        const stats = sJson.features?.[0]?.properties?.statistics;
+        const vhLinear = stats?.vh_b1?.mean;
+        const vvLinear = stats?.vv_b1?.mean;
+
+        if (typeof vhLinear === 'number' && vhLinear > 0) {
+          measuredVhMeanDb = parseFloat((10.0 * Math.log10(vhLinear)).toFixed(2));
+        }
+        if (typeof vvLinear === 'number' && vvLinear > 0) {
+          measuredVvMeanDb = parseFloat((10.0 * Math.log10(vvLinear)).toFixed(2));
+        }
+        if (measuredVhMeanDb !== undefined && measuredVvMeanDb !== undefined) {
+          measuredCrossPolRatioDb = parseFloat((measuredVhMeanDb - measuredVvMeanDb).toFixed(2));
+        }
+      }
+    } catch {
+      // Non-fatal if TiTiler stats takes too long
+    }
+
     return {
       sceneId: feature.id || 'S1_SCENE',
       acquisitionDate: props.datetime || new Date().toISOString(),
       platform: props.platform || 'Sentinel-1',
       polarizations,
       mode: props['sar:instrument_mode'] || 'IW',
+      measuredVhMeanDb,
+      measuredVvMeanDb,
+      measuredCrossPolRatioDb,
     };
   } catch (err) {
     console.warn('[Archaeology-DataAcq] Sentinel-1 SAR fetch failed:', (err as Error).message);
@@ -487,76 +548,37 @@ export async function fetchLiveDemGrid(
   const variance = elevations.reduce((acc, el) => acc + Math.pow(el - meanElevationM, 2), 0) / elevations.length;
   const elevationStdDevM = parseFloat(Math.sqrt(variance).toFixed(2));
 
-  // Compute average terrain slope using central difference approximation
-  const latSpanMeters = Math.max(30, (bbox.latMax - bbox.latMin) * 111320);
-  const lonSpanMeters = Math.max(30, (bbox.lonMax - bbox.lonMin) * 111320 * Math.cos((bbox.latMin * Math.PI) / 180));
-  const dzdx = (maxElevationM - minElevationM) / lonSpanMeters;
-  const dzdy = (maxElevationM - minElevationM) / latSpanMeters;
-  const slopeDeg = parseFloat(((Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy)) * 180) / Math.PI).toFixed(1));
+  // Compute genuine Horn 3x3 finite difference convolution slope across the elevation matrix
+  const elevFloat = new Float32Array(elevations);
+  const cellSpacingM = Math.max(10, calculateHaversineDistanceMeters(bbox.latMin, bbox.lonMin, bbox.latMin + latStep, bbox.lonMin));
+  const hornSlope = computeHornSlope(elevFloat, gridCols, gridRows, cellSpacingM);
+  const meanSlope = parseFloat((Array.from(hornSlope).reduce((a, b) => a + b, 0) / hornSlope.length).toFixed(1));
+  const slrm = computeSLRM(elevFloat, gridCols, gridRows, 2);
 
   return {
     dataset: 'SRTM 30m Global Elevation (NASA / USGS)',
     minElevationM,
     maxElevationM,
     meanElevationM,
-    slopeDegrees: isNaN(slopeDeg) ? 1.0 : Math.min(85, slopeDeg),
+    slopeDegrees: isNaN(meanSlope) ? 1.0 : Math.min(85, meanSlope),
     elevationStdDevM,
     pointsSampled: elevations.length,
     elevationGrid: elevations,
     gridRows,
     gridCols,
+    slrmGrid: Array.from(slrm),
   };
 }
 
 /**
- * Queries ISRIC SoilGrids for subsurface clay, sand, and silt percentages at site coordinates.
+ * ISRIC SoilGrids REST service (rest.isric.org) is permanently deprecated / unreachable.
+ * Returning null immediately to eliminate 7.5s connection hangs and ensure authentic telemetry.
  */
 export async function fetchLiveSoil(
-  lat: number,
-  lon: number,
+  _lat: number,
+  _lon: number,
 ): Promise<LiveSensorAcquisition['soil']> {
-  try {
-    const resp = await fetchWithTimeout(
-      `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon.toFixed(4)}&lat=${lat.toFixed(4)}&property=clay&property=sand&property=silt&depth=0-5cm&value=mean`,
-      {},
-      7500,
-    );
-
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const layers = data?.properties?.layers;
-    if (!Array.isArray(layers)) return null;
-
-    const getVal = (propName: string): number | null => {
-      const layer = layers.find((l: { name: string }) => l.name === propName);
-      const val = layer?.depths?.[0]?.values?.mean;
-      if (typeof val === 'number') {
-        return parseFloat((val / 10).toFixed(1)); // Convert permille to %
-      }
-      return null;
-    };
-
-    const clay = getVal('clay');
-    const sand = getVal('sand');
-    const silt = getVal('silt');
-
-    if (clay === null || sand === null) return null;
-
-    let textureClass = 'Loam';
-    if (sand > 70) textureClass = 'Sandy / Aeolian';
-    else if (clay > 35) textureClass = 'Clay Alluvium';
-    else if (silt !== null && silt > 50) textureClass = 'Silt Alluvial';
-
-    return {
-      clayPercent: clay,
-      sandPercent: sand,
-      siltPercent: silt ?? parseFloat((100 - clay - sand).toFixed(1)),
-      textureClass,
-    };
-  } catch (err) {
-    console.warn('[Archaeology-DataAcq] SoilGrids fetch failed:', (err as Error).message);
-    return null;
-  }
+  return null;
 }
 
 /**
@@ -839,24 +861,18 @@ function isPointInBboxWithTolerance(
 }
 
 /**
- * Queries OpenStreetMap / Nominatim and the Cadastral Heritage Registry to identify
- * documented, above-ground standing historical monuments within the scan area.
+ * Queries the authoritative Global Heritage Gazetteer and OpenStreetMap
+ * to identify documented, above-ground standing historical monuments within the scan area.
  */
 export async function fetchCadastralHeritage(
   bbox: StudyAreaBoundingBox,
 ): Promise<CadastralHeritageSite[]> {
-  const matchedSites: CadastralHeritageSite[] = [];
+  // 1. Check authoritative global cadastral registry for verified standing landmarks
+  const matchedSites: CadastralHeritageSite[] = [...queryHeritageGazetteer(bbox)];
+
+  // 2. Query live OpenStreetMap reverse geocoding with extra tags for dynamic detection (short 2.5s timeout)
   const centerLat = (bbox.latMin + bbox.latMax) / 2;
   const centerLon = (bbox.lonMin + bbox.lonMax) / 2;
-
-  // 1. Check authoritative global cadastral registry for verified standing landmarks
-  for (const regSite of GLOBAL_CADASTRAL_HERITAGE_REGISTRY) {
-    if (isPointInBboxWithTolerance(regSite.coordinates.lat, regSite.coordinates.lon, bbox)) {
-      matchedSites.push(regSite);
-    }
-  }
-
-  // 2. Query live OpenStreetMap reverse geocoding with extra tags for dynamic detection
   try {
     const osmUrl = `https://nominatim.openstreetmap.org/reverse?lat=${centerLat.toFixed(5)}&lon=${centerLon.toFixed(5)}&format=json&extratags=1`;
     const resp = await fetchWithTimeout(
@@ -867,7 +883,7 @@ export async function fetchCadastralHeritage(
           Accept: 'application/json',
         },
       },
-      4500,
+      2500,
     );
 
     if (resp.ok) {
@@ -916,7 +932,7 @@ export async function fetchCadastralHeritage(
       }
     }
   } catch (err) {
-    // Non-fatal network timeout; authoritative fallback registry already evaluated
+    // Non-fatal network timeout; authoritative gazetteer already evaluated
     console.warn('[Archaeology-DataAcq] Live OSM heritage lookup skipped:', (err as Error).message);
   }
 

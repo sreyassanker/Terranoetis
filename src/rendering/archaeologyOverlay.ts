@@ -4,12 +4,13 @@ import type {
   StudyAreaBoundingBox,
   ArchaeologyScanResult,
   SpatialGridPoint,
+  CadastralHeritageSite,
 } from '../../server/archaeology/types';
 import { throttledRender } from '@/lib/throttledRender';
 import { interpolateIDW, interpolateStructuredGrid, type InterpPoint } from './idwInterpolation';
 import { showInterpSurface, clearInterpSurface, probeGridValue } from './surfaceRenderer';
 
-const ARCHAEOLOGY_ENTITY_PREFIX = 'arch_entity_';
+export const ARCHAEOLOGY_ENTITY_PREFIX = 'arch_entity_';
 
 /**
  * 4-Tier Defense / Intelligence Colormap for Archaeological Surface Interpolation.
@@ -78,19 +79,19 @@ export const ANOMALY_COLOR_MAP: Record<
 
 /**
  * Creates an SVG pin image data URL for high-resolution globe billboard rendering.
+ * Ground-anchored, compact, and optimized for 3D globe perspective.
  */
 function createPinDataUrl(category: string, confidencePct: number): string {
   const colors = ANOMALY_COLOR_MAP[category] || ANOMALY_COLOR_MAP.linear_foundation;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="64" viewBox="0 0 56 64">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="48" viewBox="0 0 40 48">
     <defs>
-      <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.8"/>
-        <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="${colors.stroke}" flood-opacity="0.6"/>
+      <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.75"/>
       </filter>
     </defs>
-    <path d="M28 2C15.8 2 6 11.8 6 24c0 16 22 38 22 38s22-22 22-38c0-12.2-9.8-22-22-22z" fill="${colors.pin}" stroke="#ffffff" stroke-width="2.5" filter="url(#glow)"/>
-    <circle cx="28" cy="24" r="14" fill="#0f172a"/>
-    <text x="28" y="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="900" fill="#ffffff" text-anchor="middle">${confidencePct}%</text>
+    <path d="M20 2C11.16 2 4 9.16 4 18c0 11.5 16 28 16 28s16-16.5 16-28c0-8.84-7.16-16-16-16z" fill="${colors.pin}" stroke="#ffffff" stroke-width="2" filter="url(#glow)"/>
+    <circle cx="20" cy="18" r="10" fill="#0f172a"/>
+    <text x="20" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="8.5" font-weight="900" fill="#ffffff" text-anchor="middle">${confidencePct}%</text>
   </svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
@@ -99,24 +100,25 @@ function createPinDataUrl(category: string, confidencePct: number): string {
  * Creates an architectural temple / monument pin SVG for verified standing historical heritage.
  */
 function createHeritagePinDataUrl(): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="68" viewBox="0 0 60 68">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="52" viewBox="0 0 44 52">
     <defs>
-      <filter id="glow-gold" x="-30%" y="-30%" width="160%" height="160%">
-        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.8"/>
-        <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f59e0b" flood-opacity="0.8"/>
+      <filter id="glow-gold" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.8"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#f59e0b" flood-opacity="0.7"/>
       </filter>
     </defs>
-    <path d="M30 2C16.8 2 6 12.8 6 26c0 18 24 40 24 40s24-22 24-40c0-13.2-10.8-24-24-24z" fill="#f59e0b" stroke="#ffffff" stroke-width="2.5" filter="url(#glow-gold)"/>
-    <circle cx="30" cy="26" r="16" fill="#0f172a"/>
-    <path d="M22 34h16v-2H22v2zm14-4V22h-3v8h-2V22h-2v8h-2V22h-3v8h-4v2h18v-2h-4zm-6-13l9 4.5V20H21v-1.5l9-4.5z" fill="#fde68a"/>
+    <path d="M22 2C12.06 2 4 10.06 4 20c0 13 18 30 18 30s18-17 18-30c0-9.94-8.06-20-18-20z" fill="#f59e0b" stroke="#ffffff" stroke-width="2" filter="url(#glow-gold)"/>
+    <circle cx="22" cy="20" r="11" fill="#0f172a"/>
+    <path d="M16 26h12v-1.5H16v1.5zm10.5-3V17h-2.2v6h-1.5V17h-1.6v6h-1.5V17h-2.2v6H16v1.5h12V23h-1.5zm-4.5-9.7l6.7 3.3V15H15.3v-1.4l6.7-3.3z" fill="#fde68a"/>
   </svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 /**
  * Removes all rendered archaeology entities, IDW surfaces, and screen handlers from the Cesium globe.
+ * @param keepBoundaryBox If true, preserves any rendered study area boundary box entity.
  */
-export function clearArchaeologyOverlays(viewer: Cesium.Viewer | null): void {
+export function clearArchaeologyOverlays(viewer: Cesium.Viewer | null, keepBoundaryBox = false): void {
   if (!viewer || viewer.isDestroyed()) return;
 
   if (activeProbeHandler) {
@@ -128,12 +130,60 @@ export function clearArchaeologyOverlays(viewer: Cesium.Viewer | null): void {
   const entitiesToRemove: Cesium.Entity[] = [];
   viewer.entities.values.forEach(entity => {
     if (entity.id && entity.id.startsWith(ARCHAEOLOGY_ENTITY_PREFIX)) {
+      if (
+        keepBoundaryBox &&
+        (entity.id.includes('study_area') || entity.id.includes('fly_scan_bbox'))
+      ) {
+        return;
+      }
       entitiesToRemove.push(entity);
     }
   });
 
   entitiesToRemove.forEach(e => viewer.entities.remove(e));
+  if (viewer.canvas) {
+    viewer.canvas.style.cursor = 'default';
+  }
   throttledRender(viewer);
+}
+
+/**
+ * Removes archaeological study area boundary box entities only from the Cesium globe.
+ */
+export function clearArchaeologyBoundaryBox(viewer: Cesium.Viewer | null): void {
+  if (!viewer || viewer.isDestroyed()) return;
+
+  const ids = [
+    `${ARCHAEOLOGY_ENTITY_PREFIX}fly_scan_bbox`,
+    `${ARCHAEOLOGY_ENTITY_PREFIX}study_area_border`,
+    `${ARCHAEOLOGY_ENTITY_PREFIX}study_area_fill`,
+  ];
+  ids.forEach(id => {
+    const e = viewer.entities.getById(id);
+    if (e) viewer.entities.remove(e);
+  });
+  throttledRender(viewer);
+}
+
+/**
+ * Fast Jordan curve theorem ray-casting algorithm to test whether a geographic
+ * coordinate (lat, lon) is contained within an anomaly polygon footprint.
+ */
+export function isPointInPolygon(lat: number, lon: number, polygon: Array<[number, number]>): boolean {
+  if (!polygon || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    // polygon coordinates are [lon, lat] pairs
+    const xi = polygon[i][0];
+    const yi = polygon[i][1];
+    const xj = polygon[j][0];
+    const yj = polygon[j][1];
+    const intersect =
+      yi > lat !== yj > lat &&
+      lon < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 export interface ArchaeologyOverlayOptions {
@@ -141,7 +191,16 @@ export interface ArchaeologyOverlayOptions {
   surfaceOpacity?: number;
   showConfidenceFog?: boolean;
   showPins?: boolean;
+  showInspector?: boolean;
   onProbe?: (probe: { lat: number; lon: number; value: number; confidencePct: number } | null) => void;
+  onHoverAnomaly?: (
+    anomaly: ArchaeologicalAnomaly | null,
+    screenPosition?: { x: number; y: number }
+  ) => void;
+  onHoverHeritage?: (
+    heritage: CadastralHeritageSite | null,
+    screenPosition?: { x: number; y: number }
+  ) => void;
 }
 
 /**
@@ -173,6 +232,52 @@ export function renderArchaeologyAnomaliesOnGlobe(
   if (!studyArea) return;
 
   const { lonMin, latMin, lonMax, latMax } = studyArea;
+
+  // =========================================================================
+  // 1b. RENDER STUDY AREA BOUNDARY BOX (OUTLINE & RECTANGULAR FOOTPRINT)
+  // =========================================================================
+  const hasAppStudyArea = viewer.entities.values.some(
+    e => e.id && typeof e.id === 'string' && (
+      e.id.startsWith('study_area_') ||
+      e.id.startsWith('arch_study_area_') ||
+      e.id === 'study_area_rect' ||
+      e.id === `${ARCHAEOLOGY_ENTITY_PREFIX}fly_scan_bbox`
+    )
+  );
+
+  if (!hasAppStudyArea) {
+    const borderPositions = [
+      Cesium.Cartesian3.fromDegrees(lonMin, latMax, 0),
+      Cesium.Cartesian3.fromDegrees(lonMax, latMax, 0),
+      Cesium.Cartesian3.fromDegrees(lonMax, latMin, 0),
+      Cesium.Cartesian3.fromDegrees(lonMin, latMin, 0),
+      Cesium.Cartesian3.fromDegrees(lonMin, latMax, 0),
+    ];
+
+    viewer.entities.add({
+      id: `${ARCHAEOLOGY_ENTITY_PREFIX}study_area_border`,
+      name: 'Archaeological Study Area Boundary Box',
+      polyline: {
+        positions: borderPositions,
+        width: 3,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.15,
+          color: Cesium.Color.fromCssColorString('#f59e0b'),
+        }),
+        clampToGround: true,
+      },
+    });
+
+    viewer.entities.add({
+      id: `${ARCHAEOLOGY_ENTITY_PREFIX}study_area_fill`,
+      name: 'Archaeological Study Area Footprint',
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(lonMin, latMin, lonMax, latMax),
+        material: Cesium.Color.fromCssColorString('rgba(245, 158, 11, 0.04)'),
+        classificationType: Cesium.ClassificationType.TERRAIN,
+      },
+    });
+  }
 
   // =========================================================================
   // 1. RENDER CONTINUOUS IDW CLASSIFICATION & CONFIDENCE RASTER ON 3D TERRAIN
@@ -228,43 +333,186 @@ export function renderArchaeologyAnomaliesOnGlobe(
   }
 
   // =========================================================================
-  // 2. ATTACH INTERACTIVE SCREEN-SPACE MOUSE HOVER PROBE
+  // 2. ATTACH INTERACTIVE SCREEN-SPACE MOUSE HOVER PROBE & SELECTION HANDLER
   // =========================================================================
-  if (options?.onProbe) {
+  if (options?.onProbe || options?.onHoverAnomaly || options?.onHoverHeritage || onSelectAnomaly) {
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
     handler.setInputAction((movement: { endPosition: Cesium.Cartesian2 }) => {
+      // If live inspector HUD is not explicitly enabled (default is off), guarantee default cursor and suppress all hover callbacks
+      if (options?.showInspector !== true) {
+        if (viewer.canvas && viewer.canvas.style.cursor !== 'default') {
+          viewer.canvas.style.cursor = 'default';
+        }
+        options?.onHoverAnomaly?.(null, undefined);
+        options?.onHoverHeritage?.(null, undefined);
+        options?.onProbe?.(null);
+        return;
+      }
+
+      let matchedAnomaly: ArchaeologicalAnomaly | null = null;
+      let matchedHeritage: CadastralHeritageSite | null = null;
+
+      // 1. Direct Cesium Hardware Scene Pick (pins, polylines, 3D tiles)
+      const picked = viewer.scene.pick(movement.endPosition);
+      if (Cesium.defined(picked) && picked.id) {
+        if ((picked.id as any).__archaeologyAnomaly) {
+          matchedAnomaly = (picked.id as any).__archaeologyAnomaly;
+        } else if ((picked.id as any).__archaeologyHeritage) {
+          matchedHeritage = (picked.id as any).__archaeologyHeritage;
+        }
+      }
+
+      // 2. 2D Screen-Space Proximity (instantly catches pins & centroids without raycast drops)
+      if (!matchedAnomaly && !matchedHeritage) {
+        let bestDist = 42; // 42px screen radius
+        for (const anom of anomalies) {
+          try {
+            const cPos = Cesium.Cartesian3.fromDegrees(anom.centroid.lon, anom.centroid.lat, 0);
+            const winPos = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, cPos);
+            if (winPos) {
+              const screenDist = Math.hypot(winPos.x - movement.endPosition.x, winPos.y - movement.endPosition.y);
+              if (screenDist < bestDist) {
+                bestDist = screenDist;
+                matchedAnomaly = anom;
+              }
+            }
+          } catch {
+            // ignore projection quirks
+          }
+        }
+      }
+
+      // 3. Guaranteed Ellipsoid Intersection + Point-in-Polygon Fallback
+      let probeCoord: { lat: number; lon: number } | null = null;
+      let cartesian: Cesium.Cartesian3 | undefined = undefined;
       const ray = viewer.camera.getPickRay(movement.endPosition);
-      if (!ray) {
-        options.onProbe?.(null);
-        return;
+      if (ray) {
+        cartesian = viewer.scene.globe.pick(ray, viewer.scene) || undefined;
       }
-      const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
       if (!cartesian) {
-        options.onProbe?.(null);
-        return;
-      }
-      const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-      const lat = Cesium.Math.toDegrees(cartographic.latitude);
-      const lon = Cesium.Math.toDegrees(cartographic.longitude);
-
-      if (lat < latMin || lat > latMax || lon < lonMin || lon > lonMax) {
-        options.onProbe?.(null);
-        return;
+        cartesian = viewer.camera.pickEllipsoid(movement.endPosition, viewer.scene.globe.ellipsoid) || undefined;
       }
 
-      const probe = probeGridValue(lat, lon);
-      if (probe) {
-        const cloudCover = scanResult?.liveSensors?.sentinel2?.cloudCoverPercent ?? 0;
-        options.onProbe?.({
-          lat: probe.lat,
-          lon: probe.lon,
-          value: probe.value,
-          confidencePct: Math.round(Math.max(10, (1.0 - cloudCover / 100) * 100)),
-        });
-      } else {
-        options.onProbe?.(null);
+      if (cartesian) {
+        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+        const lat = Cesium.Math.toDegrees(cartographic.latitude);
+        const lon = Cesium.Math.toDegrees(cartographic.longitude);
+        probeCoord = { lat, lon };
+
+        if (!matchedAnomaly && !matchedHeritage && lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax) {
+          // A. Inside polygon
+          for (const anom of anomalies) {
+            if (anom.polygonCoordinates && isPointInPolygon(lat, lon, anom.polygonCoordinates)) {
+              matchedAnomaly = anom;
+              break;
+            }
+          }
+
+          // B. Centroid geographic proximity (within polygon radius + 40m)
+          if (!matchedAnomaly) {
+            for (const anom of anomalies) {
+              const dLat = (anom.centroid.lat - lat) * 111320;
+              const dLon = (anom.centroid.lon - lon) * (111320 * Math.cos(lat * Math.PI / 180));
+              const distM = Math.hypot(dLat, dLon);
+              const approxRadiusM = Math.sqrt((anom.areaM2 || 1000) / Math.PI);
+              if (distM <= Math.max(45, approxRadiusM * 1.15)) {
+                matchedAnomaly = anom;
+                break;
+              }
+            }
+          }
+
+          // C. Heritage monuments
+          if (!matchedAnomaly && scanResult?.cadastralHeritage) {
+            for (const her of scanResult.cadastralHeritage) {
+              if (her.polygonCoordinates && isPointInPolygon(lat, lon, her.polygonCoordinates)) {
+                matchedHeritage = her;
+                break;
+              }
+              const dLat = (her.coordinates.lat - lat) * 111320;
+              const dLon = (her.coordinates.lon - lon) * (111320 * Math.cos(lat * Math.PI / 180));
+              if (Math.hypot(dLat, dLon) <= 60) {
+                matchedHeritage = her;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Screen coordinates for UI Tooltip positioning
+      const canvasRect = viewer.scene.canvas.getBoundingClientRect();
+      const screenPos = {
+        x: canvasRect.left + movement.endPosition.x,
+        y: canvasRect.top + movement.endPosition.y,
+      };
+
+      // 5. Update cursor styling
+      if (viewer.canvas) {
+        viewer.canvas.style.cursor = (matchedAnomaly || matchedHeritage) ? 'pointer' : 'default';
+      }
+
+      // 6. Fire hover callbacks
+      options?.onHoverAnomaly?.(matchedAnomaly, matchedAnomaly ? screenPos : undefined);
+      options?.onHoverHeritage?.(matchedHeritage, matchedHeritage ? screenPos : undefined);
+
+      // 6. Fire raster probe callback if active
+      if (options?.onProbe) {
+        if (probeCoord && probeCoord.lat >= latMin && probeCoord.lat <= latMax && probeCoord.lon >= lonMin && probeCoord.lon <= lonMax) {
+          const probe = probeGridValue(probeCoord.lat, probeCoord.lon);
+          if (probe) {
+            const cloudCover = scanResult?.liveSensors?.sentinel2?.cloudCoverPercent ?? 0;
+            options.onProbe({
+              lat: probe.lat,
+              lon: probe.lon,
+              value: probe.value,
+              confidencePct: Math.round(Math.max(10, (1.0 - cloudCover / 100) * 100)),
+            });
+          } else {
+            options.onProbe(null);
+          }
+        } else {
+          options.onProbe(null);
+        }
       }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+    // Left click selection handler
+    if (onSelectAnomaly) {
+      handler.setInputAction((click: { position: Cesium.Cartesian2 }) => {
+        const picked = viewer.scene.pick(click.position);
+        if (Cesium.defined(picked) && picked.id && (picked.id as any).__archaeologyAnomaly) {
+          onSelectAnomaly((picked.id as any).__archaeologyAnomaly);
+          return;
+        }
+
+        const ray = viewer.camera.getPickRay(click.position);
+        if (ray) {
+          const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+          if (cartesian) {
+            const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+            const cLat = Cesium.Math.toDegrees(cartographic.latitude);
+            const cLon = Cesium.Math.toDegrees(cartographic.longitude);
+
+            for (const anom of anomalies) {
+              if (anom.polygonCoordinates && isPointInPolygon(cLat, cLon, anom.polygonCoordinates)) {
+                onSelectAnomaly(anom);
+                return;
+              }
+              const dLat = (anom.centroid.lat - cLat) * 111320;
+              const dLon = (anom.centroid.lon - cLon) * (111320 * Math.cos(cLat * Math.PI / 180));
+              const approxRadiusM = Math.sqrt((anom.areaM2 || 1000) / Math.PI);
+              if (Math.hypot(dLat, dLon) <= Math.max(30, approxRadiusM)) {
+                onSelectAnomaly(anom);
+                return;
+              }
+            }
+          }
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    }
+
     activeProbeHandler = handler;
   }
 
@@ -304,7 +552,7 @@ export function renderArchaeologyAnomaliesOnGlobe(
         closedDegreesArray.push(closedDegreesArray[0], closedDegreesArray[1]);
       }
 
-      viewer.entities.add({
+      const glowEntity = viewer.entities.add({
         id: `${ARCHAEOLOGY_ENTITY_PREFIX}anomaly_glow_${anomaly.id}_${index}`,
         name: `${anomaly.name} Glowing Boundary`,
         polyline: {
@@ -318,6 +566,7 @@ export function renderArchaeologyAnomaliesOnGlobe(
           clampToGround: true,
         },
       });
+      (glowEntity as any).__archaeologyAnomaly = anomaly;
 
       // 2c. Internal Archaeological Structural Vectors (Street Grids, Canals, Causeways)
       renderInternalStructuralVectors(viewer, anomaly, categoryColors.stroke, index);
@@ -334,29 +583,30 @@ export function renderArchaeologyAnomaliesOnGlobe(
         position: Cesium.Cartesian3.fromDegrees(
           clampedCentroidLon,
           clampedCentroidLat,
-          (anomaly.centroid.elevationMeters || 0) + 35,
+          0,
         ),
         billboard: {
           image: createPinDataUrl(anomaly.category, confidencePct),
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-          scale: 0.9,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          scale: 0.55,
+          scaleByDistance: new Cesium.NearFarScalar(600, 0.70, 35000, 0.38),
+          disableDepthTestDistance: 250,
         },
         label: {
-          text: `★ ${anomaly.name.toUpperCase()}\n[ ${confidencePct}% CONFIDENCE · ${categoryColors.name.toUpperCase()} ]`,
-          font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          fillColor: Cesium.Color.WHITE,
+          text: anomaly.name.replace(/^Autonomous Discovery:\s*/i, ''),
+          font: 'bold 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          fillColor: Cesium.Color.fromCssColorString('#fde68a'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.92)'),
-          backgroundPadding: new Cesium.Cartesian2(10, 5),
+          backgroundColor: Cesium.Color.fromCssColorString('rgba(11, 17, 32, 0.90)'),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
           verticalOrigin: Cesium.VerticalOrigin.TOP,
-          pixelOffset: new Cesium.Cartesian2(0, 8),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 300000),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          pixelOffset: new Cesium.Cartesian2(0, 6),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200),
+          disableDepthTestDistance: 250,
         },
       });
 
@@ -380,7 +630,7 @@ export function renderArchaeologyAnomaliesOnGlobe(
           degreesArray.push(pLon, pLat);
         });
 
-        viewer.entities.add({
+        const fillEntity = viewer.entities.add({
           id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_fill_${heritage.id}_${hIdx}`,
           name: `🏛️ ${heritage.name}`,
           polygon: {
@@ -389,12 +639,13 @@ export function renderArchaeologyAnomaliesOnGlobe(
             classificationType: Cesium.ClassificationType.TERRAIN,
           },
         });
+        (fillEntity as any).__archaeologyHeritage = heritage;
 
         const closed = [...degreesArray];
         if (closed[0] !== closed[closed.length - 2] || closed[1] !== closed[closed.length - 1]) {
           closed.push(closed[0], closed[1]);
         }
-        viewer.entities.add({
+        const glowEntity = viewer.entities.add({
           id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_glow_${heritage.id}_${hIdx}`,
           name: `${heritage.name} Perimeter Boundary`,
           polyline: {
@@ -408,36 +659,39 @@ export function renderArchaeologyAnomaliesOnGlobe(
             clampToGround: true,
           },
         });
+        (glowEntity as any).__archaeologyHeritage = heritage;
       }
 
       // Heritage Billboard Pin & Golden Badge
-      viewer.entities.add({
+      const pinEntity = viewer.entities.add({
         id: `${ARCHAEOLOGY_ENTITY_PREFIX}heritage_pin_${heritage.id}_${hIdx}`,
         name: `🏛️ ${heritage.name} (${heritage.periodOrEpoch || 'Standing Heritage'})`,
-        position: Cesium.Cartesian3.fromDegrees(lon, lat, (heritage.coordinates.elevationMeters || 0) + 40),
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
         billboard: {
           image: createHeritagePinDataUrl(),
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-          scale: 1.0,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          scale: 0.62,
+          scaleByDistance: new Cesium.NearFarScalar(600, 0.75, 40000, 0.40),
+          disableDepthTestDistance: 250,
         },
         label: {
-          text: `🏛️ ${heritage.name.toUpperCase()}\n[ ${heritage.periodOrEpoch?.toUpperCase() || 'DOCUMENTED HERITAGE'} ]`,
+          text: `🏛️ ${heritage.name}`,
           font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           fillColor: Cesium.Color.fromCssColorString('#fde68a'),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('rgba(24, 18, 10, 0.95)'),
-          backgroundPadding: new Cesium.Cartesian2(10, 6),
+          backgroundColor: Cesium.Color.fromCssColorString('rgba(20, 16, 10, 0.92)'),
+          backgroundPadding: new Cesium.Cartesian2(8, 4),
           verticalOrigin: Cesium.VerticalOrigin.TOP,
-          pixelOffset: new Cesium.Cartesian2(0, 8),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400000),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          pixelOffset: new Cesium.Cartesian2(0, 6),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000),
+          disableDepthTestDistance: 250,
         },
       });
+      (pinEntity as any).__archaeologyHeritage = heritage;
     });
   }
 
@@ -586,17 +840,18 @@ function renderInternalStructuralVectors(
 export function flyToAnomaly(
   viewer: Cesium.Viewer | null,
   anomaly: ArchaeologicalAnomaly,
-  pitchDegrees = -50,
+  pitchDegrees = -45,
 ): void {
   if (!viewer || viewer.isDestroyed()) return;
 
   const lat = anomaly.centroid.lat;
   const lon = anomaly.centroid.lon;
-  const elevation = anomaly.centroid.elevationMeters || 0;
-  const radiusMeters = Math.max(500, Math.sqrt(anomaly.areaM2 || 10000) * 2.2);
+  const radiusMeters = Math.max(400, Math.sqrt(anomaly.areaM2 || 10000) * 1.5);
+  // Cap range between 800m and 2400m for an immediate close-up 3D inspection view
+  const targetRange = Math.min(2400, Math.max(800, radiusMeters * 1.5));
 
   const sphere = new Cesium.BoundingSphere(
-    Cesium.Cartesian3.fromDegrees(lon, lat, elevation),
+    Cesium.Cartesian3.fromDegrees(lon, lat, 0),
     radiusMeters,
   );
 
@@ -604,7 +859,7 @@ export function flyToAnomaly(
     offset: new Cesium.HeadingPitchRange(
       Cesium.Math.toRadians(0),
       Cesium.Math.toRadians(pitchDegrees),
-      radiusMeters * 2.5,
+      targetRange,
     ),
     duration: 1.5,
   });
