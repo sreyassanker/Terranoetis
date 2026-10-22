@@ -397,6 +397,8 @@ export class CorrelationEngine {
   private db: Database.Database | null = null;
   private onUpdate: ((anomalies: CorrelationAnomaly[]) => void) | null = null;
   private externalFetchTimer: ReturnType<typeof setInterval> | null = null;
+  private unsubSentinelRaw: (() => void) | null = null;
+  private lastExternalFetchTime = 0;
   private ingestedIds = new Set<string>();
 
   constructor(db: Database.Database) {
@@ -432,16 +434,24 @@ export class CorrelationEngine {
     this.running = true;
     this.ensureTables();
 
-    // Fetch external sources immediately and every 5 minutes
-    this.ingestFromExternalSources().catch(() => {});
+    // Fetch external sources immediately (if stale) and every 5 minutes
+    if (Date.now() - this.lastExternalFetchTime >= 5 * 60 * 1000) {
+      this.lastExternalFetchTime = Date.now();
+      this.ingestFromExternalSources().catch(() => {});
+    }
     this.externalFetchTimer = setInterval(() => {
-      if (this.running) this.ingestFromExternalSources().catch(() => {});
+      if (this.running) {
+        this.lastExternalFetchTime = Date.now();
+        this.ingestFromExternalSources().catch(() => {});
+      }
     }, 5 * 60 * 1000);
 
     // Subscribe to all data streams
-    pubsub.subscribe('sentinel:raw', (data: unknown) => {
-      this.ingestEvent(data as CorrelatedEvent);
-    });
+    if (!this.unsubSentinelRaw) {
+      this.unsubSentinelRaw = pubsub.subscribe('sentinel:raw', (data: unknown) => {
+        this.ingestEvent(data as CorrelatedEvent);
+      });
+    }
 
     // Run correlation periodically
     this.correlationTimer = setInterval(() => {
@@ -461,6 +471,10 @@ export class CorrelationEngine {
     if (this.correlationTimer) { clearInterval(this.correlationTimer); this.correlationTimer = null; }
     if (this.pruneTimer) { clearInterval(this.pruneTimer); this.pruneTimer = null; }
     if (this.externalFetchTimer) { clearInterval(this.externalFetchTimer); this.externalFetchTimer = null; }
+    if (this.unsubSentinelRaw) {
+      this.unsubSentinelRaw();
+      this.unsubSentinelRaw = null;
+    }
     console.log('[CorrelationEngine] Stopped');
   }
 

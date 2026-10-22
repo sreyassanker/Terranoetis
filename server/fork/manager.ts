@@ -19,19 +19,55 @@ export class ForkManager {
   }
 
   start(): void {
-    this.tickInterval = setInterval(() => this.tickAll(), this.TICK_MS);
-    console.log('[FORK] Manager started — tick interval:', this.TICK_MS, 'ms');
+    if (this.forks.size > 0 && !this.tickInterval) {
+      this.tickInterval = setInterval(() => this.tickAll(), this.TICK_MS);
+      console.log('[FORK] Manager started — tick interval:', this.TICK_MS, 'ms');
+    } else {
+      console.log('[FORK] Manager ready (on-demand tick interval idle)');
+    }
+  }
+
+  pauseAll(): void {
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
+    for (const [_, fork] of this.forks) {
+      if (fork.status === 'running') {
+        fork.status = 'paused';
+      }
+    }
+    console.log('[FORK] Manager paused all active forks without terminating');
+  }
+
+  resumeAll(): void {
+    const now = Date.now();
+    for (const [_, state] of this.forkStates) {
+      state.lastTick = now;
+    }
+    for (const [_, fork] of this.forks) {
+      if (fork.status === 'paused') {
+        fork.status = 'running';
+      }
+    }
+    if (this.forks.size > 0 && !this.tickInterval) {
+      this.tickInterval = setInterval(() => this.tickAll(), this.TICK_MS);
+      console.log('[FORK] Manager resumed all active forks');
+    }
   }
 
   stop(): void {
-    if (this.tickInterval) clearInterval(this.tickInterval);
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
     for (const [forkId] of this.forks) {
       this.terminateFork(forkId, 'manager_shutdown');
     }
     console.log('[FORK] Manager stopped');
   }
 
-  createFork(request: ForkCreateRequest, userId: string): ForkDefinition {
+  createFork(request: ForkCreateRequest, userId: string = 'system'): ForkDefinition {
     if (this.forks.size >= this.MAX_CONCURRENT_FORKS) {
       throw new Error(`Maximum concurrent forks reached (${this.MAX_CONCURRENT_FORKS})`);
     }
@@ -42,9 +78,9 @@ export class ForkManager {
       forkId,
       name: request.name,
       createdAt: Date.now(),
-      createdBy: userId,
+      createdBy: userId || 'system',
       baselineSnapshot: '{}',
-      deltas: request.deltas,
+      deltas: request.deltas || [],
       status: 'running',
       divergenceScore: 0.0,
       simulatedTimeMs: 0,
@@ -66,12 +102,17 @@ export class ForkManager {
     this.forks.set(forkId, fork);
     this.forkStates.set(forkId, state);
 
+    if (!this.tickInterval) {
+      this.tickInterval = setInterval(() => this.tickAll(), this.TICK_MS);
+      console.log('[FORK] Manager activated ticker for active forks');
+    }
+
     try {
       const db = getDb();
       db.prepare(`
         INSERT INTO forks (fork_id, name, created_by, baseline_snapshot, deltas_json, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(forkId, request.name, userId, fork.baselineSnapshot, JSON.stringify(request.deltas), 'running', new Date(fork.createdAt).toISOString());
+      `).run(forkId, request.name, userId || 'system', fork.baselineSnapshot, JSON.stringify(request.deltas || []), 'running', new Date(fork.createdAt).toISOString());
     } catch (e) {
       console.error('[FORK] Failed to persist fork:', e);
     }
@@ -96,7 +137,7 @@ export class ForkManager {
     const state = this.forkStates.get(forkId);
     if (!fork || !state) return;
 
-    for (const delta of fork.deltas) {
+    for (const delta of fork.deltas || []) {
       const event = {
         type: delta.type,
         targetId: delta.targetId,
@@ -181,6 +222,11 @@ export class ForkManager {
     setTimeout(() => {
       this.forks.delete(forkId);
       this.forkStates.delete(forkId);
+      if (this.forks.size === 0 && this.tickInterval) {
+        clearInterval(this.tickInterval);
+        this.tickInterval = null;
+        console.log('[FORK] Manager deactivated ticker (zero active forks)');
+      }
       console.log(`[FORK] Cleaned up ${forkId}`);
     }, 30000);
 

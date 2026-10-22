@@ -1,13 +1,16 @@
 /**
- * UnifiedTimer — P0 Performance Optimization
+ * UnifiedTimer — Battery & CPU Optimized Scheduler
  *
- * Replaces dozens of independent setInterval() calls with a single
- * requestAnimationFrame loop. This allows the browser to enter idle/sleep
- * states between frames instead of being woken every second by timers.
+ * Replaces high-frequency polling and uncontrolled setInterval loops with
+ * an adaptive, deadline-aware timer scheduler.
  *
- * Each registered task specifies its own interval (ms). The scheduler
- * checks all tasks once per animation frame and runs only those whose
- * interval has elapsed.
+ * Instead of spinning requestAnimationFrame at 60-120 Hz regardless of task deadlines,
+ * UnifiedTimer computes the earliest due deadline across all enabled tasks:
+ * - Tasks with standard intervals (>16ms) sleep via setTimeout until their exact deadline,
+ *   allowing CPU cores to enter deep C-states (sleep) between executions.
+ * - True animation tasks (<=16ms) use requestAnimationFrame only when visible.
+ * - When document.hidden is true (app minimized or occluded), wakeups are throttled
+ *   to preserve battery.
  */
 
 export interface TimerTask {
@@ -20,23 +23,69 @@ export interface TimerTask {
 
 export function createUnifiedTimer() {
   let tasks: TimerTask[] = [];
+  let timerId: ReturnType<typeof setTimeout> | null = null;
   let rafId = 0;
   let running = false;
+  let visibilityListenerAttached = false;
 
-  function hasWork() {
-    return tasks.some(t => t.enabled);
+  function clearPending() {
+    if (timerId !== null) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+    if (rafId !== 0) {
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = 0;
+    }
   }
 
-  /** Park the loop when nothing is enabled instead of spinning at 60 Hz. */
-  function ensureLoop() {
-    if (running && hasWork() && !rafId) rafId = requestAnimationFrame(tick);
-  }
-
-  function tick(now: number) {
-    rafId = 0;
+  function getNextDelay(now: number): number {
+    let earliest = Infinity;
     for (const task of tasks) {
       if (!task.enabled) continue;
-      if (now - task.lastRun >= task.intervalMs) {
+      if (!Number.isFinite(task.lastRun)) return 0; // Never run yet
+      const dueIn = Math.max(0, (task.lastRun + task.intervalMs) - now);
+      if (dueIn < earliest) earliest = dueIn;
+    }
+    return earliest;
+  }
+
+  function scheduleNext() {
+    if (!running) return;
+    clearPending();
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let minDelay = getNextDelay(now);
+    if (!Number.isFinite(minDelay)) return; // No enabled tasks
+
+    const isHidden = typeof document !== 'undefined' && document.hidden;
+    if (isHidden && minDelay < 1000) {
+      minDelay = 1000;
+    }
+
+    const hasAnimationTask = tasks.some(t => t.enabled && t.intervalMs <= 16);
+    if (hasAnimationTask && !isHidden && minDelay <= 16) {
+      if (typeof requestAnimationFrame === 'function') {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+    }
+
+    timerId = setTimeout(tick, Math.max(0, Math.round(minDelay)));
+  }
+
+  function tick() {
+    timerId = null;
+    rafId = 0;
+    if (!running) return;
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    for (const task of tasks) {
+      if (!task.enabled) continue;
+      const elapsed = now - task.lastRun;
+      if (!Number.isFinite(task.lastRun) || elapsed >= task.intervalMs) {
         task.lastRun = now;
         try {
           task.fn();
@@ -45,7 +94,11 @@ export function createUnifiedTimer() {
         }
       }
     }
-    ensureLoop();
+    scheduleNext();
+  }
+
+  function onVisibilityChange() {
+    if (running) scheduleNext();
   }
 
   return {
@@ -54,13 +107,13 @@ export function createUnifiedTimer() {
      */
     register(id: string, fn: () => void | Promise<void>, intervalMs: number) {
       const existing = tasks.findIndex(t => t.id === id);
-      const task: TimerTask = { id, intervalMs, fn, lastRun: 0, enabled: true };
+      const task: TimerTask = { id, intervalMs, fn, lastRun: -Infinity, enabled: true };
       if (existing >= 0) {
         tasks[existing] = task;
       } else {
         tasks.push(task);
       }
-      ensureLoop();
+      if (running) scheduleNext();
     },
 
     /**
@@ -68,8 +121,10 @@ export function createUnifiedTimer() {
      */
     setEnabled(id: string, enabled: boolean) {
       const task = tasks.find(t => t.id === id);
-      if (task) task.enabled = enabled;
-      ensureLoop();
+      if (task) {
+        task.enabled = enabled;
+        if (running) scheduleNext();
+      }
     },
 
     /**
@@ -77,7 +132,10 @@ export function createUnifiedTimer() {
      */
     setInterval(id: string, intervalMs: number) {
       const task = tasks.find(t => t.id === id);
-      if (task) task.intervalMs = intervalMs;
+      if (task) {
+        task.intervalMs = intervalMs;
+        if (running) scheduleNext();
+      }
     },
 
     /**
@@ -85,6 +143,7 @@ export function createUnifiedTimer() {
      */
     unregister(id: string) {
       tasks = tasks.filter(t => t.id !== id);
+      if (running) scheduleNext();
     },
 
     /**
@@ -93,7 +152,11 @@ export function createUnifiedTimer() {
     start() {
       if (running) return;
       running = true;
-      rafId = requestAnimationFrame(tick);
+      if (typeof document !== 'undefined' && !visibilityListenerAttached) {
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        visibilityListenerAttached = true;
+      }
+      scheduleNext();
     },
 
     /**
@@ -101,13 +164,18 @@ export function createUnifiedTimer() {
      */
     stop() {
       running = false;
-      if (rafId) cancelAnimationFrame(rafId);
+      clearPending();
+      if (typeof document !== 'undefined' && visibilityListenerAttached) {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        visibilityListenerAttached = false;
+      }
     },
 
     /**
      * Get diagnostic info about registered tasks.
      */
     getStats() {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       return {
         taskCount: tasks.length,
         enabledCount: tasks.filter(t => t.enabled).length,
@@ -115,10 +183,9 @@ export function createUnifiedTimer() {
           id: t.id,
           intervalMs: t.intervalMs,
           enabled: t.enabled,
-          timeSinceLastRun: performance.now() - t.lastRun,
+          timeSinceLastRun: Number.isFinite(t.lastRun) ? now - t.lastRun : 0,
         })),
       };
     },
   };
 }
-

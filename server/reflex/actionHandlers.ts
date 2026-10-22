@@ -15,6 +15,7 @@ export class ReflexActionHandler {
   private unsubscribers: (() => void)[] = [];
 
   start(): void {
+    if (this.unsubscribers.length > 0) this.stop();
     const unsub = pubsub.subscribe('reflex:action', (payload: any) => {
       this.handleAction(payload);
     });

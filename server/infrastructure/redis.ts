@@ -28,12 +28,21 @@ export function getRedis(): Redis {
 }
 
 export async function redisHealthCheck(): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const redis = getRedis();
-    await redis.ping();
+    const pingPromise = redis.ping();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Redis ping timeout')), 500);
+    });
+    await Promise.race([pingPromise, timeoutPromise]);
     return true;
   } catch {
     return false;
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
   }
 }
 

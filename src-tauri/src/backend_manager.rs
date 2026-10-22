@@ -350,6 +350,22 @@ impl BackendManager {
             }
         }
         if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                if let Some(contents) = exe_dir.parent() {
+                    let res_nm = contents.join("Resources/dist-server/node_modules");
+                    if res_nm.exists() {
+                        node_paths.push(res_nm);
+                    }
+                    let res_nm_up = contents.join("Resources/_up_/dist-server/node_modules");
+                    if res_nm_up.exists() {
+                        node_paths.push(res_nm_up);
+                    }
+                    let direct_nm = contents.join("Resources/node_modules");
+                    if direct_nm.exists() {
+                        node_paths.push(direct_nm);
+                    }
+                }
+            }
             let mut cur = exe.parent();
             while let Some(parent) = cur {
                 let candidate = parent.join("node_modules");
@@ -374,6 +390,14 @@ impl BackendManager {
         }
         if !node_path_str.is_empty() {
             cmd.env("NODE_PATH", node_path_str);
+        }
+
+        // Rotate backend log if it exceeds 10 MB to prevent unbounded disk growth (Defect P2-LOG-01 fix)
+        if let Ok(metadata) = std::fs::metadata(&self.log_file_path) {
+            if metadata.len() > 10 * 1024 * 1024 {
+                let backup_path = self.log_file_path.with_extension("log.1");
+                let _ = std::fs::rename(&self.log_file_path, backup_path);
+            }
         }
 
         // Pipe backend stdout/stderr to application log file

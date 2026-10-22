@@ -45,6 +45,7 @@ export class MultimodalFusion {
   private eventBuffer: ModalFeedback[] = [];
   private fusionWindowMs = 300000; // 5-minute fusion window
   private unsubscribeFns: (() => void)[] = [];
+  private fuseTimer: ReturnType<typeof setInterval> | null = null;
 
   init(): void {
     this.ensureTables();
@@ -87,13 +88,17 @@ export class MultimodalFusion {
     );
 
     // Fusion cycle: every 60 seconds, fuse buffered events
-    setInterval(() => this.fuseBuffer(), 60000);
+    this.fuseTimer = setInterval(() => this.fuseBuffer(), 60000);
 
     logger.info('MultimodalFusion started — fusing signals from all modalities');
   }
 
   stop(): void {
     this.running = false;
+    if (this.fuseTimer) {
+      clearInterval(this.fuseTimer);
+      this.fuseTimer = null;
+    }
     for (const unsub of this.unsubscribeFns) unsub();
     this.unsubscribeFns = [];
     logger.info('MultimodalFusion stopped');

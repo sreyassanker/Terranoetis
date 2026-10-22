@@ -1,26 +1,27 @@
 /**
- * PowerSaver — Suspends non-essential background engines while a
- * Kaggle GPU simulation is running so the local machine stays cool.
+ * PowerSaver — Energy & Background Daemon Lifecycle Coordinator
  *
- * Kaggle compute happens in the cloud, but the local Node server runs
- * dozens of background pollers (sentinel, satellite, seismic, ML,
- * self-improvement loops, etc.). While a simulation is active these are
- * paused and resumed when it finishes.
+ * Coordinates non-essential background engines across both:
+ * 1. Kaggle GPU cloud simulation sessions
+ * 2. Desktop desktop power state (foreground active vs minimized/standby)
  *
- * Reference-counted so concurrent simulations only pause once and only
- * resume after the last one finishes.
+ * Provides idempotent pause/resume state evaluation so rapid minimize/restore
+ * or multiple simulation jobs never corrupt engine lifecycle or leave daemons
+ * permanently frozen.
  */
 
 import { logger } from '../observability/logger';
 
-type PowerEngine = {
+export type PowerEngine = {
   name: string;
   pause: () => void;
   resume: () => void;
 };
 
 const engines: PowerEngine[] = [];
-let activeSessions = 0;
+let isPaused = false;
+let desktopStandby = false;
+let kaggleSessions = 0;
 
 export function registerPowerEngine(
   name: string,
@@ -30,33 +31,63 @@ export function registerPowerEngine(
   engines.push({ name, pause, resume });
 }
 
-export function pauseBackgroundEngines(): void {
-  activeSessions++;
-  if (activeSessions > 1) return; // already paused by another sim
-  logger.info({ count: engines.length }, '[PowerSaver] Pausing background engines during Kaggle simulation');
-  for (const e of engines) {
-    try {
-      e.pause();
-    } catch (err) {
-      logger.warn({ engine: e.name, err: String(err) }, '[PowerSaver] pause failed');
+function evaluateState(reason: string): void {
+  const shouldPause = desktopStandby || kaggleSessions > 0;
+  if (shouldPause && !isPaused) {
+    isPaused = true;
+    logger.info({ reason, engineCount: engines.length }, '[PowerSaver] Pausing background engines');
+    for (const e of engines) {
+      try {
+        e.pause();
+      } catch (err) {
+        logger.warn({ engine: e.name, err: String(err) }, '[PowerSaver] pause failed');
+      }
+    }
+  } else if (!shouldPause && isPaused) {
+    isPaused = false;
+    logger.info({ reason, engineCount: engines.length }, '[PowerSaver] Resuming background engines');
+    for (const e of engines) {
+      try {
+        e.resume();
+      } catch (err) {
+        logger.warn({ engine: e.name, err: String(err) }, '[PowerSaver] resume failed');
+      }
     }
   }
 }
 
+/**
+ * Idempotently sets desktop standby / active mode from UI visibility or system sleep.
+ */
+export function setDesktopStandby(standby: boolean): void {
+  desktopStandby = standby;
+  evaluateState(standby ? 'desktop_standby' : 'desktop_active');
+}
+
+/**
+ * Reference-counted pause for Kaggle simulations.
+ */
+export function pauseBackgroundEngines(): void {
+  kaggleSessions++;
+  evaluateState('kaggle_simulation_start');
+}
+
+/**
+ * Reference-counted resume for Kaggle simulations.
+ */
 export function resumeBackgroundEngines(): void {
-  if (activeSessions === 0) return;
-  activeSessions--;
-  if (activeSessions > 0) return; // another sim still running
-  logger.info({ count: engines.length }, '[PowerSaver] Resuming background engines');
-  for (const e of engines) {
-    try {
-      e.resume();
-    } catch (err) {
-      logger.warn({ engine: e.name, err: String(err) }, '[PowerSaver] resume failed');
-    }
-  }
+  if (kaggleSessions > 0) kaggleSessions--;
+  evaluateState('kaggle_simulation_end');
 }
 
 export function isPowerSaverPaused(): boolean {
-  return activeSessions > 0;
+  return isPaused;
+}
+
+export function isDesktopStandby(): boolean {
+  return desktopStandby;
+}
+
+export function getPowerEngineInventory(): Array<{ name: string; paused: boolean }> {
+  return engines.map(e => ({ name: e.name, paused: isPaused }));
 }

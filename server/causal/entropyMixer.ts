@@ -29,6 +29,7 @@ export class EntropyMixer {
   }
 
   start(): void {
+    if (this.broadcastInterval || this.unsubs.length > 0) this.stop();
     for (const domain of this.DOMAINS) {
       const unsub = pubsub.subscribe(`anomaly:${domain}`, (data: unknown) => {
         this.feedDomain(domain, (data as Record<string, unknown>).score as number || (data as Record<string, unknown>).anomaly as number || 0);
@@ -41,7 +42,10 @@ export class EntropyMixer {
   }
 
   stop(): void {
-    if (this.broadcastInterval) clearInterval(this.broadcastInterval);
+    if (this.broadcastInterval) {
+      clearInterval(this.broadcastInterval);
+      this.broadcastInterval = null;
+    }
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
   }

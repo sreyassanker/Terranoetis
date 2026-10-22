@@ -65,6 +65,7 @@ export class PlanetaryMemorySystem {
   }
 
   async start(): Promise<void> {
+    if (this.decayInterval) this.stop();
     this.redisAvailable = await redisHealthCheck();
     if (this.redisAvailable) {
       console.log('[MEMORY] Redis hot state enabled for sensory/working tiers');

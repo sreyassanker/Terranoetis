@@ -110,6 +110,8 @@ scripts/legacy-tests/
 scripts/*.mjs
 !scripts/aiChatE2E.mjs
 !scripts/aiChatGolden.mjs
+!scripts/build-server.mjs
+!scripts/post-bundle.mjs
 start-lfm.sh
 
 # Session notes

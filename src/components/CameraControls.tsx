@@ -26,13 +26,19 @@ export function CameraControls({ viewer }: CameraControlsProps) {
   const [isDragging, setIsDragging] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const lastHeightRef = useRef<number>(0);
 
   useEffect(() => {
     if (!viewer) return;
     const update = () => {
       if (!isDragging) {
-        const h = viewer.camera.positionCartographic.height;
-        setHeight(h);
+        const h = viewer.camera.positionCartographic?.height ?? 0;
+        // Deadband filter: only update React state if height changed by >= 1m or > 0.1%
+        const prev = lastHeightRef.current;
+        if (Math.abs(h - prev) >= 1.0 || (prev > 0 && Math.abs(h - prev) / prev > 0.001)) {
+          lastHeightRef.current = h;
+          setHeight(h);
+        }
       }
     };
     update();

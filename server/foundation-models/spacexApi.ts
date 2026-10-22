@@ -93,6 +93,8 @@ export class SpacexApiEngine {
   private starlink: StarlinkSatellite[] = [];
   private correlations: LaunchCorrelation[] = [];
   private db = getDb();
+  private failureCount = 0;
+  private lastFetchTime = 0;
 
   constructor() {
     this.ensureTables();
@@ -101,7 +103,9 @@ export class SpacexApiEngine {
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.fetchLatestData().catch(() => {});
+    if (Date.now() - this.lastFetchTime >= 5 * 60 * 1000) {
+      this.fetchLatestData().catch(() => {});
+    }
     this.pollTimer = setInterval(() => {
       if (this.running) this.fetchLatestData().catch(() => {});
     }, 30 * 60 * 1000); // Every 30 minutes
@@ -114,6 +118,7 @@ export class SpacexApiEngine {
   }
 
   async fetchLatestData(): Promise<void> {
+    this.lastFetchTime = Date.now();
     try {
       await Promise.all([this.fetchLaunches(), this.fetchStarlink()]);
       this.correlateWithSentinel();
@@ -134,9 +139,15 @@ export class SpacexApiEngine {
       if (!resp.ok) throw new Error(`SpaceX API returned ${resp.status}`);
       const data = await resp.json() as SpacexLaunch[];
       this.launches = data.slice(-100); // Keep last 100 launches
+      this.failureCount = 0;
       logger.info({ count: this.launches.length }, '[SpaceX] Launches fetched');
     } catch (err) {
-      logger.error({ err }, '[SpaceX] Failed to fetch launches');
+      this.failureCount++;
+      if (this.failureCount <= 3) {
+        logger.warn({ err: (err as Error).message }, '[SpaceX] Failed to fetch launches');
+      } else {
+        logger.debug({ err: (err as Error).message }, '[SpaceX] Failed to fetch launches (suppressing repeated log)');
+      }
     }
   }
 
@@ -165,9 +176,15 @@ export class SpacexApiEngine {
       if (!resp.ok) throw new Error(`Starlink API returned ${resp.status}`);
       const data = await resp.json() as StarlinkSatellite[];
       this.starlink = data;
+      this.failureCount = 0;
       logger.info({ count: this.starlink.length }, '[SpaceX] Starlink satellites fetched');
     } catch (err) {
-      logger.error({ err }, '[SpaceX] Failed to fetch Starlink data');
+      this.failureCount++;
+      if (this.failureCount <= 3) {
+        logger.warn({ err: (err as Error).message }, '[SpaceX] Failed to fetch Starlink data');
+      } else {
+        logger.debug({ err: (err as Error).message }, '[SpaceX] Failed to fetch Starlink data (suppressing repeated log)');
+      }
     }
   }
 

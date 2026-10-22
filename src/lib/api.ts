@@ -69,6 +69,22 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
 
 
 
+export async function apiPost<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+  const resp = await fetch(url, {
+    ...addAuthHeader(init),
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (resp.ok) return resp.json() as Promise<T>;
+  handleUnauthorized(resp);
+  throw new Error(`API POST ${path} failed (${resp.status})`);
+}
+
 /* ── Sandbox API helpers ── */
 
 

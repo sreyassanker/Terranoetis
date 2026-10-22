@@ -174,7 +174,7 @@ import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { kaggleRouter } from './kaggle';
 import { archaeologyRouter } from './archaeology/routes';
-import { registerPowerEngine } from './kaggle/powerSaver';
+import { registerPowerEngine, pauseBackgroundEngines, resumeBackgroundEngines, isPowerSaverPaused, setDesktopStandby, isDesktopStandby, getPowerEngineInventory } from './kaggle/powerSaver';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
 import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
@@ -354,6 +354,7 @@ ensureDefaultAdmin();
 const RESOURCE_MONITOR_INTERVAL = 30000;
 let resourceMonitorTimer: ReturnType<typeof setInterval> | null = null;
 function startResourceMonitor(): void {
+  if (resourceMonitorTimer) stopResourceMonitor();
   resourceMonitorTimer = setInterval(() => {
     const usage = process.memoryUsage();
     const heapUsedMB = Math.round(usage.heapUsed / 1024 / 1024);
@@ -367,7 +368,10 @@ function startResourceMonitor(): void {
   }, RESOURCE_MONITOR_INTERVAL);
 }
 function stopResourceMonitor(): void {
-  if (resourceMonitorTimer) clearInterval(resourceMonitorTimer);
+  if (resourceMonitorTimer) {
+    clearInterval(resourceMonitorTimer);
+    resourceMonitorTimer = null;
+  }
 }
 
 // ── Authentication ────────────────────────────────────────────
@@ -553,6 +557,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   }
   // Public iframe bridge for embedded media players
   if (req.path.startsWith('/youtube/embed') || req.path.startsWith('/embed/youtube')) {
+    return next();
+  }
+  // Power state management (allows loopback / desktop to throttle background pollers)
+  if (req.path.startsWith('/power/state') || req.path.startsWith('/api/power/state')) {
     return next();
   }
   authGuard(req, res, next);
@@ -1397,6 +1405,28 @@ app.get('/api/ready', async (_req: express.Request, res: express.Response) => {
 app.get('/api/memory/stats', async (_req: express.Request, res: express.Response) => {
   const tiers = await memorySystem.getStats();
   res.json({ tiers, timestamp: Date.now() });
+});
+
+// Power Management API — Allows client & desktop to throttle / suspend background pollers
+app.post('/api/power/state', (req: express.Request, res: express.Response) => {
+  const { state } = req.body || {};
+  if (state === 'standby' || state === 'idle' || state === 'battery-saver') {
+    setDesktopStandby(true);
+    return res.json({ status: 'ok', powerState: 'standby', isPaused: isPowerSaverPaused(), engines: getPowerEngineInventory() });
+  } else if (state === 'active') {
+    setDesktopStandby(false);
+    return res.json({ status: 'ok', powerState: 'active', isPaused: isPowerSaverPaused(), engines: getPowerEngineInventory() });
+  }
+  return res.status(400).json({ error: 'invalid power state, expected standby or active' });
+});
+
+app.get('/api/power/state', (_req: express.Request, res: express.Response) => {
+  res.json({
+    isPaused: isPowerSaverPaused(),
+    isStandby: isDesktopStandby(),
+    desktopMode: process.env.TERRANOETIS_DESKTOP === '1',
+    engines: getPowerEngineInventory(),
+  });
 });
 
 
@@ -6411,7 +6441,17 @@ async function fetchAndCacheAirspaces(): Promise<{ type: string; features: any[]
 
   if (combined.features.length === 0) {
     try {
-      const localPath = path.join(__dirname, '../public/data/combined_airspaces.geojson');
+      const candidates = [
+        path.join(__dirname, 'combined_airspaces.geojson'),
+        path.join(__dirname, '../public/data/combined_airspaces.geojson'),
+        path.join(__dirname, 'public/data/combined_airspaces.geojson'),
+        path.join(__dirname, 'data/combined_airspaces.geojson'),
+        path.join(process.cwd(), 'public/data/combined_airspaces.geojson'),
+      ];
+      const localPath = candidates.find(p => fs.existsSync(p));
+      if (!localPath) {
+        throw new Error(`Airspace file not found in any candidate path: ${candidates.join(', ')}`);
+      }
       const localData = JSON.parse(fs.readFileSync(localPath, 'utf8'));
       if (localData?.features) {
         combined.features = localData.features;
@@ -14830,7 +14870,7 @@ function registerPowerEngines(): void {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
   registerPowerEngine('reflexEngine', () => reflexEngine.stop(), () => reflexEngine.start());
   registerPowerEngine('reflexActionHandler', () => reflexActionHandler.stop(), () => reflexActionHandler.start());
-  registerPowerEngine('forkManager', () => forkManager.stop(), () => forkManager.start());
+  registerPowerEngine('forkManager', () => forkManager.pauseAll(), () => forkManager.resumeAll());
   registerPowerEngine('entropyMixer', () => entropyMixer.stop(), () => entropyMixer.start());
   registerPowerEngine('discoveryEngine', () => discoveryEngine.stop(), () => discoveryEngine.start());
   registerPowerEngine('dreamEngine', () => dreamEngine.stop(), () => dreamEngine.start());

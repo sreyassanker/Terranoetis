@@ -886,7 +886,7 @@ function mapInputs(
         amps: genuineAmps,
         ...(ctx.tide?.heightM != null ? { __officialHeight: ctx.tide.heightM } : {}),
         ...(schurH != null ? { __schuremanHeight: schurH } : {}),
-        ...(ctx.tide ? { __tideStation: `${ctx.tide.station.name} (${ctx.tide.station.id})` } : {}),
+        ...(ctx.tide?.station?.name ? { __tideStation: `${ctx.tide.station.name} (${ctx.tide.station.id ?? ''})` } : {}),
       };
     }
     case 15: {
@@ -1498,7 +1498,7 @@ function mapInputs(
         P: u('P', 1),
         lambda: u('lambda', 22.1),
         ...(ctx.rFactor
-          ? { __rSource: `R from GHCN station '${ctx.rFactor.station}' (${ctx.rFactor.distanceKm.toFixed(0)} km), 1991–2020 normals ${ctx.rFactor.annualPrecipMm.toFixed(0)} mm → Renard-Freimund ${ctx.rFactor.R.toFixed(0)}` }
+          ? { __rSource: `R from GHCN station '${ctx.rFactor.station ?? 'unknown'}' (${(ctx.rFactor.distanceKm ?? 0).toFixed(0)} km), 1991–2020 normals ${(ctx.rFactor.annualPrecipMm ?? 0).toFixed(0)} mm → Renard-Freimund ${(ctx.rFactor.R ?? 0).toFixed(0)}` }
           : { __rSource: 'no GHCN station with climate normals found — supply measured R' }),
         ...(hasTexture ? { __kSource: `K from ISRIC texture ${SAN.toFixed(0)}/${SIL.toFixed(0)}/${CLA.toFixed(0)} % (sand/silt/clay), EPIC ${Kdefault.toFixed(3)}` } : { __kSource: 'no genuine ISRIC texture — supply measured K' }),
         ...(Number.isFinite(LScalc) ? { __lsSource: `LS from SRTM slope ${slopeDeg.toFixed(1)}°, λ=${u('lambda', 22.1)} m` } : { __lsSource: 'no genuine terrain slope — supply measured LS' }),
@@ -1861,7 +1861,7 @@ function mapInputs(
         __pco2sw: pmel?.pCO2_sw ?? null,
         __pco2air: pmel?.pCO2_air ?? null,
         __mooring: pmel
-          ? `${pmel.station} @ (${pmel.lat.toFixed(1)}°, ${pmel.lon.toFixed(1)}°), ${pmel.distanceKm.toFixed(0)} km from point, Δt = ${pmel.dtDays.toFixed(1)} d`
+          ? `${pmel.station ?? 'mooring'} @ (${Number.isFinite(pmel.lat) ? pmel.lat.toFixed(1) : '?'}°, ${Number.isFinite(pmel.lon) ? pmel.lon.toFixed(1) : '?'}°), ${Number.isFinite(pmel.distanceKm) ? pmel.distanceKm.toFixed(0) : '?'} km from point, Δt = ${Number.isFinite(pmel.dtDays) ? pmel.dtDays.toFixed(1) : '?'} d`
           : null,
         // Whether each quantity was genuinely derived (vs user-supplied), so
         // the steps only claim the paper provenance that actually applies.
@@ -3458,7 +3458,7 @@ export async function computeWithContext(
   if (id === 77 && shorelineBearing != null) sources.push('gebco-2020-shoreline');
   if (id === 75 && (terrain.slope > 0 || terrain.elevation > 0)) sources.push('srtm30m-terrain');
   if (tide) sources.push(tide.source);
-  if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
+  if (interpObs?.obs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
   if (annualMaxGumbel && (id === 40 || id === 41)) {
     sources.push(`usgs-nwis-annual-maxima:${annualMaxGumbel.siteId}`);
     log.push(`  Gumbel fit: ${annualMaxGumbel.years} water years (${annualMaxGumbel.startYear}-${annualMaxGumbel.endYear}) of daily discharge @ ${annualMaxGumbel.siteName} (${annualMaxGumbel.siteId})`);

@@ -693,13 +693,20 @@ export class Omninet {
           }
         }
 
+        let localProvider: typeof this.providers[0] | undefined;
         try {
-          const localProvider = this.providers.find(s => s.config.local && (s.config.type === 'ollama' || s.config.name === 'local-gguf'));
+          localProvider = this.providers.find(s => s.config.local && (s.config.type === 'ollama' || s.config.name === 'local-gguf') && s.circuitState !== 'open');
           if (localProvider) {
             const localModel = localProvider.config.type === 'ollama' ? 'llama3' : 'local';
             return await this.executeProviderCall(localProvider.config, localModel, prompt, { ...options, maxTokens: 1024 });
           }
-        } catch (e) { logger.warn({ err: e }, 'Omninet local fallback also failed'); }
+        } catch (e) {
+          if (localProvider) {
+            localProvider.circuitState = 'open';
+            localProvider.circuitOpenedAt = Date.now();
+          }
+          logger.warn({ err: e }, 'Omninet local fallback also failed; opened circuit for 30s');
+        }
       }
     }
 

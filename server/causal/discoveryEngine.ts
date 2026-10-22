@@ -5,6 +5,7 @@ import type { CausalEdge, Discovery } from './types';
 export class DiscoveryEngine {
   private kg: CausalKnowledgeGraph;
   private discoveryInterval: NodeJS.Timeout | null = null;
+  private lastRunTime = 0;
   private readonly DISCOVERY_INTERVAL_MS = 24 * 60 * 60 * 1000;
   private readonly MIN_CAUSAL_STRENGTH = 0.7;
   private readonly MAX_P_VALUE = 0.01;
@@ -14,15 +15,25 @@ export class DiscoveryEngine {
   }
 
   start(): void {
-    this.runDiscovery().catch(() => {});
+    if (this.discoveryInterval) this.stop();
+    const now = Date.now();
+    // Only run discovery immediately if at least 1 hour has elapsed since last execution
+    if (now - this.lastRunTime >= 3600000) {
+      this.lastRunTime = now;
+      this.runDiscovery().catch(() => {});
+    }
     this.discoveryInterval = setInterval(() => {
+      this.lastRunTime = Date.now();
       this.runDiscovery().catch(() => {});
     }, this.DISCOVERY_INTERVAL_MS);
     console.log('[DISCOVERY] Engine started — next run in 24h');
   }
 
   stop(): void {
-    if (this.discoveryInterval) clearInterval(this.discoveryInterval);
+    if (this.discoveryInterval) {
+      clearInterval(this.discoveryInterval);
+      this.discoveryInterval = null;
+    }
   }
 
   private async runDiscovery(): Promise<void> {

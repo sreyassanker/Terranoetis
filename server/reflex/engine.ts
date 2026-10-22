@@ -53,6 +53,7 @@ export class ReflexEngine {
    * Publishes actions to 'reflex:action' and reflex-specific channels.
    */
   start(): void {
+    if (this.unsubscribers.length > 0 || this.checkInterval) this.stop();
     const channels = ['seismic', 'weather', 'ais', 'adsb', 'sentinel'];
     for (const channel of channels) {
       const unsub = pubsub.subscribe(channel, (data: Record<string, unknown>) => {

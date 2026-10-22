@@ -98,6 +98,7 @@ export class BayFireDetector {
   private results: BayesianFireResult[] = [];
   private clusters: FireCluster[] = [];
   private db = getDb();
+  private lastPollTime = 0;
 
   constructor() {
     this.ensureTables();
@@ -106,10 +107,12 @@ export class BayFireDetector {
   start(): void {
     if (this.running) return;
     this.running = true;
+    if (Date.now() - this.lastPollTime >= 5 * 60 * 1000) {
+      this.pollFirmsData().catch(() => {});
+    }
     this.pollTimer = setInterval(() => {
       if (this.running) this.pollFirmsData().catch(() => {});
     }, 10 * 60 * 1000); // Every 10 minutes
-    this.pollFirmsData().catch(() => {});
     logger.info('[BayFire] Engine started — Bayesian fire detection active');
   }
 
@@ -215,6 +218,7 @@ export class BayFireDetector {
   }
 
   private async pollFirmsData(): Promise<void> {
+    this.lastPollTime = Date.now();
     // Poll global fire hotspots
     await this.analyzeRegion(-60, 60, -180, 180);
   }

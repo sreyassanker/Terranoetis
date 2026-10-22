@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -9,7 +9,7 @@ import AdminDashboard from '@/pages/AdminDashboard';
 import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import * as satellite from 'satellite.js';
 import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
@@ -1213,6 +1213,32 @@ function schemeToColorStops(scheme: string): { stop: number; r: number; g: numbe
   return cm.stops;
 }
 
+const UtcClock = memo(function UtcClock() {
+  const clockTz = useUserPrefStore(s => s.pref.timezone);
+  const [time, setTime] = useState('');
+
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      setTime(now.toLocaleString('en-IN', {
+        timeZone: clockTz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [clockTz]);
+
+  return <div className="utc-clock">{time}</div>;
+});
+
 export default function App() {
   /* ── Refs ── */
   const viewerRef = useRef<Cesium.Viewer | null>(null);
@@ -1451,7 +1477,6 @@ export default function App() {
   const [analyticsData, setAnalyticsData] = useState<Record<string, unknown> | null>(null);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
   const [activeLayerCount, setActiveLayerCount] = useState(0);
-  const [utcTime, setUtcTime] = useState('');
   const [activeEvents, setActiveEvents] = useState(0);
   const [weatherCards, setWeatherCards] = useState<WeatherCardData[]>([]);
   const [contextMenu, setContextMenu] = useState<{show:boolean;x:number;y:number;lat:number;lon:number}>({show:false,x:0,y:0,lat:0,lon:0});
@@ -2395,30 +2420,31 @@ export default function App() {
     }
   };
 
-  /* ── Clock (selected timezone) ── */
-  const clockTz = useUserPrefStore(s => s.pref.timezone);
+
+  // Lifecycle: Throttle Cesium and notify backend when minimized / hidden
   useEffect(() => {
-    const tz = clockTz;
-    const tick = () => {
-      const now = new Date();
-      const formatted = now.toLocaleString('en-IN', {
-        timeZone: tz,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      });
-      setUtcTime(formatted);
+    const handleVisibility = () => {
+      const v = viewerRef.current;
+      const isHidden = typeof document !== 'undefined' && document.hidden;
+      if (isHidden) {
+        if (v && !v.isDestroyed()) {
+          v.useDefaultRenderLoop = false;
+        }
+        apiPost('/power/state', { state: 'standby' }).catch(() => {});
+      } else {
+        if (v && !v.isDestroyed()) {
+          v.useDefaultRenderLoop = true;
+          v.scene.requestRender();
+        }
+        apiPost('/power/state', { state: 'active' }).catch(() => {});
+      }
     };
-    tick();
-    const timer = unifiedTimerRef.current;
-    timer.register('clock', tick, 1000);
-    timer.start();
-    return () => { timer.unregister('clock'); };
-  }, [clockTz]);
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     if (!cesiumElRef.current || viewerRef.current) return;
@@ -8916,6 +8942,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
   // Phase 2.2: Voice — speech recognition
   // Phase 3: Connect to proactive events via WebSocket
   useEffect(() => {
+    if (!ws.connected) return;
     const unsubMonitor = ws.onMessage('message', (msg) => {
       if (msg.event === 'monitor_trigger') {
         const data = (msg.data || msg) as any;
@@ -9088,7 +9115,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       ws.unsubscribe('reflex');
       ws.unsubscribe('fork:all');
     };
-  }, [ws, setAiMessages]);
+  }, [ws.connected, ws.onMessage, ws.subscribe, ws.unsubscribe, setAiMessages]);
 
   // Phase 3: Send monitor command via chat
   const sendMonitorCommand = useCallback(async (text: string) => {
@@ -10690,7 +10717,10 @@ case 'openPanel':
     const v = viewerRef.current;
     if (!v) return;
     if (isAutoRotating) {
-      if (rotateTimerRef.current) cancelAnimationFrame(rotateTimerRef.current as unknown as number);
+      if (rotateTimerRef.current) {
+        cancelAnimationFrame(rotateTimerRef.current as unknown as number);
+        clearTimeout(rotateTimerRef.current as unknown as number);
+      }
       rotateTimerRef.current = null;
       setIsAutoRotating(false);
     } else {
@@ -10699,11 +10729,11 @@ case 'openPanel':
         // the flying-camera rigs (heli sim / travel views) own the camera while
         // active — never fight them; auto-rotate resumes after they exit
         if (heliActiveRef.current || satTravelRef.current || flightTravelRef.current) {
-          rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
+          rotateTimerRef.current = setTimeout(rotateFrame, 500) as unknown as ReturnType<typeof setInterval>;
           return;
         }
-        if (document.hidden) {
-          rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
+        if (typeof document !== 'undefined' && document.hidden) {
+          rotateTimerRef.current = setTimeout(rotateFrame, 1000) as unknown as ReturnType<typeof setInterval>;
           return;
         }
         const camera = v.camera;
@@ -11721,7 +11751,7 @@ case 'openPanel':
           />
         </div>
         <div className="topbar-sep" />
-        <div className="utc-clock">{utcTime}</div>
+        <UtcClock />
         <div className="topbar-sep" />
         <div className="search-box" ref={searchBoxRef} style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
           <span className="search-icon"><SearchIcon size={14} /></span>

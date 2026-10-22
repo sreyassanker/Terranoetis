@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesktopApp, DESKTOP_WS_SERVER } from '@/lib/desktop';
 
 export type WsConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
@@ -223,16 +223,29 @@ export function useWebSocket(token?: string) {
     };
   }, [token]);
 
-  return {
-    status,
-    connected: status === 'connected',
-    lastMessage,
-    sendMessage,
-    subscribe,
-    unsubscribe,
-    cancelRequest,
-    sendTyping,
-    sendAck,
-    onMessage,
-  };
+  return useMemo(
+    () => ({
+      status,
+      connected: status === 'connected',
+      lastMessage,
+      sendMessage,
+      subscribe,
+      unsubscribe,
+      cancelRequest,
+      sendTyping,
+      sendAck,
+      onMessage,
+    }),
+    [
+      status,
+      lastMessage,
+      sendMessage,
+      subscribe,
+      unsubscribe,
+      cancelRequest,
+      sendTyping,
+      sendAck,
+      onMessage,
+    ]
+  );
 }

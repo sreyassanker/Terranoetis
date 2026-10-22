@@ -96,4 +96,101 @@ describe('PowerSaver', () => {
     expect(badEngine.pause).toHaveBeenCalledTimes(1);
     expect(badEngine.resume).toHaveBeenCalledTimes(1);
   });
+
+  it('handles desktop standby idempotently and tracks engine inventory', async () => {
+    const powerSaver = await import('../../kaggle/powerSaver');
+    const { registerPowerEngine: reg, setDesktopStandby: setStandby, getPowerEngineInventory: getInventory } = powerSaver;
+
+    const engine = { pause: vi.fn(), resume: vi.fn() };
+    reg('deskEngine', () => engine.pause(), () => engine.resume());
+
+    expect(powerSaver.isDesktopStandby()).toBe(false);
+    expect(powerSaver.isPowerSaverPaused()).toBe(false);
+
+    // Enter standby
+    setStandby(true);
+    expect(powerSaver.isDesktopStandby()).toBe(true);
+    expect(powerSaver.isPowerSaverPaused()).toBe(true);
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+
+    // Repeated standby calls are idempotent
+    setStandby(true);
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+
+    // Inventory check
+    const inventory = getInventory();
+    expect(inventory).toEqual([{ name: 'deskEngine', paused: true }]);
+
+    // Return to active
+    setStandby(false);
+    expect(powerSaver.isDesktopStandby()).toBe(false);
+    expect(powerSaver.isPowerSaverPaused()).toBe(false);
+    expect(engine.resume).toHaveBeenCalledTimes(1);
+
+    // Repeated active calls are idempotent
+    setStandby(false);
+    expect(engine.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps engines paused if Kaggle simulation finishes while desktop is in standby', async () => {
+    const powerSaver = await import('../../kaggle/powerSaver');
+    const { registerPowerEngine: reg, setDesktopStandby: setStandby, pauseBackgroundEngines: pause, resumeBackgroundEngines: resume } = powerSaver;
+
+    const engine = { pause: vi.fn(), resume: vi.fn() };
+    reg('hybridEngine', () => engine.pause(), () => engine.resume());
+
+    pause(); // Kaggle starts
+    expect(powerSaver.isPowerSaverPaused()).toBe(true);
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+
+    setStandby(true); // User minimizes desktop
+    expect(engine.pause).toHaveBeenCalledTimes(1); // Already paused, no redundant call
+
+    resume(); // Kaggle finishes, but desktop is still minimized
+    expect(powerSaver.isPowerSaverPaused()).toBe(true); // MUST stay paused!
+    expect(engine.resume).not.toHaveBeenCalled();
+
+    setStandby(false); // User restores desktop
+    expect(powerSaver.isPowerSaverPaused()).toBe(false);
+    expect(engine.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('verifies safe lifecycle across rapid minimize/restore bursts', async () => {
+    const powerSaver = await import('../../kaggle/powerSaver');
+    const { registerPowerEngine: reg, setDesktopStandby: setStandby } = powerSaver;
+
+    let activeIntervalCount = 0;
+    const testEngine = {
+      interval: null as ReturnType<typeof setInterval> | null,
+      start() {
+        if (this.interval) this.stop();
+        this.interval = setInterval(() => {}, 1000);
+        activeIntervalCount++;
+      },
+      stop() {
+        if (this.interval) {
+          clearInterval(this.interval);
+          this.interval = null;
+          activeIntervalCount--;
+        }
+      },
+    };
+
+    testEngine.start();
+    expect(activeIntervalCount).toBe(1);
+
+    reg('rapidBurstEngine', () => testEngine.stop(), () => testEngine.start());
+
+    // Rapid minimize/restore toggling (10 bursts)
+    for (let i = 0; i < 10; i++) {
+      setStandby(true);
+      expect(activeIntervalCount).toBe(0);
+      setStandby(false);
+      expect(activeIntervalCount).toBe(1);
+    }
+
+    // Clean up
+    testEngine.stop();
+    expect(activeIntervalCount).toBe(0);
+  });
 });

@@ -33,7 +33,7 @@
     "test:ai-chat": "vitest run server/__tests__/unit/aiChatIntent.test.ts && node scripts/aiChatE2E.mjs",
     "test:ai-chat:e2e": "node scripts/aiChatE2E.mjs",
     "desktop:dev": "tauri dev",
-    "desktop:build": "npm run build:all && tauri build --bundles app --no-sign",
+    "desktop:build": "npm run build:all && tauri build --bundles app --no-sign && node scripts/post-bundle.mjs",
     "desktop:dmg": "npm run desktop:build && mkdir -p src-tauri/target/release/bundle/dmg && hdiutil create -volname 'Terranoetis' -srcfolder 'src-tauri/target/release/bundle/macos/Terranoetis.app' -ov -format UDZO 'src-tauri/target/release/bundle/dmg/Terranoetis_3.0.0_aarch64.dmg'",
     "desktop:run": "node scripts/launch-desktop.js",
     "app": "node scripts/launch-desktop.js"
