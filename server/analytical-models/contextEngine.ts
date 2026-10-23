@@ -626,10 +626,10 @@ function mapInputs(
   const dr = ctx.drought;
   const rv = ctx.river;
   const gddStation = ctx.gddStation ?? null;
-  const T = w.temperature_2m ?? 15;
-  const P = w.pressure_msl ?? 1013.25;
-  const ws = w.wind_speed_10m ?? 5;
-  const rh = w.relative_humidity_2m ?? 50;
+  const T = w.temperature_2m ?? Number.NaN;
+  const P = w.pressure_msl ?? Number.NaN;
+  const ws = w.wind_speed_10m ?? Number.NaN;
+  const rh = w.relative_humidity_2m ?? Number.NaN;
   const lat = ctx.lat;
   const lon = ctx.lon;
 
@@ -684,28 +684,25 @@ function mapInputs(
       const wv = ctx.columnWV;
       const era5Tcwv = ctx.era5?.totalColumnWaterVapour;
       let proxyWarning: string | null = null;
-      const T10fallback = T + 273.15;
-      const T11fallback = T + 273.15 - 2;
-      const wFallback = Math.max(0.5, rh / 100 * 3);
-      if (!st || (st.bt10 == null && st.bt11 == null)) {
+      if (!st || (st.bt10 == null && st.bt11 == null && st.surfaceTemperature == null)) {
         proxyWarning = 'Landsat C2 L2 surface temperature unavailable (no cloud-free scene found in window). ' +
-          'Falling back to weather air temperature — this does NOT satisfy Rozenstein (2014).';
+          'Live satellite thermal observations required — honest NaN returned (no proxy air temperature substituted).';
       }
       const ndviForEps = st?.ndvi ?? v.ndvi;
       // Prefer the USGS-published ST_EMIS pixel value when the scene provides it;
       // fall back to the NDVI-threshold estimate (Valor & Caselles 1996).
       const eps10Res = st?.emissivity != null
         ? { eps: Math.min(1.0, Math.max(0.9, st.emissivity)), method: 'USGS ST_EMIS band' }
-        : emissivityFromNdvi(ndviForEps, 10);
+        : (ndviForEps != null ? emissivityFromNdvi(ndviForEps, 10) : { eps: Number.NaN, method: 'none' });
       const eps11Res = st?.emissivity != null
         ? { eps: Math.min(1.0, Math.max(0.9, st.emissivity - 0.002)), method: 'USGS ST_EMIS band (band-11 offset)' }
-        : emissivityFromNdvi(ndviForEps, 11);
+        : (ndviForEps != null ? emissivityFromNdvi(ndviForEps, 11) : { eps: Number.NaN, method: 'none' });
       // Column water vapour priority: scene-implied w from ST_ATRAN (consistent
-      // with the BT10/BT11 atmosphere), then direct ERA5 TCWV, Smith proxy, fallback
-      const bestWv = st?.wScene ?? era5Tcwv ?? wv ?? wFallback;
+      // with the BT10/BT11 atmosphere), then direct ERA5 TCWV, Smith proxy, or NaN
+      const bestWv = st?.wScene ?? era5Tcwv ?? wv ?? Number.NaN;
       const out: Record<string, unknown> = {
-        T10: u('T10', st?.bt10 ?? st?.surfaceTemperature ?? T10fallback),
-        T11: u('T11', st?.bt11 ?? (st?.bt10 != null ? st.bt10 - 2 : T11fallback)),
+        T10: u('T10', st?.bt10 ?? st?.surfaceTemperature ?? Number.NaN),
+        T11: u('T11', st?.bt11 ?? Number.NaN),
         eps10: u('eps10', eps10Res.eps),
         eps11: u('eps11', eps11Res.eps),
         w: u('w', bestWv),
@@ -721,19 +718,23 @@ function mapInputs(
     case 4: return {
       P0: u('P0', P),
       z: u('z', el.elevation),
-      T: u('T', T + 273.15),
+      T: u('T', Number.isFinite(T) ? T + 273.15 : Number.NaN),
     };
     case 5: {
       const pw = ctx.era5?.pressureWind;
       // Geostrophic wind: f·v_g = (1/ρ)·∂P/∂x. Use 850 hPa wind as proxy for
       // mid-tropospheric pressure gradient if available.
-      const dPdxEra5 = pw?.v850 != null ? (2 * OMEGA * Math.sin(lat * Math.PI / 180)) * pw.v850 * (P * 100 / (R_SPEC * (T + 273.15))) : undefined;
-      const dPdyEra5 = pw?.u850 != null ? -(2 * OMEGA * Math.sin(lat * Math.PI / 180)) * pw.u850 * (P * 100 / (R_SPEC * (T + 273.15))) : undefined;
+      const dPdxEra5 = pw?.v850 != null && Number.isFinite(P) && Number.isFinite(T)
+        ? (2 * OMEGA * Math.sin(lat * Math.PI / 180)) * pw.v850 * (P * 100 / (R_SPEC * (T + 273.15)))
+        : undefined;
+      const dPdyEra5 = pw?.u850 != null && Number.isFinite(P) && Number.isFinite(T)
+        ? -(2 * OMEGA * Math.sin(lat * Math.PI / 180)) * pw.u850 * (P * 100 / (R_SPEC * (T + 273.15)))
+        : undefined;
       return {
         f: u('f', 2 * OMEGA * Math.sin(lat * Math.PI / 180)),
-        rho: u('rho', P * 100 / (R_SPEC * (T + 273.15))),
-        dPdx: u('dPdx', dPdxEra5 ?? 0.001),
-        dPdy: u('dPdy', dPdyEra5 ?? 0.001),
+        rho: u('rho', Number.isFinite(P) && Number.isFinite(T) ? P * 100 / (R_SPEC * (T + 273.15)) : Number.NaN),
+        dPdx: u('dPdx', dPdxEra5 ?? Number.NaN),
+        dPdy: u('dPdy', dPdyEra5 ?? Number.NaN),
       };
     }
     case 6: {
@@ -2270,15 +2271,13 @@ function mapInputs(
       const lAuto = slopeDeg != null && Number.isFinite(bAuto) && Number.isFinite(hstarAuto)
         ? (bAuto + hstarAuto) / Math.tan(slopeDeg * Math.PI / 180)
         : Number.NaN;
-      // Primary: nearest-gauge OLS trend. Fallback (no gauge coverage): the
-      // observed global altimetry rate, labelled. Only a total NOAA failure
-      // of both paths yields NaN — never a made-up local rate.
-      const sAuto = slr != null ? slr.slopeMPerYr : gmslRateDefault().slopeMPerYr;
+      // Primary: nearest-gauge OLS trend from NOAA CO-OPS. When no regional
+      // gauge station covers the location (e.g. outside the US), return honest NaN
+      // rather than substituting an arbitrary global rate for local retreat.
+      const sAuto = slr != null ? slr.slopeMPerYr : Number.NaN;
       const slrNote = slr != null
         ? `S from NOAA CO-OPS gauge ${slr.stationId} (${slr.stationName}, ${slr.distanceKm} km away): OLS trend of ${slr.nMonths} monthly MSL values ${slr.fromYear}-${slr.toYear}`
-        : Number.isFinite(sAuto)
-          ? 'S = GIA-corrected GLOBAL altimetry rate (~3.4 mm/yr, IPCC AR6 WGI Ch 9) — no local NOAA gauge covers this point'
-          : 'No genuine sea-level source reachable — honest NaN';
+        : 'No regional gauge station available (NOAA CO-OPS coverage is limited to US coastlines) — honest NaN';
       // userInputs are already alias-normalized (PARAM_ALIASES[75]: 'L*'→'L', 'h*'→'hstar').
       const userL = userInputs['L'] != null;
       const userS = userInputs['S'] != null;
@@ -3471,17 +3470,17 @@ export async function computeWithContext(
   // results (the Es = 17.02 hPa symptom). Such results must never be
   // presented silently as measurements.
   {
-    const placeholders: string[] = [];
+    const missingSensors: string[] = [];
     if (weather.temperature_2m === undefined && consumed.has('open-meteo-weather'))
-      placeholders.push('weather (15°C/1013.25 hPa/5 m/s/50% RH standards)');
+      missingSensors.push('Open-Meteo weather (temperature/pressure/wind/humidity unreachable)');
     if (marine.wave_height === undefined && consumed.has('open-meteo-marine'))
-      placeholders.push('marine (calm-sea defaults)');
+      missingSensors.push('Open-Meteo marine (inland or marine buoy unreachable)');
     if (airQuality.pm2_5 === undefined && consumed.has('open-meteo-aq'))
-      placeholders.push('air quality (zero-pollution defaults)');
+      missingSensors.push('Open-Meteo air quality');
     if (soil.texture_class === 'unknown' && consumed.has('isric-soilgrids'))
-      placeholders.push('soil (generic texture defaults)');
-    if (placeholders.length) {
-      const msg = `Context fetch incomplete — the computation used placeholder values: ${placeholders.join('; ')}. The result is a standard-input estimate, not a measurement.`;
+      missingSensors.push('ISRIC SoilGrids');
+    if (missingSensors.length) {
+      const msg = `Live sensor unreachable: ${missingSensors.join('; ')}. Computation returned NaN / withheld rather than substituting fake standard values.`;
       warnings.push(msg);
       log.push(`  WARNING: ${msg}`);
     }

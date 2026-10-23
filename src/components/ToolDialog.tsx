@@ -215,26 +215,43 @@ const fieldStyle: React.CSSProperties = {
 };
 const labelStyle: React.CSSProperties = { fontSize: 9, color: '#64748b', marginBottom: 2, display: 'block' };
 
+const ENGINEERING_SYMBOLS = new Set([
+  'm', 'CD', 'A', 'A1', 'A2', 'v', 'n', 'R', 'C', 'K', 'X', 'Q', 'T', 'S',
+  'r', 'r1', 'r2', 'f0', 'fc', 'k', 't', 'V', 'D_P', 'P_low', 'P_high',
+  'num_intervals', 'K0', 'Vres', 'hb', 'xf', 'Pf', 'y', 'H', 'xb', 'B',
+  'px', 'py', 'Hxy', 'pxy', 'fGHz', 'dKm', 'Gt', 'Gr', 'm1', 'm2',
+  'sigmax', 'sigmay', 'd', 'rho2', 'sigma', 'N', 'L', 'β', 'γ', 'alpha1', 'alpha2',
+]);
+
 const ParamInput: React.FC<{
   param: AnalysisToolParameter; value: string; onChange: (val: string) => void; color: string;
 }> = ({ param, value, onChange, color }) => {
   const { label, unit, default: def, min, max, options } = param;
+  const isEngineering = ENGINEERING_SYMBOLS.has(param.symbol);
   return (
     <div>
-      <div style={{ fontSize: 9, color: '#64748b', marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
-        <span>{label}</span>
+      <div style={{ fontSize: 9, color: '#64748b', marginBottom: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {label}
+          {isEngineering && (
+            <span style={{ fontSize: 7.5, color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', padding: '0 3px', borderRadius: 2 }}>
+              user entry
+            </span>
+          )}
+        </span>
         {unit && <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#475569' }}>{unit}</span>}
       </div>
       {options ? (
         <select value={value} onChange={(e) => onChange(e.target.value)}
-          style={{ ...fieldStyle, borderColor: `${color}30` }}>
+          style={{ ...fieldStyle, borderColor: isEngineering ? 'rgba(245,158,11,0.3)' : `${color}30` }}>
           {options.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       ) : (
         <input
           type="number" value={value} onChange={(e) => onChange(e.target.value)}
-          placeholder={def === null || def === undefined ? 'auto' : String(def)} min={min ?? undefined} max={max ?? undefined} step="any"
-          style={{ ...fieldStyle, borderColor: `${color}30` }}
+          placeholder={isEngineering ? (def !== null && def !== undefined ? `Entry required (e.g. ${def})` : 'User parameter entry required') : (def === null || def === undefined ? 'auto' : String(def))}
+          min={min ?? undefined} max={max ?? undefined} step="any"
+          style={{ ...fieldStyle, borderColor: isEngineering ? 'rgba(245,158,11,0.3)' : `${color}30` }}
         />
       )}
     </div>
@@ -503,6 +520,12 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
         {hasInputs && (
           <div style={{ marginBottom: 10 }}>
             <div style={sectionStyle}><Play size={10} /> Parameters</div>
+            {(tool.inputs ?? []).some(p => ENGINEERING_SYMBOLS.has(p.symbol)) && (
+              <div style={{ fontSize: 9, color: '#fcd34d', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', padding: '4px 8px', borderRadius: 4, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <AlertCircle size={10} style={{ flexShrink: 0 }} />
+                <span>Engineering/scenario parameters cannot be observed by satellites. User parameter entry required.</span>
+              </div>
+            )}
             {Object.entries(groupedParams).map(([group, params]) => (
               <div key={group} style={{ marginBottom: group ? 8 : 0 }}>
                 {group && <div style={{ fontSize: 9, color: '#475569', marginBottom: 4 }}>{group}</div>}

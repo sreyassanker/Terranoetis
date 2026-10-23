@@ -56,10 +56,60 @@ const COG_READ_OPTS: CogSourceOptions = { fetch: cogFetch };
 // ── Planetary Computer ──────────────────────────────────────────────
 const PC_STAC = 'https://planetarycomputer.microsoft.com/api/stac/v1';
 const PC_SAS  = 'https://planetarycomputer.microsoft.com/api/sas/v1/sign';
+const PC_TOKEN_BASE = 'https://planetarycomputer.microsoft.com/api/sas/v1/token';
 const PC_COLLECTION = 'landsat-c2-l2';
 
-/** Sign a raw Azure blob URL with a Planetary Computer SAS token (free, no auth). */
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
+const containerTokenCache = new Map<string, CachedToken>();
+
+/**
+ * Get a container/collection SAS token from Planetary Computer with caching.
+ * Caches tokens until 1 minute before expiry (or 45 minutes by default).
+ */
+async function getContainerSasToken(account: string, container: string): Promise<string | null> {
+  const cacheKey = `${account}/${container}`;
+  const hit = containerTokenCache.get(cacheKey);
+  if (hit && Date.now() < hit.expiresAt - 60000) {
+    return hit.token;
+  }
+  try {
+    const url = `${PC_TOKEN_BASE}/${account}/${container}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const data = await r.json() as { token: string; 'msft:expiry'?: string };
+    const expiresAt = data['msft:expiry']
+      ? new Date(data['msft:expiry']).getTime()
+      : (Date.now() + 45 * 60 * 1000);
+    containerTokenCache.set(cacheKey, { token: data.token, expiresAt });
+    return data.token;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sign a raw Azure blob URL with a Planetary Computer SAS token (free, no auth).
+ * Uses cached container-level tokens first to prevent 429 rate-limiting on burst reads.
+ * Falls back to the single-blob /sign endpoint if needed.
+ */
 async function sign(href: string): Promise<string> {
+  try {
+    const u = new URL(href);
+    const account = u.hostname.split('.')[0];
+    const container = u.pathname.split('/')[1];
+    if (account && container) {
+      const token = await getContainerSasToken(account, container);
+      if (token) {
+        return `${href}${href.includes('?') ? '&' : '?'}${token}`;
+      }
+    }
+  } catch {
+    // URL parsing failed or container token failed; fall back to individual sign
+  }
+
   const r = await fetch(`${PC_SAS}?href=${encodeURIComponent(href)}`, {
     signal: AbortSignal.timeout(15000),
   });
@@ -823,8 +873,9 @@ export async function fetchLandsatThermalGrid(
 
   // QA band (fill/cloud-shadow/snow/cloud classes) — the per-pixel gate that
   // stops cloud-top radiance from being converted into a "land surface"
-  // temperature. Landsat C2 L2 exposes it as 'qa' (older items 'qa_pixel').
-  const qaKey = assets['qa'] ? 'qa' : assets['qa_pixel'] ? 'qa_pixel' : undefined;
+  // temperature. Landsat C2 L2 exposes the pixel classification bitmask as
+  // 'qa_pixel' (ST_QA under 'qa' is Kelvin uncertainty, not a bitmask).
+  const qaKey = assets['qa_pixel'] ? 'qa_pixel' : assets['qa'] ? 'qa' : undefined;
   let qaBand: { win: BandWindow; geom: BandGeom } | null = null;
   if (qaKey) {
     const qs = await sign(assets[qaKey].href).catch(() => null);
