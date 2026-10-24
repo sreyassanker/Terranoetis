@@ -1993,7 +1993,7 @@ app.delete('/api/admin/local-ai/models/:filename', requireRole('admin'), (req: e
   if (result.ok) {
     void omninet.triggerImmediateHealthChecks();
   }
-  res.json(result);
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 // Legacy backwards-compatible endpoints for older UI callers

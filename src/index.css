@@ -3506,70 +3506,161 @@ p { text-align: justify; }
   }
 
   .cctv-legend-interactive {
+    position: absolute !important;
     cursor: default;
     user-select: none;
-    transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+    border-radius: 18px !important;
+    padding: 12px 14px !important;
+    width: auto !important;
+    min-width: 236px !important;
+    max-width: 280px !important;
+    background: linear-gradient(150deg, rgba(15, 23, 42, 0.88) 0%, rgba(10, 15, 30, 0.94) 100%) !important;
+    backdrop-filter: blur(24px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 
+      0 20px 48px -8px rgba(0, 0, 0, 0.7),
+      0 0 0 1px rgba(255, 255, 255, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+    transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  .cctv-legend-interactive::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.5), transparent);
+    border-radius: 999px;
+    pointer-events: none;
   }
 
   .legend-row-interactive {
     cursor: pointer;
-    padding: 4px 6px;
-    border-radius: 5px;
+    padding: 6px 10px;
+    margin: 3px 0;
+    border-radius: 10px;
     border: 1px solid transparent;
-    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 11px;
+    color: #cbd5e1;
+    font-weight: 500;
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .legend-row-interactive:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+    color: #f8fafc;
+    transform: translateX(2px);
   }
 
   .legend-row-interactive.active {
-    background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.22);
     color: #fff;
-    font-weight: 500;
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+  }
+
+  .legend-row-interactive.active.row-video {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.18) 0%, rgba(34, 197, 94, 0.04) 100%);
+    border-color: rgba(34, 197, 94, 0.45);
+    box-shadow: 0 0 16px -2px rgba(34, 197, 94, 0.3);
+  }
+
+  .legend-row-interactive.active.row-image {
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.18) 0%, rgba(245, 158, 11, 0.04) 100%);
+    border-color: rgba(245, 158, 11, 0.45);
+    box-shadow: 0 0 16px -2px rgba(245, 158, 11, 0.3);
+  }
+
+  .legend-row-interactive.active.row-youtube {
+    background: linear-gradient(90deg, rgba(236, 72, 153, 0.2) 0%, rgba(236, 72, 153, 0.05) 100%);
+    border-color: rgba(236, 72, 153, 0.5);
+    box-shadow: 0 0 16px -2px rgba(236, 72, 153, 0.35);
+  }
+
+  .legend-row-interactive.active.row-unknown {
+    background: linear-gradient(90deg, rgba(100, 116, 139, 0.18) 0%, rgba(100, 116, 139, 0.04) 100%);
+    border-color: rgba(100, 116, 139, 0.4);
   }
 
   .legend-row-interactive.dimmed {
-    opacity: 0.45;
+    opacity: 0.38;
   }
 
   .cctv-count-badge {
-    font-size: 9px;
+    font-size: 9.5px;
     font-family: 'JetBrains Mono', monospace;
-    padding: 1px 5px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-dim);
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    letter-spacing: 0.02em;
+    transition: all 0.18s ease;
   }
 
   .legend-row-interactive.active .cctv-count-badge {
-    background: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
     color: #fff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
   }
 
   .cctv-filter-reset-btn {
-    font-size: 9px;
-    padding: 2px 7px;
-    border-radius: 4px;
-    background: rgba(239, 68, 68, 0.18);
-    border: 1px solid rgba(239, 68, 68, 0.45);
+    font-size: 9.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.4);
     color: #fca5a5;
     cursor: pointer;
-    transition: all 0.15s ease;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.15);
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .cctv-filter-reset-btn:hover {
-    background: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.28);
+    border-color: rgba(239, 68, 68, 0.6);
     color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.3);
+  }
+
+  .cctv-symbol-badge {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+  }
+
+  .legend-row-interactive:hover .cctv-symbol-badge {
+    transform: scale(1.18);
   }
 
   .legend-color {
-    width: 20px;
-    height: 8px;
-    border-radius: 2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
     flex-shrink: 0;
+    box-shadow: 0 0 8px currentColor;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .legend-row-interactive:hover .legend-color {
+    transform: scale(1.25);
+    box-shadow: 0 0 12px currentColor;
   }
 
   /* ── ISS PANEL ── */
@@ -6016,5 +6107,113 @@ p { text-align: justify; }
   opacity: 0.65;
   cursor: wait;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LOCAL AI HUB — PROFESSIONAL DOWNLOAD ANIMATIONS & PROGRESS BAR
+   ═══════════════════════════════════════════════════════════════════ */
+
+@keyframes aiDownloadFlow {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 34px 0, 0 0;
+  }
+}
+
+@keyframes aiLaserScan {
+  0% {
+    left: -25%;
+    width: 25%;
+    opacity: 0.3;
+  }
+  50% {
+    left: 100%;
+    width: 35%;
+    opacity: 1;
+  }
+  100% {
+    left: -25%;
+    width: 25%;
+    opacity: 0.3;
+  }
+}
+
+@keyframes aiBeaconPulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 10px rgba(56, 189, 248, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
+@keyframes aiCardGlow {
+  0%, 100% {
+    border-color: rgba(56, 189, 248, 0.35);
+    box-shadow: 0 10px 32px -4px rgba(56, 189, 248, 0.12), inset 0 0 24px rgba(56, 189, 248, 0.03);
+  }
+  50% {
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 10px 32px -4px rgba(99, 102, 241, 0.22), inset 0 0 30px rgba(99, 102, 241, 0.06);
+  }
+}
+
+.ai-download-card-pro {
+  animation: aiCardGlow 4s ease-in-out infinite;
+}
+
+.ai-progress-track-pro {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  background: rgba(10, 15, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.6);
+}
+
+.ai-progress-fill-pro {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.18) 0px,
+    rgba(255, 255, 255, 0.18) 12px,
+    transparent 12px,
+    transparent 24px
+  ), linear-gradient(90deg, #2563eb 0%, #06b6d4 50%, #38bdf8 100%);
+  background-size: 34px 34px, 100% 100%;
+  animation: aiDownloadFlow 1.2s linear infinite;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.7);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-progress-scanner-pro {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, rgba(56, 189, 248, 0.4) 30%, #38bdf8 50%, rgba(56, 189, 248, 0.4) 70%, transparent 100%);
+  box-shadow: 0 0 20px #38bdf8;
+  animation: aiLaserScan 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.ai-beacon-ring {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #38bdf8;
+  animation: aiBeaconPulse 1.8s ease-out infinite;
+}
+
 
 

@@ -29,7 +29,7 @@ const TRACK_OFFSETS: Record<TrackEntityType, { range: number; pitch: number }> =
   satellite: { range: 2000000, pitch: -90 },
   earthquake: { range: 250000, pitch: -50 },
   ship: { range: 100000, pitch: -30 },
-  cctv: { range: 12000, pitch: -45 },
+  cctv: { range: 6000, pitch: -90 },
   default: { range: 150000, pitch: -35 },
 };
 
@@ -50,10 +50,28 @@ export function createEntityTracker(viewer: Cesium.Viewer) {
     track(entity: Cesium.Entity, type: TrackEntityType = 'default') {
       tracked = entity;
       const offset = TRACK_OFFSETS[type] ?? TRACK_OFFSETS.default;
-      viewer.zoomTo(
-        entity,
-        new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(offset.pitch), offset.range),
-      );
+      const pos = entity.position?.getValue(viewer.clock.currentTime);
+      if (pos) {
+        const carto = Cesium.Cartographic.fromCartesian(pos);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, offset.range),
+          orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(offset.pitch),
+            roll: 0,
+          },
+          duration: 1.8,
+          easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+        });
+        viewer.scene.requestRender();
+      } else {
+        void viewer.flyTo(entity, {
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(offset.pitch), offset.range),
+          duration: 1.8,
+        });
+      }
     },
     untrack() {
       tracked = null;

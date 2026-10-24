@@ -2529,6 +2529,9 @@ export default function App() {
       selectionIndicator: false,
       creditContainer: document.createElement('div'),
     });
+    // Disable Cesium's built-in entity tracking on click/double-click so it doesn't clamp camera to billboard bounding spheres (~256m)
+    v.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    v.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_CLICK);
     viewerRef.current = v;
     (window as unknown as Record<string, unknown>).__TERRANOETIS_VIEWER__ = v;
     // God-eye test hook: expose the viewer for e2e camera assertions.
@@ -2596,6 +2599,14 @@ export default function App() {
     v.scene.globe.atmosphereLightIntensity = 30.0;
     v.scene.globe.lightingFadeOutDistance = 8e6;
     v.scene.globe.lightingFadeInDistance = 1e7;
+    v.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0B1528');
+
+    // Auto-repaint as soon as background imagery tiles finish streaming in
+    v.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
+      if (queueLength === 0) {
+        throttledRender(v);
+      }
+    });
     try {
       // Remove Cesium default imagery and add Esri satellite as the single base layer
       v.scene.imageryLayers.remove(v.scene.imageryLayers.get(0));
@@ -7865,31 +7876,55 @@ export default function App() {
     ctx.fillRect(0, 0, 36, 36);
     ctx.save();
     ctx.translate(cx, cy);
-    if (color === CCTV_FEED_COLORS.youtube || color === '#ec4899') {
-      ctx.fillStyle = '#ec4899';
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(0, 0, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+
+    const isYoutube = color === CCTV_FEED_COLORS.youtube || color === '#ec4899';
+    const isVideo = color === CCTV_FEED_COLORS.m3u8 || color === CCTV_FEED_COLORS.mjpeg || color === '#22c55e';
+    const isImage = color === CCTV_FEED_COLORS.image || color === '#f59e0b';
+
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    if (isYoutube) {
       // White play arrow inside YouTube badge
-      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.moveTo(-2, -3.5);
       ctx.lineTo(-2, 3.5);
       ctx.lineTo(3.5, 0);
       ctx.closePath();
       ctx.fill();
-    } else {
-      ctx.fillStyle = color;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.lineWidth = 1.5;
+    } else if (isVideo) {
+      // White video camera glyph inside Live Video badge
       ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI * 2);
+      ctx.rect(-3.5, -2.5, 4.2, 5);
       ctx.fill();
-      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(1.2, -1.2);
+      ctx.lineTo(3.8, -2.8);
+      ctx.lineTo(3.8, 2.8);
+      ctx.lineTo(1.2, 1.2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (isImage) {
+      // White photo camera glyph inside Snapshot Image badge
+      ctx.fillRect(-1.5, -3.6, 3, 1.2);
+      ctx.fillRect(-3.6, -2.4, 7.2, 5.2);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(0, 0.2, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Sensor eye dot inside Unknown badge
+      ctx.beginPath();
+      ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+      ctx.fill();
     }
+
     ctx.restore();
     cachedCctvCanvases.set(color, canvas);
     if (color === '#67e8f9') cachedCctvCanvas = canvas;
@@ -7958,12 +7993,12 @@ export default function App() {
             name: camera.name as string,
             billboard: {
               image: createCctvIcon(cctvFeedColor(meta)),
-              width: isYt ? 32 : 28,
-              height: isYt ? 32 : 28,
+              width: 32,
+              height: 32,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-              disableDepthTestDistance: 10000,
-              pixelOffset: new Cesium.Cartesian2(0, -2),
+              verticalOrigin: Cesium.VerticalOrigin.CENTER,
+              disableDepthTestDistance: 150000,
+              pixelOffset: new Cesium.Cartesian2(0, 0),
             },
             properties: { layer: 'india_cctv' },
           }));
@@ -8028,7 +8063,8 @@ export default function App() {
         const lon = Cesium.Math.toDegrees(carto.longitude);
         const lat = Cesium.Math.toDegrees(carto.latitude);
         v.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 12000),
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 6000),
+          orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
           duration: 1.5,
           complete: () => {
             showInfoPanel(target);
@@ -11732,8 +11768,8 @@ case 'openPanel':
           )}
 
           {layer === 'india_cctv' && (
-            <div className="sparkline-wrap">
-              <div className="sparkline-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="sparkline-wrap" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0', padding: '8px 12px' }}>
+              <div className="sparkline-title" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
                 {p.feedType === 'youtube' || p.youtubeVideoId ? (
                   <>
                     <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ef4444', boxShadow: '0 0 6px #ef4444' }} />
@@ -11743,60 +11779,21 @@ case 'openPanel':
                   <span>Public Feed</span>
                 )}
               </div>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>
-                  {p.feedType === 'youtube' || p.youtubeVideoId
-                    ? 'Verified worldwide 24/7 live video stream.'
-                    : 'Open-source live public webcam feed.'}
-                </div>
-                <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                  {(p.feedType === 'youtube' || Boolean(p.youtubeVideoId)) && (
-                    <>
-                      <button
-                        type="button"
-                        className="cctv-link"
-                        style={{border:'none',background:'none',cursor:'pointer',padding:0,color:'#ec4899'}}
-                        onClick={() => cycleYoutubeCamera(false)}
-                        title="Jump to previous YouTube 24/7 live cam"
-                      >
-                        ◀ Prev
-                      </button>
-                      <button
-                        type="button"
-                        className="cctv-link"
-                        style={{border:'none',background:'none',cursor:'pointer',padding:0,color:'#ec4899'}}
-                        onClick={() => cycleYoutubeCamera(true)}
-                        title="Jump to next YouTube 24/7 live cam"
-                      >
-                        Next ▶
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="cctv-link"
-                    style={{border:'none',background:'none',cursor:'pointer',padding:0}}
-                    onClick={() => { setCctvPreviewTick(t => t + 1); setVideoNonce(n => n + 1); setCctvPreviewFailed(false); }}
-                  >
-                    Refresh
-                  </button>
-                  <a
-                    className="cctv-link"
-                    href={String(p.pageUrl ?? p.streamUrl ?? '')}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => {
-                      const url = String(p.pageUrl ?? p.streamUrl ?? '');
-                      if (url) {
-                        e.preventDefault();
-                        openInBrowser(url);
-                      }
-                    }}
-                  >
-                    {p.feedType === 'youtube' || p.youtubeVideoId ? 'Watch on YouTube ↗' : 'Open live'}
-                  </a>
-                </div>
-              </div>
+              <a
+                className="cctv-link"
+                href={p.youtubeVideoId ? `https://www.youtube.com/watch?v=${p.youtubeVideoId}` : String(p.pageUrl ?? p.streamUrl ?? '')}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  const url = p.youtubeVideoId ? `https://www.youtube.com/watch?v=${p.youtubeVideoId}` : String(p.pageUrl ?? p.streamUrl ?? '');
+                  if (url) {
+                    e.preventDefault();
+                    openInBrowser(url);
+                  }
+                }}
+              >
+                {p.feedType === 'youtube' || p.youtubeVideoId ? 'Watch on YouTube ↗' : 'Open live'}
+              </a>
             </div>
           )}
 
@@ -13094,13 +13091,35 @@ case 'openPanel':
         <div
           className="legend-panel show glass-panel cctv-legend-interactive"
           style={{
+            position: 'absolute',
             bottom: 42,
-            right: infoEntity ? 348 : 80,
+            right: 76,
             zIndex: 90,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
-            <span className="heatmap-legend-title" style={{ margin: 0 }}>Camera Feeds</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <div style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: 'radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, rgba(56, 189, 248, 0.04) 100%)',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 10px rgba(56, 189, 248, 0.25)',
+                flexShrink: 0
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m22 8-6 4 6 4V8Z"/>
+                  <rect width="14" height="12" x="2" y="6" rx="3"/>
+                </svg>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#f1f5f9', textTransform: 'uppercase' }}>
+                Camera Feeds
+              </span>
+            </div>
             {cctvFilter !== 'all' ? (
               <button
                 type="button"
@@ -13115,14 +13134,24 @@ case 'openPanel':
                 Reset (All)
               </button>
             ) : (
-              <span style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.04em' }}>
+              <span style={{
+                fontSize: 9.5,
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: 999,
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: 'var(--text-dim)',
+                letterSpacing: '0.04em',
+                fontFamily: "'JetBrains Mono', monospace"
+              }}>
                 ALL {cctvCounts.all > 0 ? `(${cctvCounts.all})` : ''}
               </span>
             )}
           </div>
 
           <div
-            className={`legend-row legend-row-interactive ${cctvFilter === 'video' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'video' ? 'dimmed' : ''}`}
+            className={`legend-row legend-row-interactive row-video ${cctvFilter === 'video' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'video' ? 'dimmed' : ''}`}
             onClick={() => {
               const next = cctvFilter === 'video' ? 'all' : 'video';
               setCctvFilter(next);
@@ -13131,13 +13160,18 @@ case 'openPanel':
             }}
             title={cctvFilter === 'video' ? 'Click to show all feeds' : 'Click to isolate Live Video feeds only'}
           >
-            <span className="legend-color" style={{ background: '#22c55e', boxShadow: cctvFilter === 'video' ? '0 0 8px #22c55e' : undefined }} />
+            <div className="cctv-symbol-badge" style={{ background: '#22c55e', boxShadow: '0 0 10px rgba(34, 197, 94, 0.55)' }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                <rect x="2" y="5" width="13" height="14" rx="2"/>
+                <path d="M15 10l7-4v12l-7-4v-4z"/>
+              </svg>
+            </div>
             <span style={{ flex: 1 }}>Live video (HLS / MJPEG)</span>
             {cctvCounts.video > 0 && <span className="cctv-count-badge">{cctvCounts.video}</span>}
           </div>
 
           <div
-            className={`legend-row legend-row-interactive ${cctvFilter === 'image' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'image' ? 'dimmed' : ''}`}
+            className={`legend-row legend-row-interactive row-image ${cctvFilter === 'image' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'image' ? 'dimmed' : ''}`}
             onClick={() => {
               const next = cctvFilter === 'image' ? 'all' : 'image';
               setCctvFilter(next);
@@ -13146,13 +13180,18 @@ case 'openPanel':
             }}
             title={cctvFilter === 'image' ? 'Click to show all feeds' : 'Click to isolate Snapshot image feeds only'}
           >
-            <span className="legend-color" style={{ background: '#f59e0b', boxShadow: cctvFilter === 'image' ? '0 0 8px #f59e0b' : undefined }} />
+            <div className="cctv-symbol-badge" style={{ background: '#f59e0b', boxShadow: '0 0 10px rgba(245, 158, 11, 0.55)' }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                <path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/>
+                <circle cx="12" cy="14" r="3.5" fill="#f59e0b"/>
+              </svg>
+            </div>
             <span style={{ flex: 1 }}>Snapshot image</span>
             {cctvCounts.image > 0 && <span className="cctv-count-badge">{cctvCounts.image}</span>}
           </div>
 
           <div
-            className={`legend-row legend-row-interactive ${cctvFilter === 'youtube' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'youtube' ? 'dimmed' : ''}`}
+            className={`legend-row legend-row-interactive row-youtube ${cctvFilter === 'youtube' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'youtube' ? 'dimmed' : ''}`}
             onClick={() => {
               const next = cctvFilter === 'youtube' ? 'all' : 'youtube';
               setCctvFilter(next);
@@ -13161,13 +13200,17 @@ case 'openPanel':
             }}
             title={cctvFilter === 'youtube' ? 'Click to show all feeds' : 'Click to isolate YouTube live streams only'}
           >
-            <span className="legend-color" style={{ background: '#ec4899', boxShadow: cctvFilter === 'youtube' ? '0 0 8px #ec4899' : undefined }} />
+            <div className="cctv-symbol-badge" style={{ background: '#ec4899', boxShadow: '0 0 10px rgba(236, 72, 153, 0.6)' }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="white">
+                <polygon points="6,3 20,12 6,21"/>
+              </svg>
+            </div>
             <span style={{ flex: 1 }}>Embedded player (YouTube)</span>
             {cctvCounts.youtube > 0 && <span className="cctv-count-badge">{cctvCounts.youtube}</span>}
           </div>
 
           <div
-            className={`legend-row legend-row-interactive ${cctvFilter === 'unknown' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'unknown' ? 'dimmed' : ''}`}
+            className={`legend-row legend-row-interactive row-unknown ${cctvFilter === 'unknown' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'unknown' ? 'dimmed' : ''}`}
             onClick={() => {
               const next = cctvFilter === 'unknown' ? 'all' : 'unknown';
               setCctvFilter(next);
@@ -13176,7 +13219,11 @@ case 'openPanel':
             }}
             title={cctvFilter === 'unknown' ? 'Click to show all feeds' : 'Click to isolate unknown feed types only'}
           >
-            <span className="legend-color" style={{ background: '#64748b', boxShadow: cctvFilter === 'unknown' ? '0 0 8px #64748b' : undefined }} />
+            <div className="cctv-symbol-badge" style={{ background: '#64748b', boxShadow: '0 0 8px rgba(100, 116, 139, 0.5)' }}>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="white">
+                <circle cx="12" cy="12" r="5"/>
+              </svg>
+            </div>
             <span style={{ flex: 1 }}>Unknown feed type</span>
             {cctvCounts.unknown > 0 && <span className="cctv-count-badge">{cctvCounts.unknown}</span>}
           </div>

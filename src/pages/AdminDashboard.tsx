@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth, getToken, isDesktopApp } from '../context/AuthContext';
 import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu, RefreshCw, LogOut } from 'lucide-react';
+import { toast } from 'sonner';
 import { useUserPrefStore } from '../store/userPrefStore';
 import { formatISTTime, getAllTimezones } from '../lib/formatTime';
 import { LocalAiHub } from '../components/admin/LocalAiHub';
@@ -88,10 +89,13 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
 
   // Use "my location" via browser geolocation.
   const useMyLocation = () => {
-    if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported on this device');
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => setPref({ label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude }),
-      () => alert('Could not get your location — allow location access and retry.'),
+      () => toast.error('Could not get your location — allow location access in system or browser settings and retry.'),
       { timeout: 10000 },
     );
   };

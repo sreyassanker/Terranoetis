@@ -18,14 +18,58 @@ if (import.meta.env.PROD && !isDesktopApp && 'serviceWorker' in navigator) {
 
 // Errors raised outside React's own call stack — WebSocket and timer callbacks,
 // un-awaited promises — never reach an error boundary, so previously they left
-// no recoverable trace at all. Surface them without disturbing the live tree.
+// no recoverable trace at all. Surface real errors without disturbing the live tree.
 let lastToastAt = 0;
 const TOAST_COOLDOWN_MS = 15000;
 
+function isIgnoredAsyncError(error: unknown): boolean {
+  if (!error) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : '';
+
+  // 1. Aborted fetches (routine cancellations when typing, navigating, or spinning globe)
+  if (
+    name === 'AbortError' ||
+    message.includes('aborted') ||
+    message.includes('The user aborted a request') ||
+    message.includes('signal is aborted without reason')
+  ) {
+    return true;
+  }
+
+  // 2. Benign ResizeObserver timing loop warnings in WebKit/Chromium
+  if (
+    message.includes('ResizeObserver loop completed with undelivered notifications') ||
+    message.includes('ResizeObserver loop limit exceeded')
+  ) {
+    return true;
+  }
+
+  // 3. Audio autoplay gesture restrictions before first interaction
+  if (
+    name === 'NotAllowedError' ||
+    message.includes('play() failed') ||
+    message.includes("user didn't interact with the document first")
+  ) {
+    return true;
+  }
+
+  // 4. Benign cancelled image/tile loads in Cesium
+  if (message.includes('Request has been cancelled') || message.includes('cancelled')) {
+    return true;
+  }
+
+  return false;
+}
+
 function reportAsyncError(error: unknown, context: string) {
-  // Console every occurrence with the stack; only toast the first per cooldown,
-  // so a callback that throws every frame cannot bury the user in notifications.
+  // Console every occurrence with the stack; only toast real unexpected failures
   console.error(`[terranoetis] uncaught ${context}`, error);
+
+  if (isIgnoredAsyncError(error)) {
+    return;
+  }
+
   const now = Date.now();
   if (now - lastToastAt < TOAST_COOLDOWN_MS) return;
   lastToastAt = now;

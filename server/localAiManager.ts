@@ -328,6 +328,26 @@ class LocalAiManager {
       dirs.push(serverDevModels);
     }
 
+    // Walk up from current working directory to discover repository root models/
+    let cur = process.cwd();
+    while (cur && cur !== path.dirname(cur)) {
+      const candidate = path.join(cur, 'models');
+      if (fs.existsSync(candidate) && !dirs.includes(candidate)) {
+        dirs.push(candidate);
+      }
+      cur = path.dirname(cur);
+    }
+
+    // Also check standard downloads/workspace model directory and user home models
+    const workspaceModels = path.join(os.homedir(), 'Downloads', 'Terranoetis', 'models');
+    if (fs.existsSync(workspaceModels) && !dirs.includes(workspaceModels)) {
+      dirs.push(workspaceModels);
+    }
+    const userModels = path.join(os.homedir(), 'models');
+    if (fs.existsSync(userModels) && !dirs.includes(userModels)) {
+      dirs.push(userModels);
+    }
+
     return dirs;
   }
 
@@ -661,17 +681,20 @@ class LocalAiManager {
     if (process.env.LLAMA_SERVER_PATH && fs.existsSync(process.env.LLAMA_SERVER_PATH)) {
       return process.env.LLAMA_SERVER_PATH;
     }
+    const isWin = process.platform === 'win32';
     const candidates = [
       '/opt/homebrew/bin/llama-server',
       '/usr/local/bin/llama-server',
       '/usr/bin/llama-server',
       path.join(os.homedir(), '.local/bin/llama-server'),
       'C:\\Program Files\\llama.cpp\\llama-server.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'llama.cpp', 'llama-server.exe'),
+      path.join(os.homedir(), 'scoop', 'shims', 'llama-server.exe'),
     ];
     for (const c of candidates) {
-      if (fs.existsSync(c)) return c;
+      if (c && fs.existsSync(c)) return c;
     }
-    return 'llama-server';
+    return isWin ? 'llama-server.exe' : 'llama-server';
   }
 
   public setActiveModel(filename: string): { ok: boolean; message: string; running: boolean } {
@@ -740,30 +763,69 @@ class LocalAiManager {
   }
 
   public deleteModel(filename: string): { ok: boolean; message: string } {
-    const installed = this.listInstalledModels();
-    const target = installed.find(m => m.filename === filename);
-    if (!target) {
-      return { ok: false, message: 'Model file not found' };
+    const safeName = path.basename(filename);
+    if (!safeName || safeName === '.' || safeName === '..') {
+      return { ok: false, message: 'Invalid model filename' };
     }
 
-    if (this.activeModelName === filename) {
+    if (this.activeModelName === safeName || this.activeModelName === filename) {
       this.stopLlamaServer();
       this.activeModelName = null;
       this.activeModelPath = null;
     }
 
-    try {
-      if (fs.existsSync(target.path)) {
-        fs.unlinkSync(target.path);
-      }
-      const partial = `${target.path}.partial`;
-      if (fs.existsSync(partial)) {
-        fs.unlinkSync(partial);
-      }
-      return { ok: true, message: `Model ${filename} deleted successfully` };
-    } catch (e) {
-      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    const dirs = this.getModelsDirs();
+    let deletedCount = 0;
+
+    for (const d of dirs) {
+      const targetPath = path.join(d, safeName);
+      const partialPath = `${targetPath}.partial`;
+
+      try {
+        let isLink = false;
+        try {
+          isLink = fs.lstatSync(targetPath).isSymbolicLink();
+        } catch { /* file not in this dir */ }
+
+        if (fs.existsSync(targetPath) || isLink) {
+          let realPath: string | null = null;
+          try {
+            realPath = fs.realpathSync(targetPath);
+          } catch { /* ignore */ }
+
+          // Unlink the file or symlink in this dir
+          try {
+            fs.unlinkSync(targetPath);
+            deletedCount++;
+          } catch (e) {
+            logger.warn({ err: e, path: targetPath }, 'Failed to unlink target path');
+          }
+
+          // If it was a symlink to another file on disk, also remove the real file
+          if (realPath && realPath !== targetPath && fs.existsSync(realPath)) {
+            try {
+              fs.unlinkSync(realPath);
+              deletedCount++;
+            } catch (e) {
+              logger.warn({ err: e, path: realPath }, 'Failed to unlink real target path');
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      try {
+        if (fs.existsSync(partialPath)) {
+          fs.unlinkSync(partialPath);
+        }
+      } catch { /* ignore */ }
     }
+
+    if (deletedCount > 0) {
+      logger.info({ filename, deletedCount }, '[LocalAiManager] Model file deleted successfully from disk');
+      return { ok: true, message: `Model ${filename} deleted successfully from disk` };
+    }
+
+    return { ok: false, message: 'Model file not found on disk' };
   }
 
   public async ensureServerRunning(): Promise<boolean> {

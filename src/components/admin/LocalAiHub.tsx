@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Cpu, Download, X, Search, Check, Trash2, Sparkles, Eye,
   Zap, HardDrive, RefreshCw, Layers, AlertCircle, CheckCircle2, ChevronDown, ChevronUp
@@ -184,6 +184,11 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
     void fetchDownloadStatus();
   }, [fetchCatalogAndSpecs, fetchInstalledModels, fetchDownloadStatus]);
 
+  // Refresh installed models when switching tabs
+  useEffect(() => {
+    void fetchInstalledModels();
+  }, [activeTab, fetchInstalledModels]);
+
   // High-frequency polling during active download for accurate real-time percentage
   useEffect(() => {
     if (!downloadStatus?.running) return;
@@ -336,26 +341,121 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
     }
   };
 
-  // Delete Model
-  const handleDeleteModel = async (filename: string) => {
-    if (!window.confirm(`Delete ${filename} from disk to free up space?`)) return;
+  // Two-step inline delete confirmation (replaces window.confirm for Tauri / WKWebView compatibility)
+  const [confirmDeleteModel, setConfirmDeleteModel] = useState<string | null>(null);
+  const confirmDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+    };
+  }, []);
+
+  const requestDeleteModel = (filename: string) => {
+    setConfirmDeleteModel(filename);
+    if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+    confirmDeleteTimerRef.current = setTimeout(() => {
+      setConfirmDeleteModel(null);
+    }, 6000);
+  };
+
+  const executeDeleteModel = async (filename: string) => {
+    if (confirmDeleteTimerRef.current) clearTimeout(confirmDeleteTimerRef.current);
+    setConfirmDeleteModel(null);
     setActionLoading(`delete-${filename}`);
     try {
       const resp = await fetch(`/api/admin/local-ai/models/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
         headers: authHeaders,
       });
-      if (resp.ok) {
-        toast.success(`Deleted ${filename}`);
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.ok) {
+        toast.success(data.message || `Deleted ${filename}`);
+        if (activeModel === filename) {
+          setActiveModel(null);
+        }
         void fetchInstalledModels();
       } else {
-        toast.error('Failed to delete model');
+        toast.error(data.message || 'Failed to delete model');
       }
     } catch {
       toast.error('Network error deleting model');
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const renderDeleteButton = (filename: string, size: 'small' | 'normal' = 'normal') => {
+    const isConfirming = confirmDeleteModel === filename;
+    const isDeleting = actionLoading === `delete-${filename}`;
+
+    if (isConfirming) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={() => void executeDeleteModel(filename)}
+            disabled={isDeleting}
+            style={{
+              padding: size === 'small' ? '3px 8px' : '5px 10px',
+              borderRadius: 6,
+              background: '#dc2626',
+              border: '1px solid #ef4444',
+              color: '#ffffff',
+              cursor: isDeleting ? 'not-allowed' : 'pointer',
+              fontSize: 10,
+              fontWeight: 700,
+              boxShadow: '0 0 10px rgba(239, 68, 68, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            {isDeleting ? <RefreshCw size={10} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={10} />}
+            <span>{isDeleting ? 'Deleting…' : 'Confirm Delete?'}</span>
+          </button>
+          <button
+            onClick={() => setConfirmDeleteModel(null)}
+            disabled={isDeleting}
+            style={{
+              padding: size === 'small' ? '3px 6px' : '5px 8px',
+              borderRadius: 6,
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              fontSize: 10,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <button
+        onClick={() => requestDeleteModel(filename)}
+        disabled={isDeleting}
+        style={{
+          padding: size === 'small' ? '4px 6px' : '5px 8px',
+          borderRadius: 6,
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          color: '#f87171',
+          cursor: 'pointer',
+          fontSize: 11,
+          transition: 'all 0.15s ease',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
+        title="Delete model file from disk"
+      >
+        <Trash2 size={size === 'small' ? 12 : 13} />
+      </button>
+    );
   };
 
   // Filter models for active tab
@@ -433,24 +533,27 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
         </div>
       )}
 
-      {/* ── Active Download Card with Prominent Cancel Option & Live Accurate Progress ── */}
+      {/* ── Active Download Card with Professional High-Tech Animation & Live Accurate Progress ── */}
       {downloadStatus && (downloadStatus.running || downloadStatus.error) && (
-        <div style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 40,
-          background: downloadStatus.error
-            ? 'linear-gradient(135deg, rgba(127, 29, 29, 0.95) 0%, rgba(24, 15, 15, 0.95) 100%)'
-            : 'linear-gradient(135deg, rgba(30, 58, 138, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
-          backdropFilter: 'blur(12px)',
-          border: downloadStatus.error ? '1px solid rgba(239, 68, 68, 0.6)' : '1px solid rgba(96, 165, 250, 0.6)',
-          borderRadius: 12,
-          padding: '16px 18px',
-          boxShadow: downloadStatus.error ? '0 10px 30px rgba(239, 68, 68, 0.3)' : '0 10px 30px rgba(37, 99, 235, 0.3)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}>
+        <div
+          className={downloadStatus.error ? '' : 'ai-download-card-pro'}
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 40,
+            background: downloadStatus.error
+              ? 'linear-gradient(135deg, rgba(127, 29, 29, 0.95) 0%, rgba(24, 15, 15, 0.95) 100%)'
+              : 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%)',
+            backdropFilter: 'blur(16px)',
+            border: downloadStatus.error ? '1px solid rgba(239, 68, 68, 0.6)' : '1px solid rgba(56, 189, 248, 0.35)',
+            borderRadius: 12,
+            padding: '16px 20px',
+            boxShadow: downloadStatus.error ? '0 10px 30px rgba(239, 68, 68, 0.3)' : '0 10px 32px rgba(14, 165, 233, 0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
           {downloadStatus.error ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -479,78 +582,84 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{
-                    width: 10, height: 10, borderRadius: '50%', background: '#38bdf8',
-                    boxShadow: '0 0 10px #38bdf8', animation: 'pulse 1.5s infinite',
-                  }} />
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="ai-beacon-ring" />
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', letterSpacing: '0.01em' }}>
                     {downloadStatus.resuming ? 'Resuming Download' : 'Downloading Local AI Model'}
                   </div>
-                  <span style={{ fontSize: 11, color: '#93c5fd', background: 'rgba(59, 130, 246, 0.25)', border: '1px solid rgba(59, 130, 246, 0.4)', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: 11, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
                     {downloadStatus.fileName}
                   </span>
                 </div>
 
-                {/* Cancel Button */}
-                <button
-                  onClick={handleCancelDownload}
-                  disabled={actionLoading === 'cancel'}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '6px 14px', borderRadius: 6,
-                    background: 'rgba(239, 68, 68, 0.2)',
-                    border: '1px solid rgba(239, 68, 68, 0.5)',
-                    color: '#f87171', fontSize: 11, fontWeight: 600,
-                    cursor: 'pointer', transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.35)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'; }}
-                >
-                  <X size={13} />
-                  <span>Cancel Download</span>
-                </button>
-              </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    fontSize: 16, fontWeight: 800, color: '#38bdf8', fontFamily: 'monospace',
+                    textShadow: '0 0 12px rgba(56, 189, 248, 0.6)',
+                  }}>
+                    {downloadStatus.percent}%
+                  </div>
 
-              {/* High-Visibility Progress Bar with Live Centered Percentage */}
-              <div style={{ position: 'relative', width: '100%', height: 20, background: 'rgba(255,255,255,0.08)', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{
-                  width: `${Math.max(2, downloadStatus.percent)}%`,
-                  height: '100%',
-                  background: 'linear-gradient(90deg, #2563eb 0%, #38bdf8 100%)',
-                  borderRadius: 10,
-                  transition: 'width 0.3s ease',
-                  boxShadow: '0 0 16px rgba(56, 189, 248, 0.7)',
-                }} />
-                <div style={{
-                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, fontWeight: 700, color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                  letterSpacing: 0.5,
-                }}>
-                  {downloadStatus.percent}% Completed
+                  {/* Cancel Button */}
+                  <button
+                    onClick={handleCancelDownload}
+                    disabled={actionLoading === 'cancel'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '5px 12px', borderRadius: 6,
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: '1px solid rgba(239, 68, 68, 0.4)',
+                      color: '#f87171', fontSize: 11, fontWeight: 600,
+                      cursor: 'pointer', transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'; }}
+                  >
+                    <X size={13} />
+                    <span>Cancel</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Progress Stats */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1', flexWrap: 'wrap', gap: 8 }}>
+              {/* High-Tech Animated Liquid / Laser Scan Progress Bar */}
+              <div className="ai-progress-track-pro">
+                {downloadStatus.percent === 0 && (!downloadStatus.received || downloadStatus.received === 0) ? (
+                  <div className="ai-progress-scanner-pro" />
+                ) : (
+                  <div
+                    className="ai-progress-fill-pro"
+                    style={{ width: `${Math.max(1.5, Math.min(100, downloadStatus.percent))}%` }}
+                  />
+                )}
+              </div>
+
+              {/* Progress Stats & Real-time Metrics */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#cbd5e1', flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <HardDrive size={13} style={{ color: '#38bdf8' }} />
-                  <span>
+                  <span style={{ fontFamily: 'monospace' }}>
                     {downloadStatus.total > 0
                       ? `${(downloadStatus.received / 1e9).toFixed(2)} GB / ${(downloadStatus.total / 1e9).toFixed(2)} GB`
                       : downloadStatus.received > 0
                         ? `${(downloadStatus.received / 1e6).toFixed(1)} MB downloaded (connecting…)`
-                        : 'Connecting to Hugging Face CDN…'}
+                        : 'Connecting to Hugging Face CDN & Allocating Buffer…'}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   {downloadStatus.speedBytes > 0 && (
-                    <span style={{ color: '#38bdf8', fontWeight: 600, background: 'rgba(56, 189, 248, 0.12)', padding: '2px 8px', borderRadius: 4 }}>
+                    <span style={{
+                      color: '#38bdf8', fontWeight: 600,
+                      background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.25)',
+                      padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace',
+                    }}>
                       ⚡ {(downloadStatus.speedBytes / 1e6).toFixed(1)} MB/s
                     </span>
                   )}
                   {downloadStatus.etaSeconds > 0 && (
-                    <span style={{ color: '#94a3b8' }}>
+                    <span style={{
+                      color: '#94a3b8', background: 'rgba(255, 255, 255, 0.05)',
+                      padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace',
+                    }}>
                       ⏱ ~{formatEta(downloadStatus.etaSeconds)} left
                     </span>
                   )}
@@ -821,18 +930,7 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
                           </button>
                         )}
 
-                        {installed && (
-                          <button
-                            onClick={() => handleDeleteModel(model.file)}
-                            style={{
-                              background: 'transparent', border: 'none', color: '#64748b',
-                              cursor: 'pointer', padding: 4,
-                            }}
-                            title="Delete model file"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
+                        {installed && renderDeleteButton(model.file, 'small')}
                       </div>
                     </div>
                   );
@@ -1053,18 +1151,7 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
                         </button>
                       )}
 
-                      <button
-                        onClick={() => handleDeleteModel(model.filename)}
-                        disabled={actionLoading === `delete-${model.filename}`}
-                        style={{
-                          padding: '6px 10px', borderRadius: 6,
-                          background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
-                          color: '#f87171', cursor: 'pointer', fontSize: 11,
-                        }}
-                        title="Delete model to free up disk space"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {renderDeleteButton(model.filename, 'normal')}
                     </div>
                   </div>
                 );
@@ -1074,148 +1161,265 @@ export const LocalAiHub: React.FC<LocalAiHubProps> = ({ token }) => {
         </div>
       )}
 
-      {/* ── Curated Catalog Cards ── */}
+      {/* ── Curated Catalog Cards & Installed Models Section ── */}
       {activeTab !== 'search' && activeTab !== 'installed' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {filteredCurated.map((model) => {
-            const installed = isModelInstalled(model.file);
-            const isDownloading = downloadStatus?.running && downloadStatus.fileName === model.file;
-            const isActive = activeModel === model.file;
-
-            return (
-              <div
-                key={model.id}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: model.recommendedForDevice ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
-                  borderRadius: 10,
-                  padding: 14,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  boxShadow: model.recommendedForDevice ? '0 4px 14px rgba(59, 130, 246, 0.1)' : 'none',
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#f8fafc' }}>
-                        {model.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                        {model.repo}
-                      </div>
-                    </div>
-
-                    <div style={{
-                      fontSize: 10, fontWeight: 600, color: '#38bdf8',
-                      background: 'rgba(56, 189, 248, 0.12)', padding: '2px 8px', borderRadius: 4,
-                    }}>
-                      {model.sizeFormatted}
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 11, color: '#94a3b8', margin: '8px 0', lineHeight: 1.45 }}>
-                    {model.description}
-                  </div>
-
-                  {/* Feature Badges */}
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                    {model.recommendedForDevice && (
-                      <span style={{ fontSize: 9, color: '#4ade80', background: 'rgba(34, 197, 94, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <Zap size={10} /> Recommended for your Mac
-                      </span>
-                    )}
-                    {model.isVision && (
-                      <span style={{ fontSize: 9, color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <Eye size={10} /> Vision & Multimodal
-                      </span>
-                    )}
-                    {model.isAllRounder && (
-                      <span style={{ fontSize: 9, color: '#67e8f9', background: 'rgba(6, 182, 212, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <Sparkles size={10} /> All-Rounder Chat
-                      </span>
-                    )}
-                    <span style={{ fontSize: 9, color: '#cbd5e1', background: 'rgba(255, 255, 255, 0.05)', padding: '1px 6px', borderRadius: 4 }}>
-                      {model.contextWindow} Context
-                    </span>
-                  </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Downloaded Models Section on Active Tab */}
+          {installedModels.length > 0 ? (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.75) 0%, rgba(20, 30, 48, 0.85) 100%)',
+              border: '1px solid rgba(34, 197, 94, 0.35)',
+              borderRadius: 12,
+              padding: '14px 18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CheckCircle2 size={16} style={{ color: '#22c55e' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', letterSpacing: '0.02em' }}>
+                    Downloaded & Ready Models ({installedModels.length})
+                  </span>
                 </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  {installed ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Check size={12} /> Installed
-                      </span>
-                      {isActive ? (
-                        <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(34, 197, 94, 0.15)', padding: '2px 6px', borderRadius: 4 }}>
-                          Active
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleActivateModel(model.file)}
-                          disabled={actionLoading === `activate-${model.file}`}
-                          style={{
-                            padding: '4px 10px', borderRadius: 4,
-                            background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)',
-                            color: '#60a5fa', cursor: 'pointer', fontSize: 10,
-                          }}
-                        >
-                          Activate
-                        </button>
-                      )}
-                    </div>
-                  ) : isDownloading ? (
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '5px 12px', borderRadius: 6,
-                      background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.4)',
-                      color: '#38bdf8', fontSize: 11, fontWeight: 600,
-                    }}>
-                      <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
-                      <span>Downloading {downloadStatus?.percent || 0}%</span>
-                      {downloadStatus && downloadStatus.speedBytes > 0 && (
-                        <span style={{ fontSize: 10, color: '#93c5fd' }}>
-                          ({(downloadStatus.speedBytes / 1e6).toFixed(1)} MB/s)
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleStartDownload(model.repo, model.file, model.downloadUrl)}
-                      disabled={Boolean(downloadStatus?.running) || actionLoading === `download-${model.file}`}
-                      style={{
-                        padding: '6px 14px', borderRadius: 6,
-                        background: model.recommendedForDevice ? 'rgba(59, 130, 246, 0.85)' : 'rgba(255, 255, 255, 0.08)',
-                        border: 'none', color: '#fff', fontSize: 11, fontWeight: 500,
-                        cursor: downloadStatus?.running ? 'not-allowed' : 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 5,
-                      }}
-                    >
-                      <Download size={12} />
-                      <span>Download Model</span>
-                    </button>
-                  )}
-
-                  {installed && (
-                    <button
-                      onClick={() => handleDeleteModel(model.file)}
-                      style={{
-                        background: 'transparent', border: 'none', color: '#64748b',
-                        cursor: 'pointer', padding: 4,
-                      }}
-                      title="Delete model file"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
+                <span style={{
+                  fontSize: 10, color: '#4ade80', background: 'rgba(34, 197, 94, 0.12)',
+                  border: '1px solid rgba(34, 197, 94, 0.25)', padding: '2px 8px', borderRadius: 4, fontWeight: 600,
+                }}>
+                  ✓ 100% Offline Ready
+                </span>
               </div>
-            );
-          })}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {installedModels.map((model) => {
+                  const isActive = activeModel === model.filename;
+                  return (
+                    <div
+                      key={model.filename}
+                      style={{
+                        background: isActive ? 'rgba(34, 197, 94, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isActive ? '1px solid rgba(34, 197, 94, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          background: isActive ? '#22c55e' : '#64748b',
+                          boxShadow: isActive ? '0 0 8px #22c55e' : 'none',
+                          flexShrink: 0,
+                        }} />
+                        <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>
+                              {model.filename}
+                            </span>
+                            {isActive && (
+                              <span style={{
+                                fontSize: 10, color: '#22c55e', background: 'rgba(34, 197, 94, 0.15)',
+                                padding: '1px 6px', borderRadius: 4, fontWeight: 600,
+                              }}>
+                                Active in Copilot
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                            Size: {model.sizeFormatted} · Available locally
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        {!isActive && (
+                          <button
+                            onClick={() => handleActivateModel(model.filename)}
+                            disabled={actionLoading === `activate-${model.filename}`}
+                            style={{
+                              padding: '5px 12px', borderRadius: 6,
+                              background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.5)',
+                              color: '#60a5fa', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59, 130, 246, 0.35)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)'; }}
+                          >
+                            {actionLoading === `activate-${model.filename}` ? 'Activating…' : 'Activate for Copilot'}
+                          </button>
+                        )}
+
+                        {renderDeleteButton(model.filename, 'normal')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              background: 'rgba(255, 255, 255, 0.02)', border: '1px dashed rgba(255, 255, 255, 0.12)',
+              borderRadius: 10, padding: '12px 16px', color: '#94a3b8', fontSize: 11,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <HardDrive size={15} style={{ color: '#64748b' }} />
+                <span>No local AI models downloaded yet. Pick a recommended model below to start 100% offline inference.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Curated Catalog Section Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: '#94a3b8' }}>
+            <span>Available Pre-Tested Models</span>
+            <span>{filteredCurated.length} options</span>
+          </div>
+
+          {/* Catalog Cards Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {filteredCurated.map((model) => {
+              const installed = isModelInstalled(model.file);
+              const isDownloading = downloadStatus?.running && downloadStatus.fileName === model.file;
+              const isActive = activeModel === model.file;
+
+              return (
+                <div
+                  key={model.id}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: isActive
+                      ? '1px solid rgba(34, 197, 94, 0.6)'
+                      : installed
+                        ? '1px solid rgba(34, 197, 94, 0.35)'
+                        : model.recommendedForDevice
+                          ? '1px solid rgba(59, 130, 246, 0.3)'
+                          : '1px solid rgba(255, 255, 255, 0.06)',
+                    borderRadius: 10,
+                    padding: 14,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    boxShadow: isActive
+                      ? '0 4px 18px rgba(34, 197, 94, 0.15)'
+                      : model.recommendedForDevice
+                        ? '0 4px 14px rgba(59, 130, 246, 0.1)'
+                        : 'none',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#f8fafc' }}>
+                          {model.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                          {model.repo}
+                        </div>
+                      </div>
+
+                      <div style={{
+                        fontSize: 10, fontWeight: 600, color: '#38bdf8',
+                        background: 'rgba(56, 189, 248, 0.12)', padding: '2px 8px', borderRadius: 4,
+                      }}>
+                        {model.sizeFormatted}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: '#94a3b8', margin: '8px 0', lineHeight: 1.45 }}>
+                      {model.description}
+                    </div>
+
+                    {/* Feature Badges */}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                      {model.recommendedForDevice && (
+                        <span style={{ fontSize: 9, color: '#4ade80', background: 'rgba(34, 197, 94, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Zap size={10} /> Recommended for your Mac
+                        </span>
+                      )}
+                      {model.isVision && (
+                        <span style={{ fontSize: 9, color: '#c084fc', background: 'rgba(168, 85, 247, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Eye size={10} /> Vision & Multimodal
+                        </span>
+                      )}
+                      {model.isAllRounder && (
+                        <span style={{ fontSize: 9, color: '#67e8f9', background: 'rgba(6, 182, 212, 0.1)', padding: '1px 6px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Sparkles size={10} /> All-Rounder Chat
+                        </span>
+                      )}
+                      <span style={{ fontSize: 9, color: '#cbd5e1', background: 'rgba(255, 255, 255, 0.05)', padding: '1px 6px', borderRadius: 4 }}>
+                        {model.contextWindow} Context
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    {installed ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                          <Check size={12} /> Downloaded & Ready
+                        </span>
+                        {isActive ? (
+                          <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+                            Active
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleActivateModel(model.file)}
+                            disabled={actionLoading === `activate-${model.file}`}
+                            style={{
+                              padding: '4px 10px', borderRadius: 4,
+                              background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)',
+                              color: '#60a5fa', cursor: 'pointer', fontSize: 10, fontWeight: 600,
+                            }}
+                          >
+                            {actionLoading === `activate-${model.file}` ? 'Activating…' : 'Activate'}
+                          </button>
+                        )}
+                      </div>
+                    ) : isDownloading ? (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '5px 12px', borderRadius: 6,
+                        background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.4)',
+                        color: '#38bdf8', fontSize: 11, fontWeight: 600,
+                      }}>
+                        <div className="ai-beacon-ring" style={{ width: 8, height: 8 }} />
+                        <span>Downloading {downloadStatus?.percent || 0}%</span>
+                        {downloadStatus && downloadStatus.speedBytes > 0 && (
+                          <span style={{ fontSize: 10, color: '#93c5fd' }}>
+                            ({(downloadStatus.speedBytes / 1e6).toFixed(1)} MB/s)
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleStartDownload(model.repo, model.file, model.downloadUrl)}
+                        disabled={Boolean(downloadStatus?.running) || actionLoading === `download-${model.file}`}
+                        style={{
+                          padding: '6px 14px', borderRadius: 6,
+                          background: model.recommendedForDevice ? 'rgba(59, 130, 246, 0.85)' : 'rgba(255, 255, 255, 0.08)',
+                          border: 'none', color: '#fff', fontSize: 11, fontWeight: 500,
+                          cursor: downloadStatus?.running ? 'not-allowed' : 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        <Download size={12} />
+                        <span>Download Model</span>
+                      </button>
+                    )}
+
+                    {installed && renderDeleteButton(model.file, 'small')}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -2,24 +2,29 @@
 /**
  * scripts/post-bundle.mjs
  *
- * Post-packaging hygiene for Terranoetis.app bundle on macOS:
- * 1. Removes obsolete legacy keys (LSRequiresCarbon, CSResourcesFileMapped) from Info.plist.
- * 2. Injects production runtime dependencies and static assets into the bundle resources.
- * 3. Verifies standalone portability outside the repository.
+ * Cross-platform post-packaging hygiene (macOS · Windows · Linux):
+ * 1. macOS: Cleans Info.plist legacy keys, embeds production node_modules & assets into .app bundle.
+ * 2. Windows / Linux: Embeds production node_modules & assets into release resources.
+ * 3. Synchronizes local GGUF models into OS Application Support / AppData.
  */
 
-import { existsSync, cpSync, mkdirSync } from 'node:fs';
+import { existsSync, cpSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+
+const isDarwin = process.platform === 'darwin';
+const isWin = process.platform === 'win32';
 
 const APP_DIR = resolve('src-tauri/target/release/bundle/macos/Terranoetis.app');
 const APP_PLIST = resolve(APP_DIR, 'Contents/Info.plist');
 const BUNDLE_DIST_SERVER = resolve(APP_DIR, 'Contents/Resources/_up_/dist-server');
+const localNm = resolve('dist-server/node_modules');
 
-if (process.platform === 'darwin' && existsSync(APP_DIR)) {
-  console.log('[post-bundle] Auditing and cleaning Terranoetis.app at:', APP_DIR);
+// ── 1. macOS .app Bundle Hygiene ──
+if (isDarwin && existsSync(APP_DIR)) {
+  console.log('[post-bundle] 🍏 Auditing and cleaning Terranoetis.app at:', APP_DIR);
 
-  // 1. Clean Info.plist
+  // Clean Info.plist
   if (existsSync(APP_PLIST)) {
     const keysToDelete = ['LSRequiresCarbon', 'CSResourcesFileMapped'];
     for (const key of keysToDelete) {
@@ -38,10 +43,8 @@ if (process.platform === 'darwin' && existsSync(APP_DIR)) {
     }
   }
 
-  // 2. Ensure bundled node_modules
-  const localNm = resolve('dist-server/node_modules');
+  // Ensure bundled node_modules inside .app
   const bundleNm = resolve(BUNDLE_DIST_SERVER, 'node_modules');
-
   if (existsSync(localNm)) {
     if (!existsSync(bundleNm)) {
       console.log('[post-bundle] Copying production node_modules into .app bundle...');
@@ -51,11 +54,9 @@ if (process.platform === 'darwin' && existsSync(APP_DIR)) {
     } else {
       console.log('✅ [post-bundle] Bundle node_modules already present.');
     }
-  } else {
-    console.warn('⚠️ [post-bundle] Local dist-server/node_modules not found!');
   }
 
-  // 3. Ensure bundled airspaces geojson
+  // Ensure bundled airspaces geojson inside .app
   const localAirspacesData = resolve('dist-server/data/combined_airspaces.geojson');
   const bundleAirspacesData = resolve(BUNDLE_DIST_SERVER, 'data/combined_airspaces.geojson');
   const localAirspaces = resolve('dist-server/combined_airspaces.geojson');
@@ -70,8 +71,65 @@ if (process.platform === 'darwin' && existsSync(APP_DIR)) {
     cpSync(localAirspaces, bundleAirspaces);
     console.log('✅ [post-bundle] Embedded combined_airspaces.geojson into bundle.');
   }
-
-  console.log('[post-bundle] ✅ Bundle hygiene complete.\n');
-} else {
-  console.log('[post-bundle] No macOS .app bundle found or non-Darwin platform; skipping bundle hygiene.');
 }
+
+// ── 2. Windows / Linux Standalone Release Hygiene ──
+const releaseDir = resolve('src-tauri/target/release');
+if (existsSync(releaseDir) && existsSync(localNm)) {
+  const winResources = resolve(releaseDir, 'resources/dist-server');
+  const winNm = resolve(winResources, 'node_modules');
+  if (!existsSync(winNm)) {
+    try {
+      mkdirSync(winResources, { recursive: true });
+      cpSync(localNm, winNm, { recursive: true });
+      console.log('✅ [post-bundle] Embedded production node_modules into standalone release resources.');
+    } catch { /* ignore */ }
+  }
+
+  const winAirspaces = resolve(winResources, 'data/combined_airspaces.geojson');
+  const localAirspacesData = resolve('dist-server/data/combined_airspaces.geojson');
+  if (existsSync(localAirspacesData) && !existsSync(winAirspaces)) {
+    try {
+      mkdirSync(resolve(winResources, 'data'), { recursive: true });
+      cpSync(localAirspacesData, winAirspaces);
+      console.log('✅ [post-bundle] Embedded data/combined_airspaces.geojson into standalone release resources.');
+    } catch { /* ignore */ }
+  }
+}
+
+// ── 3. Synchronize any local models into Application Data models ──
+const localModelsDir = resolve('models');
+const homedir = process.env.HOME || process.env.USERPROFILE || '';
+if (homedir && existsSync(localModelsDir)) {
+  const isLinux = process.platform === 'linux';
+  let appModelsDir;
+  if (isWin) {
+    appModelsDir = resolve(process.env.APPDATA || resolve(homedir, 'AppData/Roaming'), 'Terranoetis/models');
+  } else if (isLinux) {
+    appModelsDir = resolve(process.env.XDG_DATA_HOME || resolve(homedir, '.local/share'), 'Terranoetis/models');
+  } else {
+    appModelsDir = resolve(homedir, 'Library/Application Support/Terranoetis/models');
+  }
+  mkdirSync(appModelsDir, { recursive: true });
+  try {
+    const files = readdirSync(localModelsDir);
+    for (const f of files) {
+      if (f.endsWith('.gguf') && !f.endsWith('.partial')) {
+        const dest = resolve(appModelsDir, f);
+        if (!existsSync(dest)) {
+          try {
+            symlinkSync(resolve(localModelsDir, f), dest);
+            console.log(`✅ [post-bundle] Linked local model ${f} into Application Support.`);
+          } catch {
+            try {
+              cpSync(resolve(localModelsDir, f), dest);
+              console.log(`✅ [post-bundle] Copied local model ${f} into Application Data.`);
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+console.log('[post-bundle] ✅ Bundle hygiene complete.\n');

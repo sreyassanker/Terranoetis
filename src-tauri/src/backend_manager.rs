@@ -306,15 +306,33 @@ impl BackendManager {
             }
         }
 
-        // Augment PATH with node directory and standard system paths
-        let mut new_path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string();
+        // Augment PATH with node directory and standard system paths in a cross-platform manner
+        #[cfg(windows)]
+        let path_sep = ";";
+        #[cfg(not(windows))]
+        let path_sep = ":";
+
+        let mut path_entries = Vec::new();
         if let Some(parent) = node.parent().and_then(|p| p.to_str()) {
-            new_path = format!("{}:{}", parent, new_path);
+            path_entries.push(parent.to_string());
+        }
+        #[cfg(unix)]
+        {
+            for p in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+                path_entries.push(p.to_string());
+            }
         }
         if let Ok(existing) = std::env::var("PATH") {
-            new_path = format!("{}:{}", new_path, existing);
+            path_entries.push(existing);
         }
+        let new_path = path_entries.join(path_sep);
         cmd.env("PATH", new_path);
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW prevents command prompt flash
+        }
         cmd.env("PORT", "3001");
         cmd.env("PROXY_PORT", "3001");
         cmd.env("PARENT_PID", std::process::id().to_string());
@@ -364,6 +382,20 @@ impl BackendManager {
                     if direct_nm.exists() {
                         node_paths.push(direct_nm);
                     }
+                }
+
+                // Windows / Linux standalone installer: resources/ directory sits alongside executable
+                let win_res_nm = exe_dir.join("resources/dist-server/node_modules");
+                if win_res_nm.exists() {
+                    node_paths.push(win_res_nm);
+                }
+                let win_res_nm_up = exe_dir.join("resources/_up_/dist-server/node_modules");
+                if win_res_nm_up.exists() {
+                    node_paths.push(win_res_nm_up);
+                }
+                let win_direct_nm = exe_dir.join("resources/node_modules");
+                if win_direct_nm.exists() {
+                    node_paths.push(win_direct_nm);
                 }
             }
             let mut cur = exe.parent();
@@ -466,8 +498,17 @@ impl BackendManager {
             unsafe {
                 libc::kill(-pid, libc::SIGTERM);
             }
-            #[cfg(not(unix))]
+            #[cfg(windows)]
             {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000)
+                    .spawn();
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                let mut child = child;
                 let _ = child.kill();
             }
 

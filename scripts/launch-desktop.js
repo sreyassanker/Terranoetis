@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,16 +60,33 @@ prep.on('close', async (code) => {
     console.log('[desktop-launcher] ✅ Backend is ready on http://127.0.0.1:3001');
     console.log('[desktop-launcher] 🌍 Launching Terranoetis Desktop App...');
 
-    const appPath = path.join(ROOT, 'src-tauri/target/release/bundle/macos/Terranoetis.app');
-    const app = spawn('open', ['-W', appPath]);
+    let app;
+    if (process.platform === 'win32') {
+      const winCandidates = [
+        path.join(ROOT, 'src-tauri/target/release/Terranoetis.exe'),
+        path.join(ROOT, 'src-tauri/target/release/terranoetis.exe'),
+      ];
+      const winExe = winCandidates.find(p => fs.existsSync(p)) || winCandidates[0];
+      app = spawn(winExe, [], { stdio: 'inherit' });
+    } else if (process.platform === 'linux') {
+      const linuxCandidates = [
+        path.join(ROOT, 'src-tauri/target/release/terranoetis'),
+        path.join(ROOT, 'src-tauri/target/release/Terranoetis'),
+      ];
+      const linuxExe = linuxCandidates.find(p => fs.existsSync(p)) || linuxCandidates[0];
+      app = spawn(linuxExe, [], { stdio: 'inherit' });
+    } else {
+      const appPath = path.join(ROOT, 'src-tauri/target/release/bundle/macos/Terranoetis.app');
+      app = spawn('open', ['-W', appPath]);
+    }
 
     app.on('close', (appCode) => {
-      console.log(`[desktop-launcher] Terranoetis.app closed (code ${appCode}).`);
+      console.log(`[desktop-launcher] Desktop application closed (code ${appCode}).`);
       cleanup();
     });
 
     app.on('error', (err) => {
-      console.error('[desktop-launcher] Failed to open Terranoetis.app:', err);
+      console.error('[desktop-launcher] Failed to open desktop application:', err);
       cleanup();
     });
   } catch (err) {
