@@ -27,10 +27,22 @@ async function compile() {
     platform: 'node',
     format: 'esm',
     target: 'node20',
-    packages: 'external',
-    sourcemap: true,
+    banner: {
+      js: "import { createRequire as __createRequire } from 'node:module'; import { fileURLToPath as __fileURLToPath } from 'node:url'; import __path from 'node:path'; const require = __createRequire(import.meta.url); const __filename = __fileURLToPath(import.meta.url); const __dirname = __path.dirname(__filename);",
+    },
+    external: [
+      'better-sqlite3',
+      'bindings',
+      'h5wasm',
+      'fsevents',
+      'esbuild',
+    ],
+    sourcemap: false,
     logLevel: 'info',
   });
+
+  const oldMap = path.join(OUT_DIR, 'server.mjs.map');
+  if (fs.existsSync(oldMap)) fs.rmSync(oldMap, { force: true });
 
   const duration = Date.now() - t0;
   console.log(`✅ Server bundled in ${duration}ms -> dist-server/server.mjs`);
@@ -65,41 +77,33 @@ async function compile() {
   fs.writeFileSync(path.join(OUT_DIR, 'package.json'), JSON.stringify(pkgJson, null, 2));
   console.log('📄 Generated dist-server/package.json');
 
-  // Copy production node_modules into dist-server/node_modules for full standalone execution
-  console.log('📦 Packaging production runtime dependencies into dist-server/node_modules...');
+  // Copy ONLY native/runtime packages needed by external imports
+  console.log('📦 Packaging required native modules into dist-server/node_modules...');
   const tNm = Date.now();
   const rootNm = path.join(ROOT, 'node_modules');
   const distNm = path.join(OUT_DIR, 'node_modules');
+  fs.rmSync(distNm, { recursive: true, force: true });
   fs.mkdirSync(distNm, { recursive: true });
 
-  const excludePkgs = new Set([
-    '@anthropic-ai', '@playwright', 'playwright-core', 'typescript', 'vite', 'vitest',
-    '@eslint', 'eslint', 'prettier', 'cesium', '@cesium', '@cesium-extends',
-    'lucide-react', 'jspdf', 'jspdf-autotable', 'recharts', 'react-markdown',
-    'cmdk', 'embla-carousel-react', 'vaul', 'sonner', 'react-resizable-panels',
-    'react-hook-form', 'react-day-picker', 'input-otp', 'next-themes', 'dompurify',
-    '.vite', '.cache', '@img',
-    'onnxruntime-web'
-  ]);
+  const requiredNativePkgs = [
+    'better-sqlite3',
+    'bindings',
+    'h5wasm',
+  ];
 
-  if (fs.existsSync(rootNm)) {
-    let copied = 0;
-    for (const p of fs.readdirSync(rootNm)) {
-      if (excludePkgs.has(p) || p.startsWith('.')) continue;
-      const src = path.join(rootNm, p);
-      const dest = path.join(distNm, p);
-      try {
-        if (!fs.existsSync(dest)) {
-          fs.cpSync(src, dest, { recursive: true, dereference: false });
-          copied++;
-        }
-      } catch (e) {
-        // continue on non-critical file copy error
-      }
+  let copied = 0;
+  for (const pkg of requiredNativePkgs) {
+    const src = path.join(rootNm, pkg);
+    const dest = path.join(distNm, pkg);
+    if (fs.existsSync(src)) {
+      fs.cpSync(src, dest, { recursive: true, dereference: false });
+      copied++;
+    } else {
+      console.warn(`⚠️ Warning: native package "${pkg}" not found in root node_modules`);
     }
-    const nmDuration = Date.now() - tNm;
-    console.log(`✅ Packaged ${copied} production runtime modules in ${nmDuration}ms -> dist-server/node_modules`);
   }
+  const nmDuration = Date.now() - tNm;
+  console.log(`✅ Packaged ${copied} essential native modules in ${nmDuration}ms -> dist-server/node_modules`);
 
   const stats = fs.statSync(path.join(OUT_DIR, 'server.mjs'));
   console.log(`📊 Output size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);

@@ -46,15 +46,24 @@ if (isDarwin && existsSync(APP_DIR)) {
   // Ensure bundled node_modules inside .app
   const bundleNm = resolve(BUNDLE_DIST_SERVER, 'node_modules');
   if (existsSync(localNm)) {
-    if (!existsSync(bundleNm)) {
-      console.log('[post-bundle] Copying production node_modules into .app bundle...');
-      mkdirSync(BUNDLE_DIST_SERVER, { recursive: true });
-      cpSync(localNm, bundleNm, { recursive: true });
-      console.log('✅ [post-bundle] Embedded production node_modules into bundle.');
-    } else {
-      console.log('✅ [post-bundle] Bundle node_modules already present.');
-    }
+    console.log('[post-bundle] Syncing minimal production node_modules into .app bundle...');
+    mkdirSync(BUNDLE_DIST_SERVER, { recursive: true });
+    try {
+      const { rmSync } = await import('node:fs');
+      rmSync(bundleNm, { recursive: true, force: true });
+    } catch { /* ignore */ }
+    cpSync(localNm, bundleNm, { recursive: true });
+    console.log('✅ [post-bundle] Embedded minimal production node_modules into bundle.');
   }
+
+  // Clean up any lingering debug maps in bundle
+  try {
+    const bundleMap = resolve(BUNDLE_DIST_SERVER, 'server.mjs.map');
+    if (existsSync(bundleMap)) {
+      const { rmSync } = await import('node:fs');
+      rmSync(bundleMap, { force: true });
+    }
+  } catch { /* ignore */ }
 
   // Ensure bundled airspaces geojson inside .app
   const localAirspacesData = resolve('dist-server/data/combined_airspaces.geojson');
@@ -78,13 +87,13 @@ const releaseDir = resolve('src-tauri/target/release');
 if (existsSync(releaseDir) && existsSync(localNm)) {
   const winResources = resolve(releaseDir, 'resources/dist-server');
   const winNm = resolve(winResources, 'node_modules');
-  if (!existsSync(winNm)) {
-    try {
-      mkdirSync(winResources, { recursive: true });
-      cpSync(localNm, winNm, { recursive: true });
-      console.log('✅ [post-bundle] Embedded production node_modules into standalone release resources.');
-    } catch { /* ignore */ }
-  }
+  try {
+    mkdirSync(winResources, { recursive: true });
+    const { rmSync } = await import('node:fs');
+    rmSync(winNm, { recursive: true, force: true });
+    cpSync(localNm, winNm, { recursive: true });
+    console.log('✅ [post-bundle] Embedded minimal production node_modules into standalone release resources.');
+  } catch { /* ignore */ }
 
   const winAirspaces = resolve(winResources, 'data/combined_airspaces.geojson');
   const localAirspacesData = resolve('dist-server/data/combined_airspaces.geojson');

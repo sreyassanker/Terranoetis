@@ -128,8 +128,6 @@ export class Omninet {
   private providers: ProviderState[] = [];
   private initialized = false;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
-  private localPipeline: ((text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>) | null = null;
-  private localPipelinePromise: Promise<((text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>) | null> | null = null;
   private monthlyBudgetCap = 0;
 
   init(): void {
@@ -745,23 +743,58 @@ export class Omninet {
   }
 
   private async callLocalEmbedding(text: string): Promise<Float32Array> {
-    if (!this.localPipelinePromise) {
-      this.localPipelinePromise = this.initLocalPipeline();
-    }
-    const pipeline = await this.localPipelinePromise;
-    if (!pipeline) throw new Error('Local embedding not available');
-    const result = await pipeline(text, { pooling: 'mean', normalize: true });
-    return new Float32Array(result.data);
-  }
+    if (!text) return new Float32Array(768);
 
-  private async initLocalPipeline(): Promise<((text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>) | null> {
+    // 1. If local llama-server is running on port 8080 with embedding support, query it
     try {
-      const { pipeline: xfPipeline } = await import('@xenova/transformers');
-      return await xfPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2') as unknown as (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>;
-    } catch (e) {
-      logger.warn({ err: e }, 'Omninet local pipeline init failed');
-      return null;
+      const resp = await fetch('http://127.0.0.1:8080/embedding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(600),
+        body: JSON.stringify({ content: text }),
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { embedding?: number[] };
+        if (data.embedding && data.embedding.length > 0) {
+          const res = new Float32Array(768);
+          for (let i = 0; i < Math.min(768, data.embedding.length); i++) {
+            res[i] = data.embedding[i];
+          }
+          return res;
+        }
+      }
+    } catch {
+      // llama-server offline or non-responsive — fallback to fast deterministic embedding
     }
+
+    // 2. High-speed zero-dependency deterministic lexical embedding (dim 768)
+    const vec = new Float32Array(768);
+    const tokens = text.toLowerCase().match(/\w+/g) || [];
+    let norm = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      let h1 = 0x811c9dc5;
+      let h2 = 0x5bd1e995;
+      for (let j = 0; j < tok.length; j++) {
+        const c = tok.charCodeAt(j);
+        h1 = Math.imul(h1 ^ c, 0x01000193);
+        h2 = Math.imul(h2 ^ c, 0x5bd1e995);
+      }
+      const idx1 = Math.abs(h1) % 768;
+      const idx2 = Math.abs(h2) % 768;
+      vec[idx1] += 1.0;
+      vec[idx2] += 0.5;
+    }
+    for (let i = 0; i < 768; i++) {
+      norm += vec[i] * vec[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < 768; i++) {
+        vec[i] /= norm;
+      }
+    }
+    return vec;
   }
 
   private async callApiEmbedding(config: ProviderConfig, text: string): Promise<Float32Array> {

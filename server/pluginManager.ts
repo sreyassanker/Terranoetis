@@ -1,10 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
-import { transformSync } from 'esbuild';
 import { logger } from './observability/logger';
 import { pluginLoadsTotal } from './observability/metrics';
 import { getDb } from './db/index';
+
+let esbuildTransform: ((code: string, opts: Record<string, unknown>) => { code: string }) | null = null;
+try {
+  // Optional runtime dependency for dynamic .ts plugin compilation
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const es = require('esbuild');
+  esbuildTransform = es.transformSync;
+} catch {
+  // esbuild not present in production standalone bundle — plugins executed as JS
+}
 
 export interface PluginTool {
   name: string;
@@ -626,10 +635,12 @@ export class PluginManager {
     const sandboxModule = { exports: {} as Record<string, unknown> };
 
     let transpileSource = content;
-    try {
-      transpileSource = transformSync(content, { loader: 'ts', target: 'es2022' }).code;
-    } catch (e) {
-      logger.warn({ error: (e as Error).message }, 'TypeScript transpile failed, using raw content');
+    if (esbuildTransform) {
+      try {
+        transpileSource = esbuildTransform(content, { loader: 'ts', target: 'es2022' }).code;
+      } catch (e) {
+        logger.warn({ error: (e as Error).message }, 'TypeScript transpile failed, using raw content');
+      }
     }
 
     const cleanContent = transpileSource
