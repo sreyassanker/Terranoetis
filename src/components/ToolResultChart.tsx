@@ -16,12 +16,21 @@ interface Props {
   colorStops?: Array<{ stop: number; r: number; g: number; b: number }>;
 }
 
-/** Interpolate a value in [vmin, vmax] through a color-stop ramp → CSS color. */
-function colorForValue(v: number, vmin: number, vmax: number, stops: Array<{ stop: number; r: number; g: number; b: number }>): string {
-  if (!stops || stops.length === 0) return '#8b5cf6';
+export const DEFAULT_COLOR_STOPS = [
+  { stop: 0.0, r: 20, g: 40, b: 180 },
+  { stop: 0.25, r: 30, g: 120, b: 220 },
+  { stop: 0.5, r: 50, g: 200, b: 100 },
+  { stop: 0.75, r: 220, g: 200, b: 50 },
+  { stop: 1.0, r: 200, g: 30, b: 30 },
+];
+
+/** Interpolate a value in [vmin, vmax] through a color-stop ramp → CSS color.
+ *  Defaults to the map's native thermal/spectral gradient (blue→green→yellow→red). */
+function colorForValue(v: number, vmin: number, vmax: number, stops?: Array<{ stop: number; r: number; g: number; b: number }>): string {
+  const actualStops = stops && stops.length > 0 ? stops : DEFAULT_COLOR_STOPS;
   const t = vmax > vmin ? Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin))) : 0;
-  for (let i = 0; i < stops.length - 1; i++) {
-    const c0 = stops[i], c1 = stops[i + 1];
+  for (let i = 0; i < actualStops.length - 1; i++) {
+    const c0 = actualStops[i], c1 = actualStops[i + 1];
     if (t >= c0.stop && t <= c1.stop) {
       const seg = (c1.stop - c0.stop) === 0 ? 0 : (t - c0.stop) / (c1.stop - c0.stop);
       const r = Math.round(c0.r + (c1.r - c0.r) * seg);
@@ -30,7 +39,7 @@ function colorForValue(v: number, vmin: number, vmax: number, stops: Array<{ sto
       return `rgb(${r},${g},${b})`;
     }
   }
-  const last = stops[stops.length - 1];
+  const last = actualStops[actualStops.length - 1];
   return `rgb(${last.r},${last.g},${last.b})`;
 }
 
@@ -118,19 +127,19 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
     }
     return w;
   };
-  const yAxisTickW = Math.max(12, ...series.flatMap(s => s.points.map(p => estTextW(formatSciCompact(p.y), 10))));
-  const Y_AXIS_WIDTH = Math.ceil(yAxisTickW + 26); // tick width + title half-height + 0.3 cm gap
+  const yAxisTickW = Math.max(12, ...series.flatMap(s => (s?.points || []).map(p => estTextW(formatSciCompact(p?.y ?? 0), 10))));
+  const Y_AXIS_WIDTH = Math.min(80, Math.ceil(yAxisTickW + 26)); // tick width + title half-height + 0.3 cm gap
 
   switch (vizType) {
     case 'timeseries':
     case 'profile':
     case 'spectrum':
     case 'distribution': {
-      const yAll = series.flatMap(s => s.points.map(p => p.y));
-      const yFin = yAll.filter(v => Number.isFinite(v));
+      const yAll = series.flatMap(s => (s?.points || []).map(p => p?.y));
+      const yFin = yAll.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
       const yPos = yFin.filter(v => v > 0);
       const hasNeg = yFin.some(v => v < 0);
-      const useLogY = !hasNeg && yPos.length > 0
+      const useLogY = !hasNeg && yPos.length > 1
         && Math.log10(Math.max(...yPos)) - Math.log10(Math.min(...yPos)) > 3;
       const yLogMin = useLogY ? Math.log10(Math.min(...yPos)) : 0;
       const yLogMax = useLogY ? Math.log10(Math.max(...yPos)) : 0;
@@ -140,7 +149,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
         : [yLinMin, 'auto'] as [number, 'auto'];
       // Log10 X axis when a series opts in (log-spaced x, e.g. the Thiem
       // radial-distance sweep). Requires strictly positive x values.
-      const xAll = series.flatMap(s => s.points.map(p => p.x)).filter(Number.isFinite);
+      const xAll = series.flatMap(s => (s?.points || []).map(p => p?.x)).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
       const useLogX = series.some(s => s.logX) && xAll.length > 0 && xAll.every(v => v > 0);
       const xLogDomain = useLogX
         ? [Math.min(...xAll), Math.max(...xAll)] as [number, number]
@@ -155,7 +164,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
             <YAxis width={Y_AXIS_WIDTH} domain={yLogDomain} scale={useLogY ? 'log' : 'linear'} allowDataOverflow label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
-              <Area key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} name={series[i].label} />
+              <Area key={k} type="monotone" dataKey={k} stroke={series[i]?.color || CHART_COLORS[i % CHART_COLORS.length]} fill={series[i]?.color || CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} name={series[i]?.label || `Series ${i}`} />
             ))}
           </AreaChart>
         </ResponsiveContainer>
@@ -166,10 +175,12 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
     case 'bar':
     case 'histogram': {
       const barKeys = keys;
-      const useBinColors = vizType === 'histogram' && !!colorStops && colorStops.length > 0;
+      const effectiveStops = colorStops && colorStops.length > 0 ? colorStops : DEFAULT_COLOR_STOPS;
+      const useBinColors = vizType === 'histogram';
       // Histogram: value range for per-bin color mapping (matches the heatmap).
-      const histMin = data.length ? Math.min(...data.map(d => Number(d.x))) : 0;
-      const histMax = data.length ? Math.max(...data.map(d => Number(d.x))) : 1;
+      const histX = data.map(d => Number(d.x)).filter(Number.isFinite);
+      const histMin = histX.length ? Math.min(...histX) : 0;
+      const histMax = histX.length ? Math.max(...histX) : 1;
       return (
         <div style={wrapper}>
         <div style={titleStyle}>{title}</div>
@@ -180,11 +191,32 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
             <YAxis width={Y_AXIS_WIDTH} label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {barKeys.map((k, i) => (
-              <Bar key={k} dataKey={k} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} radius={[3, 3, 0, 0]} isAnimationActive={false} name={series[i].label}>
-                {useBinColors && data.map((d, bi) => (
-                  <Cell key={bi} fill={colorForValue(Number(d.x), histMin, histMax, colorStops!)} />
-                ))}
-              </Bar>
+              <Bar
+                key={k}
+                dataKey={k}
+                radius={[3, 3, 0, 0]}
+                isAnimationActive={false}
+                name={series[i].label}
+                shape={(barProps: any) => {
+                  const { x, y, width, height, payload } = barProps;
+                  if (!width || !height || height <= 0 || width <= 0) return null;
+                  const val = Number(payload?.x ?? 0);
+                  const fill = useBinColors
+                    ? colorForValue(val, histMin, histMax, effectiveStops)
+                    : (series[i].color || '#10b981');
+                  return (
+                    <rect
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      fill={fill}
+                      rx={2}
+                      ry={2}
+                    />
+                  );
+                }}
+              />
             ))}
           </BarChart>
         </ResponsiveContainer>

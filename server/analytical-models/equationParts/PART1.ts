@@ -12,6 +12,17 @@ export const PART1: Record<number, ComputeFn> = {
 
   // ── Part I · Domain 1: Atmospheric Science ──
   1: ({ T10, T11, eps10, eps11, w }) => {
+    // Input sanity checks: brightness temps in Kelvin, emissivity, water vapor
+    if (
+      !Number.isFinite(T10) || !Number.isFinite(T11) ||
+      !Number.isFinite(eps10) || !Number.isFinite(eps11) ||
+      !Number.isFinite(w) ||
+      T10 < 180 || T10 > 360 || T11 < 180 || T11 > 360 ||
+      eps10 < 0.70 || eps10 > 1.05 || eps11 < 0.70 || eps11 > 1.05 ||
+      w < 0 || w > 15
+    ) {
+      return { result: NaN, unit: '°C', steps: ['Input parameters outside physical terrestrial domain'] };
+    }
     const a10 = -64.4661, b10 = 0.4398; // Li regression coefficients for Band 10 (0-60°C)
     const a11 = -68.8678, b11 = 0.4755; // Li regression coefficients for Band 11 (0-60°C)
     // Step 1: Atmospheric transmittance from water vapor (MODTRAN 4.0, mid-lat summer)
@@ -27,7 +38,7 @@ export const PART1: Record<number, ComputeFn> = {
     const D11 = computeD(tau11, eps11);
     // Step 3: Intermediate SWA coefficients
     const E0 = D11 * C10 - D10 * C11;
-    if (E0 === 0) return { result: NaN, unit: '°C', steps: ['Singular: E₀ = 0, no solution possible'] };
+    if (Math.abs(E0) < 1e-6) return { result: NaN, unit: '°C', steps: ['Singular: E₀ ≈ 0, no solution possible'] };
     const E1 = D11 * (1 - C10 - D10) / E0;
     const E2 = D10 * (1 - C11 - D11) / E0;
     const A = D10 / E0;
@@ -38,6 +49,9 @@ export const PART1: Record<number, ComputeFn> = {
     // Step 5: Land Surface Temperature retrieval
     const Ts = A0 + A1 * T10 - A2 * T11;
     const TsC = Ts - 273.15;
+    if (!Number.isFinite(TsC) || TsC < -80 || TsC > 85) {
+      return { result: NaN, unit: '°C', steps: ['Retrieved LST outside physical terrestrial bounds [-80°C, +85°C]'] };
+    }
     return {
       result: TsC,
       unit: '°C',

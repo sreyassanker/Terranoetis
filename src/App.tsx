@@ -44,7 +44,7 @@ import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleCha
 import { interpolateIDW } from '@/rendering/idwInterpolation';
 import type { InterpGrid, InterpPoint } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
-import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS } from '@/rendering/surfaceRenderer';
+import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS, DEFAULT_COLORS } from '@/rendering/surfaceRenderer';
 import { COLORMAPS } from '@/components/kaggle/shared';
 import terranoetisLogo from '@/assets/terranoetis-wordmark.png';
 import {
@@ -1203,13 +1203,13 @@ function formatValue(v: number): string {
   return formatSci(v, 2);
 }
 
-/** Resolve a scheme name to the full ColorStop[] used by renderGridToCanvas
- *  and legendGradientCSS. 'default' returns undefined (the renderer's own
- *  DEFAULT_COLORS). */
-function schemeToColorStops(scheme: string): { stop: number; r: number; g: number; b: number }[] | undefined {
-  if (scheme === 'default') return undefined;
+/** Resolve a scheme name to the full ColorStop[] used by renderGridToCanvas,
+ *  legendGradientCSS, and the histogram distribution chart.
+ *  'default' maps to DEFAULT_COLORS (the map's native thermal/spectral gradient). */
+function schemeToColorStops(scheme: string): { stop: number; r: number; g: number; b: number }[] {
+  if (scheme === 'default') return DEFAULT_COLORS;
   const cm = COLORMAPS[scheme];
-  if (!cm) return undefined;
+  if (!cm) return DEFAULT_COLORS;
   return cm.stops;
 }
 
@@ -2040,6 +2040,7 @@ export default function App() {
     status: 'optimal' | 'coarse' | 'exceeds';
   } | null>(null);
   const drawerRef = useRef<any>(null);
+  const pointDrawHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const virtualizedChatRef = useRef<VirtualizedMessageListHandle>(null);
 
@@ -2130,9 +2131,11 @@ export default function App() {
     // centre pixel value + dot on the globe is misleading (the field varies).
     if (!spatialViz.includes(vizType ?? '')) {
       if (toolResultEntityRef.current) {
-        viewer.entities.remove(toolResultEntityRef.current);
+        try { viewer.entities.remove(toolResultEntityRef.current); } catch {}
       }
-      toolResultEntityRef.current = viewer.entities.add({
+      try { viewer.entities.removeById('analytical-tool-result-pin'); } catch {}
+      const resEnt = viewer.entities.add({
+        id: 'analytical-tool-result-pin',
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         label: {
           text: label,
@@ -2157,6 +2160,9 @@ export default function App() {
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
       });
+      (resEnt as any).isToolResult = true;
+      toolResultEntityRef.current = resEnt;
+      throttledRender(viewer);
     }
 
     // QGIS-style raster output: render the computed spatial grid as a styled
@@ -2275,12 +2281,32 @@ export default function App() {
     toolSurfaceSamplesRef.current = [];
     toolSurfacePolygonRef.current = undefined;
     const viewer = viewerRef.current;
-    if (!viewer) return;
+    if (!viewer || viewer.isDestroyed()) return;
     if (toolResultEntityRef.current) {
-      viewer.entities.remove(toolResultEntityRef.current);
+      try {
+        viewer.entities.remove(toolResultEntityRef.current);
+      } catch (e) {
+        console.warn('[handleClearToolResult] entity remove error:', e);
+      }
       toolResultEntityRef.current = null;
     }
+    try {
+      viewer.entities.removeById('analytical-tool-result-pin');
+      const toRemove: Cesium.Entity[] = [];
+      for (let i = 0; i < viewer.entities.values.length; i++) {
+        const ent = viewer.entities.values[i];
+        if (ent && ((ent as any).isToolResult || ent.id === 'analytical-tool-result-pin' || String(ent.id).startsWith('analytical-tool-result'))) {
+          toRemove.push(ent);
+        }
+      }
+      for (const ent of toRemove) {
+        viewer.entities.remove(ent);
+      }
+    } catch (e) {
+      console.warn('[handleClearToolResult] cleanup error:', e);
+    }
     clearInterpSurface(viewer);
+    throttledRender(viewer);
   }, []);
 
   // Re-render the tool-result heatmap with a different color scheme (Viridis,
@@ -2484,6 +2510,7 @@ export default function App() {
       creditContainer: document.createElement('div'),
     });
     viewerRef.current = v;
+    (window as unknown as Record<string, unknown>).__TERRANOETIS_VIEWER__ = v;
     // God-eye test hook: expose the viewer for e2e camera assertions.
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__VIEWER__ = v;
@@ -10804,11 +10831,20 @@ case 'openPanel':
   function clearStudyArea() {
     const v = viewerRef.current;
     if (!v) return;
+    if (drawerRef.current) {
+      drawerRef.current.reset();
+      drawerRef.current = null;
+    }
+    if (pointDrawHandlerRef.current) {
+      pointDrawHandlerRef.current.destroy();
+      pointDrawHandlerRef.current = null;
+    }
     if (studyAreaEntityRef.current) {
       v.entities.remove(studyAreaEntityRef.current);
       studyAreaEntityRef.current = null;
       throttledRender(v);
     }
+    handleClearToolResult();
   }
 
   // Keep the globe in sync with the store: when the chat store drops the
@@ -10889,9 +10925,9 @@ case 'openPanel':
   const formatArchDrawingTooltip = (areaKm2: number) => {
     if (areaKm2 <= 0) {
       return {
-        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
-          <div style="font-weight: 700; color: #38bdf8;">Click to place initial vertex</div>
-          <div style="color: #94a3b8; font-size: 10px;">Optimal: 1 – 10 km² · Limit: Max 25 km²</div>
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 10.5px; line-height: 1.25; white-space: nowrap;">
+          <div style="font-weight: 700; color: #38bdf8;">Click to place vertex</div>
+          <div style="color: #94a3b8; font-size: 9.5px;">Optimal: 1 – 10 km² · Max: 25 km²</div>
         </div>`,
         text: 'Click to place vertex (Optimal: 1–10 km²)',
         status: 'optimal' as const,
@@ -10901,13 +10937,13 @@ case 'openPanel':
     if (areaKm2 <= 10.0) {
       const areaFmt = areaKm2 < 1 ? areaKm2.toFixed(2) : areaKm2.toFixed(1);
       return {
-        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="color: #34d399; font-weight: 800; font-size: 13px;">● ${areaFmt} km²</span>
-            <span style="background: rgba(16,185,129,0.25); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">OPTIMAL RANGE</span>
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 10.5px; line-height: 1.25; white-space: nowrap;">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span style="color: #34d399; font-weight: 800; font-size: 11.5px;">● ${areaFmt} km²</span>
+            <span style="background: rgba(16,185,129,0.25); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.5); padding: 0 4px; border-radius: 3px; font-weight: 700; font-size: 9px; letter-spacing: 0.3px;">OPTIMAL</span>
           </div>
-          <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px;">
-            Sentinel 10m High-Res · Double-click to finish
+          <div style="color: #cbd5e1; font-size: 9.5px; margin-top: 1px;">
+            Sentinel 10m · Double-click to finish
           </div>
         </div>`,
         text: `${areaFmt} km² [OPTIMAL RANGE] · Double-click to finish`,
@@ -10917,12 +10953,12 @@ case 'openPanel':
 
     if (areaKm2 <= 25.0) {
       return {
-        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="color: #fbbf24; font-weight: 800; font-size: 13px;">▲ ${areaKm2.toFixed(1)} km²</span>
-            <span style="background: rgba(245,158,11,0.25); color: #fde68a; border: 1px solid rgba(245,158,11,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">COARSE RESOLUTION</span>
+        html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 10.5px; line-height: 1.25; white-space: nowrap;">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span style="color: #fbbf24; font-weight: 800; font-size: 11.5px;">▲ ${areaKm2.toFixed(1)} km²</span>
+            <span style="background: rgba(245,158,11,0.25); color: #fde68a; border: 1px solid rgba(245,158,11,0.5); padding: 0 4px; border-radius: 3px; font-weight: 700; font-size: 9px; letter-spacing: 0.3px;">COARSE</span>
           </div>
-          <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px;">
+          <div style="color: #cbd5e1; font-size: 9.5px; margin-top: 1px;">
             Micro-relief degraded · Double-click to finish
           </div>
         </div>`,
@@ -10932,13 +10968,13 @@ case 'openPanel':
     }
 
     return {
-      html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="color: #f87171; font-weight: 800; font-size: 13px;">✖ ${areaKm2.toFixed(1)} km²</span>
-          <span style="background: rgba(239,68,68,0.25); color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); padding: 1px 6px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">BEYOND LIMIT</span>
+      html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 10.5px; line-height: 1.25; white-space: nowrap;">
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <span style="color: #f87171; font-weight: 800; font-size: 11.5px;">✖ ${areaKm2.toFixed(1)} km²</span>
+          <span style="background: rgba(239,68,68,0.25); color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); padding: 0 4px; border-radius: 3px; font-weight: 700; font-size: 9px; letter-spacing: 0.3px;">EXCEEDED</span>
         </div>
-        <div style="color: #fca5a5; font-size: 10px; margin-top: 2px; font-weight: 600;">
-          Exceeds max 25 km² limit · Shrink selection to scan
+        <div style="color: #fca5a5; font-size: 9.5px; margin-top: 1px; font-weight: 600;">
+          Exceeds 25 km² limit · Shrink area
         </div>
       </div>`,
       text: `${areaKm2.toFixed(1)} km² [BEYOND 25 km² LIMIT] · Shrink selection`,
@@ -10949,17 +10985,22 @@ case 'openPanel':
   const formatGenDrawingTooltip = (areaKm2: number) => {
     if (areaKm2 <= 0) {
       return {
-        html: 'Click to place vertex · Double-click to finish',
+        html: `<span style="font-size: 10.5px; font-weight: 500; color: #e2e8f0; white-space: nowrap;">
+          <span style="color: #38bdf8; font-weight: 600;">Click to place vertex</span>
+          <span style="color: #64748b; margin: 0 4px;">·</span>
+          <span style="color: #94a3b8; font-size: 9.5px;">Double-click to finish</span>
+        </span>`,
         text: 'Click to place vertex · Double-click to finish',
         status: 'optimal' as const,
       };
     }
     const areaFmt = areaKm2 < 1 ? areaKm2.toFixed(2) : areaKm2.toFixed(1);
     return {
-      html: `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; line-height: 1.35; padding: 2px 4px;">
-        <span style="color: #38bdf8; font-weight: 800; font-size: 12px;">${areaFmt} km²</span>
-        <span style="color: #94a3b8; font-size: 10px; margin-left: 6px;">Double-click to finish</span>
-      </div>`,
+      html: `<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; white-space: nowrap;">
+        <span style="color: #34d399; font-weight: 700;">● ${areaFmt} km²</span>
+        <span style="color: #64748b;">·</span>
+        <span style="color: #94a3b8; font-size: 9.5px;">Double-click to finish</span>
+      </span>`,
       text: `${areaFmt} km² · Double-click to finish`,
       status: 'optimal' as const,
     };
@@ -10971,9 +11012,17 @@ case 'openPanel':
     // POINT: place a single marker directly (the Drawer is for shapes only)
     if (type === 'POINT') {
       setStudyDrawing(true);
+      if (pointDrawHandlerRef.current) {
+        pointDrawHandlerRef.current.destroy();
+        pointDrawHandlerRef.current = null;
+      }
+      if (v.canvas) v.canvas.style.cursor = 'crosshair';
       const handler = new Cesium.ScreenSpaceEventHandler(v.canvas);
+      pointDrawHandlerRef.current = handler;
       const handleClick = (e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
         handler.destroy();
+        pointDrawHandlerRef.current = null;
+        if (v.canvas) v.canvas.style.cursor = 'default';
         const cartesian = v.scene.globe.pick(v.camera.getPickRay(e.position)!, v.scene);
         if (!cartesian) {
           setStudyDrawing(false);
@@ -10982,8 +11031,10 @@ case 'openPanel':
         const carto = Cesium.Cartographic.fromCartesian(cartesian);
         const lon = Cesium.Math.toDegrees(carto.longitude);
         const lat = Cesium.Math.toDegrees(carto.latitude);
+        const areaId = `study_area_${Date.now()}`;
         const name = `point ${studyAreasRef.current.length + 1}`;
         const entity = v.entities.add({
+          id: `study_area_point_${areaId}`,
           position: cartesian,
           point: {
             pixelSize: 14,
@@ -10994,6 +11045,8 @@ case 'openPanel':
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
+        (entity as any).studyAreaId = areaId;
+        (entity as any).isStudyArea = true;
         const geojson: GeoJSON.FeatureCollection = {
           type: 'FeatureCollection',
           features: [{
@@ -11003,7 +11056,7 @@ case 'openPanel':
           }],
         };
         const area: StudyAreaItem = {
-          id: `study_area_${Date.now()}`, name, type: 'point' as any,
+          id: areaId, name, type: 'point' as any,
           visible: true, active: false, entity, positions: [cartesian], geojson, color: '#22c55e', width: 3,
         };
         if (analyticalNeedsTwoPoints) {
@@ -11014,6 +11067,7 @@ case 'openPanel':
           }
         } else {
           studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+          handleClearToolResult();
         }
         setStudyAreaActive(v, area, true);
         studyAreasRef.current = [...studyAreasRef.current, area];
@@ -11089,14 +11143,13 @@ case 'openPanel':
         onEnd: (entity: any, positions: Cesium.Cartesian3[]) => {
           setDrawingStats(null);
           if (!v || !positions?.length) return;
-          const typeLabel = type === 'RECTANGLE' ? 'rectangle' : 'polygon';
+          const typeLabel = type === 'RECTANGLE' ? 'rectangle' : type === 'CIRCLE' ? 'circle' : 'polygon';
           const name = `${typeLabel} ${studyAreasRef.current.length + 1}`;
           const color = '#22c55e';
           // The drawer reports a circle as its degenerate [center, center] point
-          // list, which would make the study-area bbox a zero-area point (and the
-          // land-cover grid a garbage sliver). Normalize circles to their true
-          // extent: bbox-corner positions (for bbox / fly-to math) plus a proper
-          // closed ring in GeoJSON (for point-in-polygon masking + export).
+          // list, which would make the study-area bbox a zero-area point. Normalize
+          // circles to 64 smooth circular perimeter coordinates for both Cartesian positions
+          // and GeoJSON polygon rings, providing authentic circular geometry across all tools.
           const toDeg = (p: Cesium.Cartesian3): [number, number] => {
             const carto = Cesium.Cartographic.fromCartesian(p);
             return [Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)];
@@ -11110,16 +11163,15 @@ case 'openPanel':
             if (rM > 0) {
               const dLon = rM / (111320 * Math.max(Math.cos(Cesium.Math.toRadians(cLat)), 0.2));
               const dLat = rM / 111320;
-              finalPositions = [
-                Cesium.Cartesian3.fromDegrees(cLon - dLon, cLat + dLat),
-                Cesium.Cartesian3.fromDegrees(cLon + dLon, cLat + dLat),
-                Cesium.Cartesian3.fromDegrees(cLon + dLon, cLat - dLat),
-                Cesium.Cartesian3.fromDegrees(cLon - dLon, cLat - dLat),
-              ];
+              finalPositions = [];
               ringCoords = [];
-              for (let k = 0; k < 36; k++) {
-                const a = (k / 36) * Math.PI * 2;
-                ringCoords.push([cLon + Math.cos(a) * dLon, cLat + Math.sin(a) * dLat]);
+              const SAMPLES = 64;
+              for (let k = 0; k < SAMPLES; k++) {
+                const a = (k / SAMPLES) * Math.PI * 2;
+                const pLon = cLon + Math.cos(a) * dLon;
+                const pLat = cLat + Math.sin(a) * dLat;
+                ringCoords.push([pLon, pLat]);
+                finalPositions.push(Cesium.Cartesian3.fromDegrees(pLon, pLat));
               }
             }
           }
@@ -11151,6 +11203,9 @@ case 'openPanel':
           setActiveStudyAreaId(area.id);
           flyToStudyAreaTopDown(v, area);
           setStudyDrawing(false);
+          if (drawerRef.current) {
+            drawerRef.current.pause();
+          }
           throttledRender(v);
           // Sync the drawn area to the chat store so the AI can use it
           const bbox = computeStudyAreaBbox(area);
@@ -11187,12 +11242,19 @@ case 'openPanel':
   };
 
   const stopStudyDraw = useCallback(() => {
+    const v = viewerRef.current;
+    if (v && v.canvas) v.canvas.style.cursor = 'default';
+    if (pointDrawHandlerRef.current) {
+      pointDrawHandlerRef.current.destroy();
+      pointDrawHandlerRef.current = null;
+    }
     if (drawerRef.current) {
       drawerRef.current.reset();
       drawerRef.current = null;
     }
     setDrawingStats(null);
     setStudyDrawing(false);
+    if (v) throttledRender(v);
   }, []);
 
   // World Radio: draw a looping wave at the selected station in the picked
@@ -11995,6 +12057,19 @@ case 'openPanel':
           const next = typeof updater === 'function' ? updater(studyAreasRef.current) : updater;
           studyAreasRef.current = next;
           setStudyAreas(next);
+          if (next.length === 0) {
+            if (drawerRef.current) {
+              drawerRef.current.reset();
+              drawerRef.current = null;
+            }
+            if (pointDrawHandlerRef.current) {
+              pointDrawHandlerRef.current.destroy();
+              pointDrawHandlerRef.current = null;
+            }
+            handleClearToolResult();
+            setActiveStudyAreaId(null);
+            if (viewerRef.current) throttledRender(viewerRef.current);
+          }
         }}
         activeStudyAreaId={activeStudyAreaId}
         onActivate={(id: string) => {
@@ -12002,6 +12077,8 @@ case 'openPanel':
           if (!v) return;
           if (!id) {
             setActiveStudyAreaId(null);
+            handleClearToolResult();
+            throttledRender(v);
             return;
           }
           studyAreasRef.current.forEach(a => {
@@ -12009,6 +12086,33 @@ case 'openPanel':
             else if (a.active) setStudyAreaActive(v, a, false);
           });
           setActiveStudyAreaId(id);
+          throttledRender(v);
+        }}
+        onClearResult={() => {
+          if (drawerRef.current) {
+            drawerRef.current.reset();
+            drawerRef.current = null;
+          }
+          if (pointDrawHandlerRef.current) {
+            pointDrawHandlerRef.current.destroy();
+            pointDrawHandlerRef.current = null;
+          }
+          handleClearToolResult();
+        }}
+        onDeleteArea={(deletedItem) => {
+          const v = viewerRef.current;
+          if (drawerRef.current) {
+            drawerRef.current.reset();
+            drawerRef.current = null;
+          }
+          if (pointDrawHandlerRef.current) {
+            pointDrawHandlerRef.current.destroy();
+            pointDrawHandlerRef.current = null;
+          }
+          if (deletedItem.id === activeStudyAreaId || studyAreasRef.current.length <= 1) {
+            handleClearToolResult();
+          }
+          if (v) throttledRender(v);
         }}
         show={showStudyArea}
         onClose={() => { stopStudyDraw(); setShowStudyArea(false); }}
@@ -13241,7 +13345,16 @@ case 'openPanel':
       /></PanelSuspense>
 
       {/* Analytics Workbench Panel */}
-      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} initialToolId={pendingAnalyticalToolId} onInitialToolConsumed={() => setPendingAnalyticalToolId(null)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
+      <ErrorBoundary
+        label="Analytics Workbench"
+        style={{
+          position: 'fixed', top: 60, right: 10, bottom: 56,
+          zIndex: getPanelZIndex('analytics'), width: 440, maxWidth: 'calc(100vw - 32px)',
+          background: 'rgba(12,12,30,0.94)', borderRadius: 12, border: '1px solid rgba(139,92,246,0.3)',
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        }}
+      >
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} initialToolId={pendingAnalyticalToolId} onInitialToolConsumed={() => setPendingAnalyticalToolId(null)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

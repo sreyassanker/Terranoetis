@@ -1,8 +1,9 @@
 import * as Cesium from 'cesium';
 import { renderGridToCanvas, pointInRing } from './idwInterpolation';
 import type { InterpGrid } from './idwInterpolation';
+import { throttledRender } from '@/lib/throttledRender';
 
-const DEFAULT_COLORS = [
+export const DEFAULT_COLORS = [
   { stop: 0.0, r: 20, g: 40, b: 180 },
   { stop: 0.25, r: 30, g: 120, b: 220 },
   { stop: 0.5, r: 50, g: 200, b: 100 },
@@ -163,6 +164,7 @@ export function showInterpSurface(
 
 export function clearInterpSurface(viewer: Cesium.Viewer): void {
   currentGrid = null;
+  if (!viewer || viewer.isDestroyed()) return;
   if (surfaceLayer) {
     viewer.scene.imageryLayers.remove(surfaceLayer, true);
     surfaceLayer = null;
@@ -171,6 +173,7 @@ export function clearInterpSurface(viewer: Cesium.Viewer): void {
     viewer.scene.imageryLayers.remove(confidenceLayer, true);
     confidenceLayer = null;
   }
+  throttledRender(viewer);
 }
 
 

@@ -20,7 +20,7 @@
     "dev:redis": "node scripts/dev-prep.js --redis-only",
     "postinstall": "node scripts/patch-cesium.js",
     "build": "npm run build:all",
-    "build:client": "node scripts/patch-cesium.js && tsc -b && vite build",
+    "build:client": "node scripts/patch-cesium.js && tsc -b && NODE_OPTIONS='--max-old-space-size=8192' vite build",
     "build:server": "node scripts/build-server.mjs",
     "build:all": "npm run build:client && npm run build:server",
     "lint": "eslint .",

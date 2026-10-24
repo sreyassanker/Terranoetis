@@ -5,6 +5,8 @@ interface ErrorBoundaryProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
   label?: string;
+  style?: React.CSSProperties;
+  onReset?: () => void;
 }
 
 interface ErrorBoundaryState {
@@ -28,6 +30,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   handleReset = (): void => {
     this.setState({ hasError: false, error: null });
+    this.props.onReset?.();
   };
 
   render(): React.ReactNode {
@@ -37,6 +40,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
         <div style={{
           padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center',
           justifyContent: 'center', textAlign: 'center', gap: 12, height: '100%',
+          ...this.props.style,
         }}>
           <AlertCircle size={28} color="#ef4444" style={{ opacity: 0.6 }} />
           <div style={{ fontSize: 13, color: '#ef4444', fontWeight: 600 }}>

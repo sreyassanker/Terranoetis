@@ -145,14 +145,22 @@ function toReflectance(raw: number): number {
   return Math.max(0, raw * 2.75e-5 - 0.2);
 }
 
-/** Scale a Landsat C2 L2 ST_B10 pixel value to Kelvin. */
-function toKelvin(raw: number): number {
-  return raw * 0.00341802 + 149.0;
+/** Scale a Landsat C2 L2 ST_B10 pixel value to Kelvin with physical bounds check. */
+function toKelvin(raw: number): number | undefined {
+  if (raw <= 0 || !Number.isFinite(raw)) return undefined;
+  const k = raw * 0.00341802 + 149.0;
+  // Physical terrestrial surface limits: 200 K (-73.15 °C, Vostok) to 345 K (71.85 °C, Dasht-e Lut)
+  if (!Number.isFinite(k) || k < 200 || k > 345) return undefined;
+  return k;
 }
 
-/** Scale the ST_EMIS band to emissivity [0,1]. */
-function toEmissivity(raw: number): number {
-  return raw * 0.0001;
+/** Scale the ST_EMIS band to emissivity [0,1] with terrestrial bounds check. */
+function toEmissivity(raw: number): number | undefined {
+  if (raw <= 0 || !Number.isFinite(raw)) return undefined;
+  const emis = raw * 0.0001;
+  // Physical terrestrial emissivity: 0.80 (bare mineral/quartz) to 1.00 (pure water/dense canopy)
+  if (!Number.isFinite(emis) || emis < 0.80 || emis > 1.00) return undefined;
+  return emis;
 }
 
 /**
@@ -431,7 +439,7 @@ function pointInFootprint(
 
 /** True when a raw Landsat C2 L2 pixel is a fill/no-data value. */
 function isFill(raw: number | null | undefined): boolean {
-  return raw == null || raw === 0 || raw === -9999 || raw === -99999;
+  return raw == null || !Number.isFinite(raw) || raw <= 0 || raw === -9999 || raw === -99999;
 }
 
 /**
@@ -727,8 +735,26 @@ function sampleBandWindow(
   const ty = Math.max(0, Math.min(1, gy - y0));
   const at = (x: number, y: number): number => win.data[y * ww + x];
   const v00 = at(x0, y0), v10 = at(x1, y0), v01 = at(x0, y1), v11 = at(x1, y1);
-  const val = (v00 * (1 - tx) + v10 * tx) * (1 - ty) + (v01 * (1 - tx) + v11 * tx) * ty;
-  return Number.isFinite(val) ? val : undefined;
+  const f00 = isFill(v00), f10 = isFill(v10), f01 = isFill(v01), f11 = isFill(v11);
+  if (!f00 && !f10 && !f01 && !f11) {
+    const val = (v00 * (1 - tx) + v10 * tx) * (1 - ty) + (v01 * (1 - tx) + v11 * tx) * ty;
+    return Number.isFinite(val) && !isFill(val) ? val : undefined;
+  }
+  // Boundary cell adjacent to nodata fill: check nearest neighbor
+  const nx = Math.max(0, Math.min(ww - 1, Math.round(gx)));
+  const ny = Math.max(0, Math.min(hh - 1, Math.round(gy)));
+  const nearVal = win.data[ny * ww + nx];
+  if (isFill(nearVal)) return undefined;
+
+  // Weight only the valid non-fill corners so nodata (-9999) never enters arithmetic
+  const w00 = !f00 ? (1 - tx) * (1 - ty) : 0;
+  const w10 = !f10 ? tx * (1 - ty) : 0;
+  const w01 = !f01 ? (1 - tx) * ty : 0;
+  const w11 = !f11 ? tx * ty : 0;
+  const totalWeight = w00 + w10 + w01 + w11;
+  if (totalWeight < 0.5) return undefined;
+  const val = (v00 * w00 + v10 * w10 + v01 * w01 + v11 * w11) / totalWeight;
+  return Number.isFinite(val) && !isFill(val) ? val : undefined;
 }
 
 /**
@@ -910,6 +936,7 @@ export async function fetchLandsatThermalGrid(
       const nirRaw = raw('nir08');
       if (stRaw == null) continue;
       const surfaceTemperature = toKelvin(stRaw);
+      if (surfaceTemperature == null) continue;
       const emissivity = emisRaw != null ? toEmissivity(emisRaw) : undefined;
       let ndvi: number | undefined;
       if (redRaw != null && nirRaw != null) {

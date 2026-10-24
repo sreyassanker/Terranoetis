@@ -51,9 +51,9 @@ interface StudyArea {
 
 const DEFAULT_STUDY_AREA: StudyArea = {
   mode: 'point',
-  lat: 35.68, lon: 139.76,
-  latMin: 35.43, latMax: 35.93, lonMin: 139.51, lonMax: 140.01,
-  lat1: 35.68, lon1: 139.76, lat2: 34.69, lon2: 135.50,
+  lat: 8.5017, lon: 76.9030,
+  latMin: 8.4817, latMax: 8.5217, lonMin: 76.8830, lonMax: 76.9230,
+  lat1: 8.5017, lon1: 76.9030, lat2: 8.4820, lon2: 76.9200,
 };
 
 /** What the user can actually draw on the globe. `null` means nothing is drawn. */
@@ -137,7 +137,12 @@ function buildAreaFromSelection(
     case 'point': {
       const p = sel.kind === 'point' ? points?.[0] : undefined;
       if (!p) return base;
-      return { ...base, lat: p.lat, lon: p.lon };
+      return {
+        ...base,
+        lat: p.lat, lon: p.lon,
+        latMin: p.lat - 0.02, latMax: p.lat + 0.02,
+        lonMin: p.lon - 0.02, lonMax: p.lon + 0.02,
+      };
     }
     case 'two-points':
     case 'transect':
@@ -145,10 +150,15 @@ function buildAreaFromSelection(
     case 'path': {
       const p1 = points?.[0];
       if (!p1) return base;
-      const p2 = points?.[1] ?? { lat: p1.lat + 5, lon: p1.lon + 5 };
+      const p2 = points?.[1] ?? { lat: p1.lat + 0.04, lon: p1.lon + 0.04 };
+      const latMin = Math.min(p1.lat, p2.lat) - 0.02;
+      const latMax = Math.max(p1.lat, p2.lat) + 0.02;
+      const lonMin = Math.min(p1.lon, p2.lon) - 0.02;
+      const lonMax = Math.max(p1.lon, p2.lon) + 0.02;
       return {
         ...base, lat: (p1.lat + p2.lat) / 2, lon: (p1.lon + p2.lon) / 2,
         lat1: p1.lat, lon1: p1.lon, lat2: p2.lat, lon2: p2.lon,
+        latMin, latMax, lonMin, lonMax,
       };
     }
     case 'bbox':
@@ -286,7 +296,10 @@ function formatResult(val: unknown, unit?: string): string {
  *  the standard companion to a raster map (histogram-legend convention):
  *  shows how the field's values are distributed across the study area. */
 function buildGridHistogram(grid: ToolGrid, bins = 20): ToolSeries {
-  const finite = grid.values.filter((v): v is number => Number.isFinite(v));
+  if (!grid || !Array.isArray(grid.values)) {
+    return { label: 'Value Distribution', points: [] };
+  }
+  const finite = grid.values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const lo = grid.valueMin, hi = grid.valueMax;
   const span = hi - lo;
   if (finite.length === 0 || !Number.isFinite(lo) || !Number.isFinite(hi) || span <= 0) {
@@ -303,7 +316,7 @@ function buildGridHistogram(grid: ToolGrid, bins = 20): ToolSeries {
     x: lo + ((i + 0.5) / bins) * span,
     y: c,
   }));
-  return { label: 'Value Distribution', points, color: '#8b5cf6' };
+  return { label: 'Value Distribution', points, color: '#10b981' };
 }
 
 const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Array<{ stop: number; r: number; g: number; b: number }> }> = ({ grid, color, schemeColors }) => {
@@ -316,8 +329,8 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Arra
       ) : (
         <div style={{ fontSize: 10, color: '#f59e0b', padding: 4 }}>No finite values to chart.</div>
       )}
-      <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 4, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.15)' }}>
-        <div style={{ fontSize: 8, fontWeight: 600, color: '#c4b5fd', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Field Statistics</div>
+      <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 4, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)' }}>
+        <div style={{ fontSize: 8, fontWeight: 600, color: '#34d399', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Field Statistics</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '3px 12px', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}>
           <span style={{ color: '#94a3b8' }}>Mean <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueMean)}</span></span>
           <span style={{ color: '#94a3b8' }}>Std Dev <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueStd)}</span></span>
@@ -401,6 +414,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
   const [showMethodology, setShowMethodology] = useState(false);
   const [showOutputInterpretation, setShowOutputInterpretation] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [pdfStatus, setPdfStatus] = useState<'idle' | 'generating' | 'saved' | 'error'>('idle');
+  const [pdfMessage, setPdfMessage] = useState<string>('');
 
   const meta = tool.analysisMeta;
   const displayName = tool.toolName || tool.name;
@@ -423,6 +438,15 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
   const handleRun = useCallback(async () => {
     setRunning(true); setError(null); setResult(null);
     try {
+      // Inverted date protection: if start > end, auto-correct chronologically
+      let effStart = start;
+      let effEnd = end;
+      if (effStart && effEnd && effStart > effEnd) {
+        [effStart, effEnd] = [effEnd, effStart];
+        setStart(effStart);
+        setEnd(effEnd);
+      }
+
       const payload: Record<string, number> = {};
       if (tool.inputs) for (const inp of tool.inputs) {
         const val = paramValues[inp.symbol]?.trim();
@@ -440,7 +464,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
           inputs: payload,
           context: {
             studyArea: { mode: area.mode, point: [area.lat, area.lon], bbox: [[area.latMin, area.lonMin], [area.latMax, area.lonMax]], twoPoints: [[area.lat1, area.lon1], [area.lat2, area.lon2]], polygon: area.mode === 'bbox' ? polygon : undefined },
-            time: { granularity: meta?.timeGranularity ?? null, start, end },
+            time: { granularity: meta?.timeGranularity ?? null, start: effStart, end: effEnd },
             filters: filterValues,
             autoDataSources: meta?.autoDataSources ?? [],
           },
@@ -469,7 +493,11 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
         const label = isFieldViz ? displayName : `${displayName}: ${formatResult(val, data.unit)}`;
         const useLat = area.mode === 'point' ? area.lat : (bbox ? (bbox.latMin + bbox.latMax) / 2 : area.lat);
         const useLon = area.mode === 'point' ? area.lon : (bbox ? (bbox.lonMin + bbox.lonMax) / 2 : area.lon);
-        onToolResult(tool.id, label, useLat, useLon, Number.isFinite(val) ? val : undefined, grid, data.unit, data.visualizationType);
+        try {
+          onToolResult(tool.id, label, useLat, useLon, Number.isFinite(val) ? val : undefined, grid, data.unit, data.visualizationType);
+        } catch (onToolErr) {
+          console.warn('[ToolDialog] Host onToolResult notice:', onToolErr);
+        }
       }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRunning(false); }
@@ -570,8 +598,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
             <>
           {area.mode === 'point' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-              <NumberField label="Latitude" value={area.lat} unit="°" onChange={(v) => setArea(a => ({ ...a, lat: v }))} />
-              <NumberField label="Longitude" value={area.lon} unit="°" onChange={(v) => setArea(a => ({ ...a, lon: v }))} />
+              <NumberField label="Latitude" value={area.lat} unit="°" onChange={(v) => setArea(a => ({ ...a, lat: v, latMin: v - 0.02, latMax: v + 0.02 }))} />
+              <NumberField label="Longitude" value={area.lon} unit="°" onChange={(v) => setArea(a => ({ ...a, lon: v, lonMin: v - 0.02, lonMax: v + 0.02 }))} />
             </div>
           )}
           {area.mode === 'bbox' && (
@@ -747,6 +775,21 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
           {running ? 'Computing with live data...' : (!validSelection ? 'Select a Study Area First' : (hasInputs ? 'Run Analysis' : 'Compute with Auto-Fetched Data'))}
         </button>
 
+        {/* Error notification placed prominently right beneath the Run button */}
+        {error && (
+          <div style={{
+            padding: '8px 10px', borderRadius: 6, marginBottom: 8,
+            background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)',
+            fontSize: 10, color: '#fca5a5', display: 'flex', alignItems: 'flex-start', gap: 6,
+          }}>
+            <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 1, color: '#ef4444' }} />
+            <div>
+              <div style={{ fontWeight: 600, color: '#ef4444', marginBottom: 2 }}>Analysis Notice</div>
+              <div>{error}</div>
+            </div>
+          </div>
+        )}
+
         {/* Result */}
         {result && (
           <div style={{ padding: '8px 10px', borderRadius: 6, marginBottom: 8, background: resultIsFinite ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)', border: `1px solid ${resultIsFinite ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
@@ -877,7 +920,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                 (histogram-legend convention) instead of a redundant mini-map. */}
             {result.grid && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 9, color: '#c4b5fd', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontSize: 9, color: '#38bdf8', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Layers size={10} /> Spatial Field · {result.grid.nLat}×{result.grid.nLon} cells
                 </div>
                 <GridHeatmap grid={result.grid} color={color} schemeColors={schemeColors} />
@@ -924,36 +967,118 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
             )}
 
             {resultIsFinite && (
-              <button onClick={async () => {
-                await exportToolResultAsPDF({
-                  toolName: tool.toolName || tool.name || '',
-                  toolId: tool.id,
-                  resultText: `${formatResult(result.result)}`,
-                  resultUnit: result.unit || '—',
-                  secondary: result.secondary?.map(s => ({ label: s.label, value: `${Number.isFinite(s.value) ? (Math.abs(s.value) >= 100 ? s.value.toFixed(1) : s.value.toFixed(2)) + (s.unit ? ' ' + s.unit : '') : 'NaN'}` })),
-                  dataSource: result.dataSource,
-                  contextualAnalysis: result.interpretation?.contextualAnalysis,
-                  recommendations: result.interpretation?.recommendations,
-                  steps: result.steps,
-                  series: result.series,
-                  seriesVizType: result.visualizationType,
-                  grid: result.grid ? {
-                    valueMin: result.grid.valueMin, valueMax: result.grid.valueMax,
-                    valueMean: result.grid.valueMean, valueStd: result.grid.valueStd,
-                    valueMedian: result.grid.valueMedian,
-                    finiteCellCount: result.grid.finiteCellCount, nLat: result.grid.nLat, nLon: result.grid.nLon,
-                  } : undefined,
-                  colorStops: schemeColors,
-                  gridValues: result.grid ? result.grid.values.filter((v): v is number => Number.isFinite(v)) : undefined,
-                });
-              }}
-                style={{
-                  marginTop: 6, width: '100%', padding: '5px 0', borderRadius: 6, border: '1px solid rgba(139,92,246,0.3)',
-                  background: 'rgba(139,92,246,0.08)', color: '#a78bfa', fontSize: 10, fontWeight: 600, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                }}>
-                <FileDown size={10} /> Download PDF Report
-              </button>
+              <div style={{ marginTop: 6, width: '100%' }}>
+                <button
+                  disabled={pdfStatus === 'generating'}
+                  onClick={async () => {
+                    setPdfStatus('generating');
+                    setPdfMessage('');
+                    try {
+                      const { filename, savedPath } = await exportToolResultAsPDF({
+                        toolName: tool.toolName || tool.name || '',
+                        toolId: tool.id,
+                        resultText: `${formatResult(result.result)}`,
+                        resultUnit: result.unit || '—',
+                        rawResult: result.result,
+                        uncertainty: result.uncertainty,
+                        classification: result.interpretation?.classification,
+                        equation: tool.equation,
+                        methodology: tool.methodology,
+                        secondary: result.secondary?.map(s => ({
+                          label: s.label,
+                          value: `${Number.isFinite(s.value) ? (Math.abs(s.value) >= 100 ? s.value.toFixed(1) : s.value.toFixed(2)) + (s.unit ? ' ' + s.unit : '') : 'NaN'}`,
+                        })),
+                        dataSource: result.dataSource,
+                        contextualAnalysis: result.interpretation?.contextualAnalysis,
+                        recommendations: result.interpretation?.recommendations,
+                        steps: result.steps,
+                        series: result.series,
+                        seriesVizType: result.visualizationType,
+                        grid: result.grid ? {
+                          latMin: result.grid.latMin, latMax: result.grid.latMax,
+                          lonMin: result.grid.lonMin, lonMax: result.grid.lonMax,
+                          valueMin: result.grid.valueMin, valueMax: result.grid.valueMax,
+                          valueMean: result.grid.valueMean, valueStd: result.grid.valueStd,
+                          valueMedian: result.grid.valueMedian,
+                          finiteCellCount: result.grid.finiteCellCount, nLat: result.grid.nLat, nLon: result.grid.nLon,
+                          values: result.grid.values,
+                        } : undefined,
+                        colorStops: schemeColors,
+                        gridValues: result.grid ? result.grid.values.filter((v): v is number => Number.isFinite(v)) : undefined,
+                        bbox: (() => {
+                          if (area.mode === 'point' && area.lat != null && area.lon != null) {
+                            return {
+                              latMin: area.lat - 0.02,
+                              latMax: area.lat + 0.02,
+                              lonMin: area.lon - 0.02,
+                              lonMax: area.lon + 0.02,
+                            };
+                          }
+                          if (['two-points', 'transect', 'fault-line', 'path'].includes(area.mode) && area.lat1 != null && area.lat2 != null && area.lon1 != null && area.lon2 != null) {
+                            return {
+                              latMin: Math.min(area.lat1, area.lat2) - 0.02,
+                              latMax: Math.max(area.lat1, area.lat2) + 0.02,
+                              lonMin: Math.min(area.lon1, area.lon2) - 0.02,
+                              lonMax: Math.max(area.lon1, area.lon2) + 0.02,
+                            };
+                          }
+                          if (area.mode === 'bbox' && area.latMin != null && area.latMax != null && area.latMax > area.latMin) {
+                            return { latMin: area.latMin, latMax: area.latMax, lonMin: area.lonMin, lonMax: area.lonMax };
+                          }
+                          if (result.grid) {
+                            return { latMin: result.grid.latMin, latMax: result.grid.latMax, lonMin: result.grid.lonMin, lonMax: result.grid.lonMax };
+                          }
+                          return bbox;
+                        })(),
+                        polygon: polygon,
+                        points: (area.mode === 'point' && area.lat != null && area.lon != null)
+                          ? [{ lat: area.lat, lon: area.lon }]
+                          : (points ?? (area.lat != null && area.lon != null ? [{ lat: area.lat, lon: area.lon }] : undefined)),
+                        cesiumSnapshotUrl: null,
+                      });
+                      setPdfStatus('saved');
+                      setPdfMessage(savedPath ? `Saved to ~/Downloads & opened: ${filename}` : `Downloaded: ${filename}`);
+                      setTimeout(() => setPdfStatus('idle'), 6000);
+                    } catch (err: any) {
+                      console.error('[ToolDialog] Failed to generate PDF report:', err);
+                      setPdfStatus('error');
+                      setPdfMessage(err?.message || 'Failed to generate PDF');
+                      setTimeout(() => setPdfStatus('idle'), 6000);
+                    }
+                  }}
+                  className={`tool-pdf-download-btn ${pdfStatus === 'saved' ? 'saved' : pdfStatus === 'error' ? 'error' : ''}`}>
+                  {pdfStatus === 'generating' ? (
+                    <>
+                      <Loader2 size={11} className="animate-spin" /> Generating & Saving PDF Report...
+                    </>
+                  ) : pdfStatus === 'saved' ? (
+                    <>
+                      <Check size={11} /> Saved to ~/Downloads (Opened in Preview)
+                    </>
+                  ) : pdfStatus === 'error' ? (
+                    <>
+                      <AlertCircle size={11} /> Export Failed (Click to retry)
+                    </>
+                  ) : (
+                    <>
+                      <FileDown size={11} /> Download PDF Report
+                    </>
+                  )}
+                </button>
+                {pdfMessage && (
+                  <div style={{
+                    fontSize: 9,
+                    color: pdfStatus === 'error' ? '#f87171' : '#34d399',
+                    marginTop: 4,
+                    textAlign: 'center',
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                    padding: '2px 4px',
+                  }}>
+                    {pdfMessage}
+                  </div>
+                )}
+              </div>
             )}
 
             {onClearResult && (
@@ -966,11 +1091,6 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                 <Trash2 size={10} /> Clear Result
               </button>
             )}
-          </div>
-        )}
-        {error && (
-          <div style={{ padding: '6px 10px', borderRadius: 6, marginBottom: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', fontSize: 10, color: '#ef4444', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-            <AlertCircle size={10} style={{ flexShrink: 0, marginTop: 1 }} /> {error}
           </div>
         )}
 

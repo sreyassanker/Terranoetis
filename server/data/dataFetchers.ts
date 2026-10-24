@@ -132,9 +132,51 @@ export async function fetchCurrentWeatherMulti(
 export async function fetchHistoricalWeather(
   lat: number, lon: number, startDate: string, endDate: string,
 ): Promise<WeatherData> {
+  let sDate = startDate;
+  let eDate = endDate;
+  if (sDate && eDate && sDate > eDate) {
+    [sDate, eDate] = [eDate, sDate];
+  }
+
+  // Open-Meteo Archive API requires dates to be consolidated (> 2 to 5 days in the past).
+  // For recent dates (today, yesterday, or near past), we query the standard forecast endpoint
+  // with past_days=7 so the API returns genuine recent observations without throwing HTTP 400.
+  const endTs = Date.parse(eDate || sDate);
+  const daysDiff = Number.isFinite(endTs) ? (Date.now() - endTs) / 86400000 : 999;
+  if (daysDiff < 4) {
+    try {
+      const data = await strictFetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
+        + `&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,pressure_msl,`
+        + `wind_speed_10m,wind_direction_10m,cloud_cover,weather_code,shortwave_radiation,cape`
+        + `&past_days=7&forecast_days=1&timezone=auto`
+      );
+      const h = (data.hourly ?? {}) as Record<string, unknown>;
+      const mean = (arr: number[] | undefined) => {
+        if (!arr || arr.length === 0) return undefined;
+        return arr.reduce((a: number, b: number) => a + b, 0) / arr.length;
+      };
+      return {
+        temperature_2m: mean(h.temperature_2m as number[] | undefined),
+        relative_humidity_2m: mean(h.relative_humidity_2m as number[] | undefined),
+        apparent_temperature: mean(h.apparent_temperature as number[] | undefined),
+        precipitation: mean(h.precipitation as number[] | undefined),
+        pressure_msl: mean(h.pressure_msl as number[] | undefined),
+        wind_speed_10m: mean(h.wind_speed_10m as number[] | undefined),
+        wind_direction_10m: mean(h.wind_direction_10m as number[] | undefined),
+        cloud_cover: mean(h.cloud_cover as number[] | undefined),
+        shortwave_radiation: mean(h.shortwave_radiation as number[] | undefined),
+        cape: mean(h.cape as number[] | undefined),
+        weather_code: (h.weather_code as number[] | undefined)?.[0],
+      };
+    } catch {
+      return fetchCurrentWeather(lat, lon);
+    }
+  }
+
   const data = await strictFetch(
     `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}`
-    + `&start_date=${startDate}&end_date=${endDate}`
+    + `&start_date=${sDate}&end_date=${eDate}`
     + `&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,pressure_msl,`
     + `wind_speed_10m,wind_direction_10m,cloud_cover,weather_code,soil_temperature_0cm,soil_moisture_0_to_7cm,`
     + `soil_moisture_7_to_28cm,soil_temperature_7_to_28cm,shortwave_radiation,cape`
@@ -440,8 +482,11 @@ export async function fetchEarthquakes(
   lat: number, lon: number,
   startDate?: string, endDate?: string, radiusKm: number = 500,
 ): Promise<EarthquakeData> {
-  const start = startDate || new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-  const end = endDate || new Date().toISOString().slice(0, 10);
+  let start = startDate || new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  let end = endDate || new Date().toISOString().slice(0, 10);
+  if (start > end) {
+    [start, end] = [end, start];
+  }
   const latRange = radiusKm / 111;
   const lonRange = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
 

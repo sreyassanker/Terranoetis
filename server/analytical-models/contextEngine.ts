@@ -3870,6 +3870,18 @@ async function buildSpatialGrid(
         const res = EQUATION_ENGINE[id](cellInputs);
         let v = res?.result;
         if (typeof v !== 'number' || !Number.isFinite(v)) { v = NaN; hasNaN = true; }
+        // Physical bounds screening:
+        // Satellite thermal LST values must be physically plausible terrestrial temperatures.
+        // Screen mathematical singularities (e.g. from near-zero split-window denominators)
+        if (SAFE_THERMAL_TOOLS.has(id) && Number.isFinite(v)) {
+          const isKelvin = v > 150;
+          const minAllowed = isKelvin ? 200 : -60;
+          const maxAllowed = isKelvin ? 350 : 75;
+          if (v < minAllowed || v > maxAllowed) {
+            v = NaN;
+            hasNaN = true;
+          }
+        }
         values[r * nLon + c] = v;
         if (Number.isFinite(v)) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
       } catch {
@@ -3912,12 +3924,11 @@ async function buildSpatialGrid(
           }
         }
       }
-      if (sceneOutlierMasked > 0) {
-        vmin = Infinity; vmax = -Infinity;
-        for (const v of values) if (Number.isFinite(v)) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
-      }
     }
   }
+  // Synchronize vmin and vmax strictly from the final finite cells in values
+  vmin = Infinity; vmax = -Infinity;
+  for (const v of values) if (Number.isFinite(v)) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
   // Zonal statistics over finite cells (standard spatial-field summary for
   // raster/heatmap output — min/max/mean/std/median of the field).
   const finite = values.filter((v): v is number => Number.isFinite(v));
@@ -3979,21 +3990,28 @@ async function buildSatelliteComposite(
   start?: string, end?: string,
 ): Promise<{ result: number; scenes: Array<{ date: string; value: number }> } | null> {
   if (!SATELLITE_INDEX_IDS.has(id)) return null;
-  if (!start || !end || start === end) return null;
-  const t0 = Date.parse(start), t1 = Date.parse(end);
-  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
+  if (!start || !end) return null;
+  let t0 = Date.parse(start), t1 = Date.parse(end);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+  if (t1 < t0) {
+    [t0, t1] = [t1, t0];
+  }
 
-  const N = 5;
+  const N = t0 === t1 ? 1 : 5;
   const dates: string[] = [];
   for (let i = 0; i < N; i++) {
-    const t = t0 + ((t1 - t0) * i) / (N - 1);
+    const t = N === 1 ? t0 : t0 + ((t1 - t0) * i) / (N - 1);
     dates.push(new Date(t).toISOString().slice(0, 10));
   }
+  const uniqueDates = Array.from(new Set(dates));
+
+  // Query in parallel instead of sequentially to eliminate the multi-minute hang
+  const scenePromises = uniqueDates.map(d => safeAny(fetchLandsatThermal(lat, lon, d), null, 25000));
+  const rawScenes = await Promise.all(scenePromises);
 
   const scenes: Array<{ date: string; value: number }> = [];
   const seen = new Set<string>();
-  for (const d of dates) {
-    const scene = await safeAny(fetchLandsatThermal(lat, lon, d), null, 40000);
+  for (const scene of rawScenes) {
     if (!scene || !scene.sr || !scene.acquired) continue;
     const sr = scene.sr;
     if (sr.nir == null && sr.red == null && sr.swir1 == null) continue;

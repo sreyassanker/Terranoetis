@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -370,8 +370,8 @@ app.use(cors({
   credentials: true,
   maxAge: 600,
 }));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: false }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: false }));
 app.disable('x-powered-by');
 
 // ── Observability middleware (before auth) ─────────────────────
@@ -414,6 +414,224 @@ app.post('/api/auth/register', loginRateLimit, registerUser);
 app.post('/api/auth/dev-login', devAutoLogin);
 
 app.post('/api/auth/refresh', refreshToken);
+
+/**
+ * Direct file saving to the user's Downloads directory.
+ * Essential for desktop environments (Tauri WKWebView) where programmatic <a download> is ignored.
+ */
+app.post('/api/save-download', express.json({ limit: '50mb' }), (req: express.Request, res: express.Response) => {
+  try {
+    const { filename, dataBase64, open } = req.body || {};
+    if (!filename || !dataBase64) {
+      return res.status(400).json({ error: 'filename and dataBase64 required' });
+    }
+    const safeName = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const downloadsDir = path.join(os.homedir(), 'Downloads');
+    if (!fs.existsSync(downloadsDir)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
+    const targetPath = path.join(downloadsDir, safeName);
+    const buffer = Buffer.from(dataBase64, 'base64');
+    fs.writeFileSync(targetPath, buffer);
+    logger.info({ path: targetPath, size: buffer.length }, 'Report saved directly to Downloads');
+
+    if (open !== false) {
+      try {
+        if (process.platform === 'darwin') {
+          exec(`open "${targetPath}"`);
+        } else if (process.platform === 'win32') {
+          exec(`start "" "${targetPath}"`);
+        } else if (process.platform === 'linux') {
+          exec(`xdg-open "${targetPath}"`);
+        }
+      } catch (e) {
+        logger.warn({ err: e }, 'Could not open saved report automatically');
+      }
+    }
+
+    return res.json({ ok: true, path: targetPath, filename: safeName, size: buffer.length });
+  } catch (err) {
+    logger.error({ err }, 'Failed to save download');
+    return res.status(500).json({ error: 'Failed to save download', detail: String(err) });
+  }
+});
+
+/**
+ * High-resolution satellite imagery export proxy.
+ * Proxies ArcGIS World Imagery export requests server-side to bypass WKWebView / browser
+ * CORS restrictions, handle long timeouts reliably, and cache tiles for instant PDF reporting.
+ */
+app.get('/api/satellite-map-export', async (req: express.Request, res: express.Response) => {
+  try {
+    const { bbox, width = '2048', height = '1280' } = req.query;
+    if (!bbox) return res.status(400).json({ error: 'bbox parameter required' });
+    const arcgisUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${encodeURIComponent(String(bbox))}&bboxSR=4326&imageSR=4326&size=${width},${height}&format=png&f=image`;
+    const upstream = await fetch(arcgisUrl, { signal: AbortSignal.timeout(15000) });
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `ArcGIS upstream error: ${upstream.status}` });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  } catch (err: any) {
+    logger.warn({ err }, 'Failed to proxy ArcGIS satellite imagery');
+    return res.status(502).json({ error: 'Failed to fetch satellite imagery', detail: String(err) });
+  }
+});
+
+/**
+ * Universal Cartographic Place Names in Bounding Box.
+ * Dynamically queries OpenStreetMap / Nominatim for authentic local settlements,
+ * suburbs, neighbourhoods, landmarks, and stations for any study area worldwide.
+ * Caches results in memory for rapid PDF reporting without hardcoded coordinates.
+ */
+const placeBboxCache = new Map<string, { timestamp: number; places: Array<{ name: string; lat: number; lon: number; type: 'major' | 'minor' | 'station' | 'airport' }> }>();
+
+app.get('/api/places-in-bbox', async (req: express.Request, res: express.Response) => {
+  try {
+    const latMin = parseFloat(String(req.query.latMin));
+    const latMax = parseFloat(String(req.query.latMax));
+    const lonMin = parseFloat(String(req.query.lonMin));
+    const lonMax = parseFloat(String(req.query.lonMax));
+
+    if (!Number.isFinite(latMin) || !Number.isFinite(latMax) || !Number.isFinite(lonMin) || !Number.isFinite(lonMax)) {
+      return res.status(400).json({ error: 'Valid latMin, latMax, lonMin, lonMax query parameters required' });
+    }
+
+    const cacheKey = `${latMin.toFixed(4)},${latMax.toFixed(4)},${lonMin.toFixed(4)},${lonMax.toFixed(4)}`;
+    const cached = placeBboxCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 3600000) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.json({ places: cached.places });
+    }
+
+    const cLat = (latMin + latMax) / 2;
+    const cLon = (lonMin + lonMax) / 2;
+    const dLat = latMax - latMin;
+    const dLon = lonMax - lonMin;
+
+    const samplePoints = [
+      { lat: cLat, lon: cLon },
+      { lat: cLat + dLat * 0.25, lon: cLon + dLon * 0.25 },
+      { lat: cLat - dLat * 0.25, lon: cLon - dLon * 0.25 },
+      { lat: cLat + dLat * 0.25, lon: cLon - dLon * 0.25 },
+      { lat: cLat - dLat * 0.25, lon: cLon + dLon * 0.25 },
+      { lat: cLat + dLat * 0.35, lon: cLon },
+      { lat: cLat - dLat * 0.35, lon: cLon },
+      { lat: cLat, lon: cLon + dLon * 0.35 },
+      { lat: cLat, lon: cLon - dLon * 0.35 },
+    ];
+
+    const places = new Map<string, { name: string; lat: number; lon: number; type: 'major' | 'minor' | 'station' | 'airport' }>();
+
+    // Parallel reverse-geocode probe
+    const reversePromises = samplePoints.map(async (pt) => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${pt.lat}&lon=${pt.lon}&format=json&zoom=15&addressdetails=1&accept-language=en`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'TerranoetisGIS/3.0 (research@terranoetis.org)' },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!resp.ok) return;
+        const data = await resp.json() as any;
+        const addr = data.address || {};
+        const rawName = addr.suburb || addr.quarter || addr.neighbourhood || addr.village || addr.town || addr.city_district || addr.city || data.name;
+        if (!rawName) return;
+        const name = String(rawName).trim().toUpperCase();
+        const lat = parseFloat(data.lat);
+        const lon = parseFloat(data.lon);
+        if (lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax) {
+          if (!places.has(name)) {
+            let type: 'major' | 'minor' | 'station' | 'airport' = 'major';
+            if (addr.village || addr.neighbourhood || addr.quarter) type = 'minor';
+            if (data.type === 'station' || addr.railway) type = 'station';
+            if (data.type === 'aerodrome' || addr.aeroway) type = 'airport';
+            places.set(name, { name, lat, lon, type });
+          }
+        }
+      } catch {}
+    });
+
+    // Viewbox search probe for major localities
+    const searchPromise = (async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=suburb&format=json&viewbox=${lonMin},${latMax},${lonMax},${latMin}&bounded=1&limit=8&accept-language=en`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'TerranoetisGIS/3.0 (research@terranoetis.org)' },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!resp.ok) return;
+        const results = await resp.json() as any[];
+        for (const r of results) {
+          const rawName = r.name || (r.display_name && r.display_name.split(',')[0]);
+          if (!rawName) continue;
+          const name = String(rawName).trim().toUpperCase();
+          const lat = parseFloat(r.lat);
+          const lon = parseFloat(r.lon);
+          if (lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax && !places.has(name)) {
+            places.set(name, { name, lat, lon, type: 'major' });
+          }
+        }
+      } catch {}
+    })();
+
+    await Promise.allSettled([...reversePromises, searchPromise]);
+
+    const resultList = Array.from(places.values());
+    placeBboxCache.set(cacheKey, { timestamp: Date.now(), places: resultList });
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.json({ places: resultList });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to retrieve places in bbox', detail: String(err) });
+  }
+});
+
+/**
+ * High-resolution place names & boundaries reference layer export proxy.
+ * Overlays cities, towns, administrative borders, and geographic labels onto the satellite plate.
+ */
+app.get('/api/satellite-places-export', async (req: express.Request, res: express.Response) => {
+  try {
+    const { bbox, width = '2048', height = '1280' } = req.query;
+    if (!bbox) return res.status(400).json({ error: 'bbox parameter required' });
+    const arcgisUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/export?bbox=${encodeURIComponent(String(bbox))}&bboxSR=4326&imageSR=4326&size=${width},${height}&format=png32&transparent=true&f=image`;
+    const upstream = await fetch(arcgisUrl, { signal: AbortSignal.timeout(15000) });
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `ArcGIS places upstream error: ${upstream.status}` });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  } catch (err: any) {
+    logger.warn({ err }, 'Failed to proxy ArcGIS places reference layer');
+    return res.status(502).json({ error: 'Failed to fetch places layer', detail: String(err) });
+  }
+});
+
+/**
+ * High-resolution street & transportation reference layer export proxy.
+ * Overlays roads, highways, and transport names onto the satellite plate.
+ */
+app.get('/api/satellite-transport-export', async (req: express.Request, res: express.Response) => {
+  try {
+    const { bbox, width = '2048', height = '1280' } = req.query;
+    if (!bbox) return res.status(400).json({ error: 'bbox parameter required' });
+    const arcgisUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/export?bbox=${encodeURIComponent(String(bbox))}&bboxSR=4326&imageSR=4326&size=${width},${height}&format=png32&transparent=true&f=image`;
+    const upstream = await fetch(arcgisUrl, { signal: AbortSignal.timeout(15000) });
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `ArcGIS transportation upstream error: ${upstream.status}` });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  } catch (err: any) {
+    logger.warn({ err }, 'Failed to proxy ArcGIS transportation layer');
+    return res.status(502).json({ error: 'Failed to fetch transportation layer', detail: String(err) });
+  }
+});
 
 // Internal analytical-model execution for the agent tool registry. The
 // registry's tools call this server's own endpoints (via 127.0.0.1) with no
@@ -592,6 +810,16 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   }
   // Power state management (allows loopback / desktop to throttle background pollers)
   if (req.path.startsWith('/power/state') || req.path.startsWith('/api/power/state')) {
+    return next();
+  }
+  // File download saver & satellite map export proxy (allows saving generated reports and proxying map imagery & place labels)
+  if (
+    req.path === '/api/save-download' || req.path === '/save-download' ||
+    req.path === '/api/satellite-map-export' || req.path === '/satellite-map-export' ||
+    req.path === '/api/satellite-places-export' || req.path === '/satellite-places-export' ||
+    req.path === '/api/satellite-transport-export' || req.path === '/satellite-transport-export' ||
+    req.path === '/api/places-in-bbox' || req.path === '/places-in-bbox'
+  ) {
     return next();
   }
   authGuard(req, res, next);

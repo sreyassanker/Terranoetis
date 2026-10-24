@@ -24,18 +24,35 @@ export const CHART_COLORS = ['#0072B2', '#E69F00', '#009E73', '#CC79A7', '#D55E0
  * zeros are preserved.
  */
 export function mergeSeries(series: ToolSeries[]): { data: Record<string, number>[]; keys: string[] } {
+  if (!series || !Array.isArray(series) || series.length === 0) {
+    return { data: [], keys: [] };
+  }
+  const validSeries = series.filter(s => s && Array.isArray(s.points));
+  if (validSeries.length === 0) {
+    return { data: [], keys: [] };
+  }
   const xSet = new Set<number>();
-  for (const s of series) for (const p of s.points) xSet.add(p.x);
+  for (const s of validSeries) {
+    for (const p of s.points) {
+      if (p && typeof p.x === 'number' && Number.isFinite(p.x)) {
+        xSet.add(p.x);
+      }
+    }
+  }
   const xSorted = [...xSet].sort((a, b) => a - b);
-  const lookups = series.map(s => {
+  const lookups = validSeries.map(s => {
     const m = new Map<number, number>();
-    for (const p of s.points) m.set(p.x, p.y);
+    for (const p of s.points) {
+      if (p && typeof p.x === 'number' && typeof p.y === 'number' && Number.isFinite(p.y)) {
+        m.set(p.x, p.y);
+      }
+    }
     return m;
   });
-  const keys = series.map((_, i) => `y${i}`);
+  const keys = validSeries.map((_, i) => `y${i}`);
   const data = xSorted.map(x => {
-    const row: Record<string, number> = { x: Number.isFinite(x) ? x : 0 };
-    for (let i = 0; i < series.length; i++) {
+    const row: Record<string, number> = { x };
+    for (let i = 0; i < validSeries.length; i++) {
       const y = lookups[i].get(x);
       row[keys[i]] = y != null && Number.isFinite(y) ? y : 0;
     }

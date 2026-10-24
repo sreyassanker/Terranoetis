@@ -227,5 +227,19 @@ export function exportConversationAsPDF(messages: ChatMessage[], meta: ReportMet
   doc.text(`— End of report — ${formatIST(new Date(), { dateStyle: 'medium', timeStyle: 'short' })} IST`, MARGIN, y);
 
   footer();
-  doc.save(`${(meta.title || 'earth-intelligence-report').replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  const filename = `${(meta.title || 'earth-intelligence-report').replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  try {
+    const dataUri = doc.output('datauristring');
+    const dataBase64 = dataUri ? dataUri.split(',')[1] : null;
+    if (dataBase64) {
+      void fetch('/api/save-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, dataBase64, open: true }),
+      }).catch(() => {});
+    }
+  } catch { /* proceed */ }
+  try {
+    doc.save(filename);
+  } catch { /* headless */ }
 }

@@ -276,18 +276,63 @@ export function removeStudyAreaFromGlobe(
   viewer: Cesium.Viewer,
   item: StudyAreaItem,
 ): void {
+  if (!viewer || viewer.isDestroyed()) return;
+
   if (item.dataSource) {
-    viewer.dataSources.remove(item.dataSource, true);
+    try {
+      viewer.dataSources.remove(item.dataSource, true);
+    } catch (e) {
+      console.warn('[removeStudyAreaFromGlobe] dataSource remove error:', e);
+    }
     item.dataSource = undefined;
   }
   if (item.entity) {
-    viewer.entities.remove(item.entity);
+    try {
+      viewer.entities.remove(item.entity);
+      if ((item.entity as any).id) {
+        viewer.entities.removeById((item.entity as any).id);
+      }
+    } catch (e) {
+      console.warn('[removeStudyAreaFromGlobe] entity remove error:', e);
+    }
     item.entity = undefined;
   }
+  if (item.id) {
+    try {
+      viewer.entities.removeById(item.id);
+      viewer.entities.removeById(`study_area_${item.id}`);
+      viewer.entities.removeById(`study_area_point_${item.id}`);
+    } catch (e) {
+      console.warn('[removeStudyAreaFromGlobe] removeById error:', e);
+    }
+  }
+
+  // Also clean up any entity tagged with this studyAreaId
+  try {
+    const toRemove: Cesium.Entity[] = [];
+    for (let i = 0; i < viewer.entities.values.length; i++) {
+      const ent = viewer.entities.values[i];
+      if (ent && ((ent as any).studyAreaId === item.id || ent.id === item.id || ent.id === `study_area_point_${item.id}`)) {
+        toRemove.push(ent);
+      }
+    }
+    for (const ent of toRemove) {
+      viewer.entities.remove(ent);
+    }
+  } catch (e) {
+    console.warn('[removeStudyAreaFromGlobe] tagged entity cleanup error:', e);
+  }
+
   if (item.outlinePrimitive) {
-    viewer.scene.groundPrimitives.remove(item.outlinePrimitive);
+    try {
+      viewer.scene.groundPrimitives.remove(item.outlinePrimitive);
+    } catch (e) {
+      console.warn('[removeStudyAreaFromGlobe] groundPrimitive remove error:', e);
+    }
     item.outlinePrimitive = undefined;
   }
+
+  throttledRender(viewer);
 }
 
 /* ── Build one batched GroundPolylinePrimitive for every polygon ring ──
@@ -363,6 +408,30 @@ function buildOutlinePrimitive(
           Cesium.Cartesian3.fromRadians(west, north),
         ]);
       }
+    } else if (item.entity.ellipse) {
+      /* Ellipse / Circle */
+      const center = item.entity.position?.getValue(Cesium.JulianDate.now());
+      const radiusM = (item.entity.ellipse.semiMajorAxis?.getValue(Cesium.JulianDate.now()) ||
+                       item.entity.ellipse.semiMinorAxis?.getValue(Cesium.JulianDate.now())) as number | undefined;
+      if (center && radiusM && radiusM > 0) {
+        const carto = Cesium.Cartographic.fromCartesian(center);
+        const cLon = Cesium.Math.toDegrees(carto.longitude);
+        const cLat = Cesium.Math.toDegrees(carto.latitude);
+        const dLon = radiusM / (111320 * Math.max(Math.cos(carto.latitude), 0.2));
+        const dLat = radiusM / 111320;
+        const ring: Cesium.Cartesian3[] = [];
+        const SAMPLES = 64;
+        for (let i = 0; i <= SAMPLES; i++) {
+          const angle = (i / SAMPLES) * Math.PI * 2;
+          ring.push(Cesium.Cartesian3.fromDegrees(
+            cLon + Math.cos(angle) * dLon,
+            cLat + Math.sin(angle) * dLat,
+          ));
+        }
+        addRing(ring);
+      } else if (item.positions && item.positions.length >= 3) {
+        addRing(item.positions);
+      }
     } else if (item.positions && item.positions.length >= 3) {
       addRing(item.positions);
     }
@@ -408,6 +477,11 @@ export function updateStudyAreaStyle(
     if (rect) rect.material = transparent;
     const poly = item.entity.polygon;
     if (poly) poly.material = transparent;
+    const ell = item.entity.ellipse;
+    if (ell) {
+      ell.material = transparent;
+      (ell as any).outline = false;
+    }
   }
 
   /* Build batched GroundPolylinePrimitive for all rings */
@@ -425,6 +499,7 @@ export function setStudyAreaVisibility(
   item: StudyAreaItem,
   visible: boolean,
 ): void {
+  if (!viewer || viewer.isDestroyed()) return;
   if (item.dataSource) {
     item.dataSource.show = visible;
   }
@@ -433,6 +508,20 @@ export function setStudyAreaVisibility(
   }
   if (item.outlinePrimitive) {
     item.outlinePrimitive.show = visible;
+  }
+  if (item.id) {
+    try {
+      const e = viewer.entities.getById(item.id) || viewer.entities.getById(`study_area_point_${item.id}`);
+      if (e) e.show = visible;
+      for (let i = 0; i < viewer.entities.values.length; i++) {
+        const ent = viewer.entities.values[i];
+        if (ent && ((ent as any).studyAreaId === item.id || ent.id === item.id || ent.id === `study_area_point_${item.id}`)) {
+          ent.show = visible;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
   throttledRender(viewer);
 }

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import ToolDialog, { type ToolGrid, type StudyAreaDrawType } from '@/components/ToolDialog';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import {
   PARTS, TOTAL_EQUATIONS, TOTAL_DOMAINS,
   type PartIconId, type AnalysisTool, type Domain,
@@ -79,7 +80,17 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
     onToolModeChange?.(false);
   }, [onToolModeChange]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') { if (selectedTool) closeTool(); else onClose(); } }, [onClose, closeTool, selectedTool]);
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA')) {
+        target.blur();
+        return;
+      }
+      if (selectedTool) closeTool();
+      else onClose();
+    }
+  }, [onClose, closeTool, selectedTool]);
   useEffect(() => { if (open) window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [open, handleKeyDown]);
 
   // Chat handoff: auto-open the requested model. State is adjusted during
@@ -256,7 +267,9 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={closeTool} bbox={bbox} polygon={polygon} points={points} studyAreaType={studyAreaType} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
+            <ErrorBoundary label="Tool Execution" onReset={closeTool}>
+              <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={closeTool} bbox={bbox} polygon={polygon} points={points} studyAreaType={studyAreaType} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
+            </ErrorBoundary>
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
