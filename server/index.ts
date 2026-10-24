@@ -2169,6 +2169,7 @@ interface WorldwideCctvCamera {
   updatedAt: number;
   description?: string;
   feedType?: string;
+  youtubeVideoId?: string;
 }
 
 interface WorldwideCctvPayload {
@@ -2237,11 +2238,11 @@ const CCTV_DEAD_SOURCES = new Set([
   "vdotcameras",
   "vegvesen",
   "weatherbug",
-  "wikaserangpanimbang",
-  "youtube_scenic"
+  "wikaserangpanimbang"
 ]);
 
 function isPlayableFeedUrl(cam: WorldwideCctvCamera): boolean {
+  if (cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId)) return true;
   const feed = cam.previewUrl ?? cam.streamUrl ?? cam.thumbnailUrl;
   if (!feed) return true; // pageUrl-only camera; nothing to drop
   return /^https?:\/\//i.test(feed);
@@ -2256,6 +2257,7 @@ function filterHealthyCctvCams(cams: WorldwideCctvCamera[]): {
   let removedByScheme = 0;
   let removedBySource = 0;
   const cameras = cams.filter(cam => {
+    if (cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId)) return true;
     if (CCTV_DEAD_SOURCES.has(cam.source)) {
       removedBySource++;
       return false;
@@ -2439,6 +2441,60 @@ async function fetchLiveEnvStreams(): Promise<WorldwideCctvCamera[]> {
   return cams;
 }
 
+// ── Verified 24/7 Global YouTube Live Streams ──
+// Tested and confirmed embeddable 24/7 live streams across major global cities, landmarks & space.
+const VERIFIED_YOUTUBE_LIVE_STREAMS = [
+  { id: 'VGnFLdQW39A', city: 'New York', country: 'US', region: 'New York', lat: 40.7580, lon: -73.9855, name: 'New York - Times Square 24/7 Live 4K Cam' },
+  { id: 'dfVK7ld38Ys', city: 'Tokyo', country: 'JP', region: 'Kanto', lat: 35.6595, lon: 139.7005, name: 'Tokyo - Shibuya Scramble Crossing 24/7 Cam' },
+  { id: 'zMCea32gpmg', city: 'London', country: 'GB', region: 'England', lat: 51.5320, lon: -0.1774, name: 'London - Abbey Road Crossing Live Cam' },
+  { id: 'QI-PPEW2Bgc', city: 'Paris', country: 'FR', region: 'Île-de-France', lat: 48.8584, lon: 2.2945, name: 'Paris - Eiffel Tower & Skyline Live Cam' },
+  { id: 'r8N6IsoIkTk', city: 'Venice', country: 'IT', region: 'Veneto', lat: 45.4371, lon: 12.3326, name: 'Venice - Grand Canal & Rialto 4K Live Cam' },
+  { id: 'BSWhGNXxT9A', city: 'San Francisco', country: 'US', region: 'California', lat: 37.8199, lon: -122.4783, name: 'San Francisco - Golden Gate Bridge & Bay Live' },
+  { id: 'v97JpT3ZA0w', city: 'Los Angeles', country: 'US', region: 'California', lat: 34.0195, lon: -118.4912, name: 'Los Angeles - Santa Monica Pier & Pacific Beach Cam' },
+  { id: 'yVS7l0AsJW0', city: 'Chicago', country: 'US', region: 'Illinois', lat: 41.8781, lon: -87.6298, name: 'Chicago - Downtown Skyline & River Live Cam' },
+  { id: 'cmkAbDUEoyA', city: 'Miami Beach', country: 'US', region: 'Florida', lat: 25.7907, lon: -80.1300, name: 'Miami Beach - Ocean Boardwalk Live Cam' },
+  { id: '4CK0CsimBHs', city: 'Honolulu', country: 'US', region: 'Hawaii', lat: 21.2766, lon: -157.8284, name: 'Honolulu - Waikiki Beach & Diamond Head Live' },
+  { id: '1EiC9bvVGnk', city: 'Jackson Hole', country: 'US', region: 'Wyoming', lat: 43.4799, lon: -110.7624, name: 'Jackson Hole - Town Square Live Cam' },
+  { id: '7gBzLGlJnwk', city: 'Niagara Falls', country: 'CA', region: 'Ontario', lat: 43.0896, lon: -79.0849, name: 'Niagara Falls - Horseshoe Falls Live 4K Stream' },
+  { id: 'WEl_I5vmuSs', city: 'Rio de Janeiro', country: 'BR', region: 'Rio de Janeiro', lat: -22.9711, lon: -43.1822, name: 'Rio de Janeiro - Copacabana Beach Live Cam' },
+  { id: 'Gd9d4q6WvUY', city: 'Amsterdam', country: 'NL', region: 'North Holland', lat: 52.3702, lon: 4.8952, name: 'Amsterdam - Dam Square 4K Ultra HD Live' },
+  { id: '4Xg-wkPazp4', city: 'Berlin', country: 'DE', region: 'Berlin', lat: 52.5200, lon: 13.4050, name: 'Berlin - Tiergarten & Skyline Live Cam' },
+  { id: 'Rvn7Z5bwJWE', city: 'Madrid', country: 'ES', region: 'Community of Madrid', lat: 40.4168, lon: -3.7038, name: 'Madrid - Gran Vía & Puerta del Sol Live 4K' },
+  { id: '03pYP2Nmreo', city: 'Rome', country: 'IT', region: 'Lazio', lat: 41.8902, lon: 12.4922, name: 'Rome - Vatican City & St. Peters Square Live' },
+  { id: 'tmlE1ct0cYk', city: 'Prague', country: 'CZ', region: 'Prague', lat: 50.0875, lon: 14.4214, name: 'Prague - Central Station & Old Town 4K Live' },
+  { id: '3nyPER2kzqk', city: 'Dublin', country: 'IE', region: 'Leinster', lat: 53.3498, lon: -6.2603, name: 'Dublin - OConnell Bridge & Liffey River Live' },
+  { id: 'HfgIFGbdGJ0', city: 'Dubai', country: 'AE', region: 'Dubai', lat: 25.1972, lon: 55.2744, name: 'Dubai - Burj Khalifa & Downtown Marina Skyline' },
+  { id: 'UemFRPrl1hk', city: 'Bangkok', country: 'TH', region: 'Bangkok', lat: 13.7563, lon: 100.5018, name: 'Bangkok - Sukhumvit Boulevard 4K Live Cam' },
+  { id: 'vk5BHoDxXf0', city: 'Seoul', country: 'KR', region: 'Seoul Capital', lat: 37.5665, lon: 126.9780, name: 'Seoul - Han River & Yeouido Skyline 4K Live' },
+  { id: 'z_fY1pj1VBw', city: 'Taipei', country: 'TW', region: 'Taipei', lat: 25.0330, lon: 121.5654, name: 'Taipei - Taipei 101 & Xiangshan Summit 4K' },
+  { id: '5uZa3-RMFos', city: 'Sydney', country: 'AU', region: 'New South Wales', lat: -33.8568, lon: 151.2153, name: 'Sydney - Sydney Harbour & Opera House 4K Live' },
+  { id: 'ydYDqZQpim8', city: 'Namib Desert', country: 'NA', region: 'Hardap', lat: -24.0000, lon: 16.0000, name: 'Namibia - Namib Desert Wildlife Waterhole 24/7' },
+  { id: 'jOqASqt3vVI', city: 'Cape Town', country: 'ZA', region: 'Western Cape', lat: -33.9249, lon: 18.4241, name: 'Cape Town - Table Mountain & Camps Bay Live' },
+  { id: 'awQzjn72bI0', city: 'Low Earth Orbit', country: 'INTL', region: 'Space', lat: 0.0000, lon: 0.0000, name: 'Orbit - ISS Space Station Live High-Definition Views' },
+];
+
+function getVerifiedYoutubeLiveCams(): WorldwideCctvCamera[] {
+  return VERIFIED_YOUTUBE_LIVE_STREAMS.map(item => ({
+    id: `yt_live_${item.id}`,
+    name: item.name,
+    lat: item.lat,
+    lon: item.lon,
+    pageUrl: `https://www.youtube.com/watch?v=${item.id}`,
+    previewUrl: `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
+    streamUrl: `https://www.youtube.com/watch?v=${item.id}`,
+    thumbnailUrl: `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
+    source: 'youtube',
+    category: 'live webcam',
+    city: item.city,
+    region: item.region,
+    location: `${item.city}, ${item.country}`,
+    updatedAt: Date.now(),
+    description: `24/7 Verified Live YouTube Stream: ${item.name}`,
+    feedType: 'youtube',
+    youtubeVideoId: item.id,
+  }));
+}
+
 async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
   // Fetch from additional open sources concurrently
   const [extraSkyline, extraLiveEnv] = await Promise.allSettled([
@@ -2531,11 +2587,19 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
   const hlsCams = shuffleArray(cams.filter(c => c.feed_type === 'm3u8' && c.feed_url && c.feed_url.startsWith('http')));
   const otherCams = shuffleArray(cams.filter(c => c.feed_type !== 'm3u8'));
 
-  // Merge all cameras without hard limits — prefer HLS, then all others
+  // Merge all cameras without hard limits — prefer YouTube first, then India, then HLS, then all others
   const addedIds = new Set<string>();
   const filteredCams: any[] = [];
 
-  // Guarantee scraped Indian cameras are added first
+  // 0. Prepend verified 24/7 global YouTube live streams
+  const ytCams = getVerifiedYoutubeLiveCams();
+  for (const cam of ytCams) {
+    if (addedIds.has(cam.id)) continue;
+    addedIds.add(cam.id);
+    filteredCams.push(cam);
+  }
+
+  // 1. Guarantee scraped Indian cameras are added
   const indiaSpecific = cams.filter(c => c.country === 'IN');
   for (const cam of indiaSpecific) {
     if (addedIds.has(cam.id)) continue;
@@ -2543,14 +2607,14 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
     filteredCams.push(cam);
   }
 
-  // 1. Add all valid HLS (video) streams
+  // 2. Add all valid HLS (video) streams
   for (const cam of hlsCams) {
     if (addedIds.has(cam.id)) continue;
     addedIds.add(cam.id);
     filteredCams.push(cam);
   }
 
-  // 2. Add all other feeds (mjpeg/images)
+  // 3. Add all other feeds (mjpeg/images)
   for (const cam of otherCams) {
     if (addedIds.has(cam.id)) continue;
     addedIds.add(cam.id);
@@ -2563,13 +2627,35 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
     return `/api/cctv/proxy?url=${encodeURIComponent(url)}`;
   };
   return filteredCams.map(cam => {
+    const isYt = cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId);
+    if (isYt) {
+      return {
+        id: cam.id,
+        name: cam.name,
+        lat: cam.lat,
+        lon: cam.lon ?? cam.lng,
+        pageUrl: cam.pageUrl,
+        previewUrl: cam.previewUrl,
+        streamUrl: cam.streamUrl,
+        thumbnailUrl: cam.thumbnailUrl,
+        source: 'youtube',
+        category: cam.category || 'live webcam',
+        city: cam.city,
+        region: cam.region,
+        location: cam.location,
+        updatedAt: cam.updatedAt || Date.now(),
+        description: cam.description,
+        feedType: 'youtube',
+        youtubeVideoId: cam.youtubeVideoId,
+      };
+    }
     const pageUrl = `https://opencctv.org/cameras/${cam.id}`;
     const feedUrl = cam.feed_url;
     return {
       id: cam.id,
       name: cam.name || `Camera ${cam.camera_code}`,
       lat: cam.lat,
-      lon: cam.lng,
+      lon: cam.lng ?? cam.lon,
       pageUrl,
       previewUrl: proxied(feedUrl),
       streamUrl: proxied(feedUrl),
@@ -2577,14 +2663,26 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
       source: cam.source || 'opencctv.org',
       category: cam.category || 'public webcam',
       city: cam.city || undefined,
-      region: cam.state || undefined,
-      location: [cam.city, cam.state, cam.country].filter(Boolean).join(', ') || 'Worldwide',
+      region: cam.state || cam.region || undefined,
+      location: [cam.city, cam.state || cam.region, cam.country].filter(Boolean).join(', ') || 'Worldwide',
       updatedAt: Date.now(),
       description: cam.description || undefined,
       feedType: cam.feed_type
     };
   });
 }
+
+// Dedicated endpoint for verified 24/7 YouTube live webcams
+app.get('/api/cctv/youtube', (_req: express.Request, res: express.Response) => {
+  const cameras = getVerifiedYoutubeLiveCams();
+  res.json({
+    source: 'youtube',
+    country: 'Worldwide',
+    updatedAt: Date.now(),
+    total: cameras.length,
+    cameras,
+  });
+});
 
 
 

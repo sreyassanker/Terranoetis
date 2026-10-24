@@ -3487,9 +3487,9 @@ p { text-align: justify; }
   /* ── LEGENDS ── */
   .legend-panel {
     position: absolute;
-    bottom: 100px;
-    right: 16px;
-    z-index: 85;
+    bottom: 42px;
+    right: 80px;
+    z-index: 90;
     display: none;
     min-width: 180px;
   }
@@ -3503,6 +3503,66 @@ p { text-align: justify; }
     margin-bottom: 4px;
     font-size: 10px;
     color: var(--text-dim);
+  }
+
+  .cctv-legend-interactive {
+    cursor: default;
+    user-select: none;
+    transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  }
+
+  .legend-row-interactive {
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+  }
+
+  .legend-row-interactive:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+  }
+
+  .legend-row-interactive.active {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .legend-row-interactive.dimmed {
+    opacity: 0.45;
+  }
+
+  .cctv-count-badge {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-dim);
+  }
+
+  .legend-row-interactive.active .cctv-count-badge {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+  }
+
+  .cctv-filter-reset-btn {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(239, 68, 68, 0.18);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .cctv-filter-reset-btn:hover {
+    background: rgba(239, 68, 68, 0.35);
+    color: #fff;
   }
 
   .legend-color {

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark, Video } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -226,18 +226,34 @@ const CCTV_FEED_COLORS: Record<string, string> = {
   mjpeg: '#22c55e',
   image: '#f59e0b',
   iframe: '#ec4899',
+  youtube: '#ec4899',
 };
 const CCTV_UNKNOWN_COLOR = '#64748b';
 
 function cctvFeedColor(meta: Record<string, unknown>): string {
   const feedType = String(meta.feedType ?? '').toLowerCase();
+  const source = String(meta.source ?? '').toLowerCase();
+  const url = String(meta.previewUrl ?? meta.streamUrl ?? meta.pageUrl ?? '');
+  if (feedType === 'youtube' || source === 'youtube' || meta.youtubeVideoId || /youtube\.com\/(watch|embed)|youtu\.be/i.test(url)) {
+    return CCTV_FEED_COLORS.youtube;
+  }
   if (CCTV_FEED_COLORS[feedType]) return CCTV_FEED_COLORS[feedType];
-  const url = String(meta.previewUrl ?? meta.streamUrl ?? '');
   if (/\.m3u8(\?|$)/i.test(url)) return CCTV_FEED_COLORS.m3u8;
   if (/\.mjpeg|\.mjpg|multipart/i.test(url)) return CCTV_FEED_COLORS.mjpeg;
-  if (/youtube\.com\/(watch|embed)|youtu\.be|player\./i.test(url)) return CCTV_FEED_COLORS.iframe;
+  if (/player\./i.test(url)) return CCTV_FEED_COLORS.iframe;
   if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(url)) return CCTV_FEED_COLORS.image;
   return CCTV_UNKNOWN_COLOR;
+}
+
+type CctvCategory = 'video' | 'image' | 'youtube' | 'unknown';
+type CctvFilterType = 'all' | CctvCategory;
+
+function getCctvCategory(meta: Record<string, unknown>): CctvCategory {
+  const color = cctvFeedColor(meta);
+  if (color === CCTV_FEED_COLORS.m3u8 || color === CCTV_FEED_COLORS.mjpeg) return 'video';
+  if (color === CCTV_FEED_COLORS.image) return 'image';
+  if (color === CCTV_FEED_COLORS.youtube || color === CCTV_FEED_COLORS.iframe) return 'youtube';
+  return 'unknown';
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -2017,6 +2033,10 @@ export default function App() {
   const [cctvPreviewTick, setCctvPreviewTick] = useState(0);
   const [videoNonce, setVideoNonce] = useState(0);
   const [cctvPreviewFailed, setCctvPreviewFailed] = useState(false);
+  const [cctvFilter, setCctvFilter] = useState<CctvFilterType>('all');
+  const cctvFilterRef = useRef<CctvFilterType>('all');
+  cctvFilterRef.current = cctvFilter;
+  const [cctvLoadedCount, setCctvLoadedCount] = useState(0);
   useEffect(() => { setCctvPreviewFailed(false); }, [infoEntity]);
   useEffect(() => {
     if (showSuggestions && searchSuggestions.length > 0) {
@@ -4207,10 +4227,48 @@ export default function App() {
     getPrimitiveLayer(layerId)?.setShown(visible);
     const ents = entityStoreRef.current[layerId];
     if (!ents) return;
+    const isCctv = layerId === 'india_cctv';
+    const filter = cctvFilterRef.current;
+    const metaMap = cctvMetaRef.current;
     ents.forEach(ent => {
-      if (ent) ent.show = visible;
+      if (ent) {
+        if (isCctv && visible && filter !== 'all') {
+          const meta = metaMap.get(ent.id);
+          const cat = meta ? getCctvCategory(meta) : 'unknown';
+          ent.show = (cat === filter);
+        } else {
+          ent.show = visible;
+        }
+      }
     });
   }
+
+  const applyCctvFilter = useCallback((filter: CctvFilterType) => {
+    cctvFilterRef.current = filter;
+    const ents = entityStoreRef.current['india_cctv'] || [];
+    const metaMap = cctvMetaRef.current;
+    ents.forEach(ent => {
+      if (!ent) return;
+      if (filter === 'all') {
+        ent.show = true;
+      } else {
+        const meta = metaMap.get(ent.id);
+        const cat = meta ? getCctvCategory(meta) : 'unknown';
+        ent.show = (cat === filter);
+      }
+    });
+    throttledRender(viewerRef.current);
+  }, []);
+
+  const cctvCounts = useMemo(() => {
+    const counts = { all: 0, video: 0, image: 0, youtube: 0, unknown: 0 };
+    for (const meta of cctvMetaRef.current.values()) {
+      counts.all++;
+      const cat = getCctvCategory(meta);
+      counts[cat]++;
+    }
+    return counts;
+  }, [cctvLoadedCount, cctvPreviewTick, isLayerEnabled('india_cctv')]);
 
   function clearEntityProperties(ent: Cesium.Entity): void {
     if (!ent) return;
@@ -7807,13 +7865,31 @@ export default function App() {
     ctx.fillRect(0, 0, 36, 36);
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.fillStyle = color;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    if (color === CCTV_FEED_COLORS.youtube || color === '#ec4899') {
+      ctx.fillStyle = '#ec4899';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // White play arrow inside YouTube badge
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(-2, -3.5);
+      ctx.lineTo(-2, 3.5);
+      ctx.lineTo(3.5, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillStyle = color;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
     ctx.restore();
     cachedCctvCanvases.set(color, canvas);
     if (color === '#67e8f9') cachedCctvCanvas = canvas;
@@ -7833,14 +7909,17 @@ export default function App() {
       const allCameras = (data.cameras ?? [])
         .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon));
 
-      // The worldwide feed has ~18k cameras; rendering them all as ground-clamped
-      // billboards freezes the globe. Show an evenly-spread global sample and be
-      // honest about it in the notification.
+      // Always guarantee 100% of YouTube 24/7 live webcams are preserved and rendered.
+      // Sample other high-volume snapshot cameras evenly so the globe stays smooth.
       const MAX_CCTV = 2500;
       const totalAvailable = allCameras.length;
-      const cameras = totalAvailable > MAX_CCTV
-        ? allCameras.filter((_, i) => i % Math.ceil(totalAvailable / MAX_CCTV) === 0).slice(0, MAX_CCTV)
-        : allCameras;
+      const ytCameras = allCameras.filter(c => c.feedType === 'youtube' || c.source === 'youtube' || Boolean(c.youtubeVideoId));
+      const otherCameras = allCameras.filter(c => c.feedType !== 'youtube' && c.source !== 'youtube' && !c.youtubeVideoId);
+      const remainingQuota = Math.max(0, MAX_CCTV - ytCameras.length);
+      const sampledOthers = otherCameras.length > remainingQuota
+        ? otherCameras.filter((_, i) => i % Math.ceil(otherCameras.length / remainingQuota) === 0).slice(0, remainingQuota)
+        : otherCameras;
+      const cameras = [...ytCameras, ...sampledOthers];
 
       const total = cameras.length;
       const ents: Cesium.Entity[] = [];
@@ -7853,6 +7932,7 @@ export default function App() {
         for (; idx < end; idx++) {
           const camera = cameras[idx];
           const entityId = `cctv_${camera.id || idx}`;
+          const isYt = camera.feedType === 'youtube' || camera.source === 'youtube' || Boolean(camera.youtubeVideoId);
           const meta = {
             title: camera.name,
             lat: camera.lat,
@@ -7869,6 +7949,7 @@ export default function App() {
             updatedAt: camera.updatedAt ?? Date.now(),
             description: sanitizeHtml(String(camera.description ?? '')),
             feedType: camera.feedType,
+            youtubeVideoId: camera.youtubeVideoId,
           };
           metaMap.set(entityId, meta);
           ents.push(viewer.entities.add({
@@ -7877,8 +7958,8 @@ export default function App() {
             name: camera.name as string,
             billboard: {
               image: createCctvIcon(cctvFeedColor(meta)),
-              width: 28,
-              height: 28,
+              width: isYt ? 32 : 28,
+              height: isYt ? 32 : 28,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
               disableDepthTestDistance: 10000,
@@ -7891,6 +7972,10 @@ export default function App() {
           requestAnimationFrame(addChunk);
         } else {
           entityStoreRef.current['india_cctv'] = ents;
+          setCctvLoadedCount(ents.length);
+          if (cctvFilterRef.current !== 'all') {
+            applyCctvFilter(cctvFilterRef.current);
+          }
           enforceEntityCap();
           throttledRender(viewer);
           showNotification(
@@ -7913,6 +7998,56 @@ export default function App() {
       showNotification('Worldwide camera feed unavailable', 'warning');
     }
   }
+
+  const currentYtCamIndexRef = useRef(0);
+  const cycleYoutubeCamera = useCallback((forward = true) => {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (!isLayerEnabled('india_cctv')) {
+      toggleLayer('india_cctv');
+    }
+    const doCycle = () => {
+      const ents = entityStoreRef.current['india_cctv'] || [];
+      const ytEnts = ents.filter(e => {
+        const meta = cctvMetaRef.current.get(e.id);
+        return meta && (meta.feedType === 'youtube' || meta.source === 'youtube' || Boolean(meta.youtubeVideoId));
+      });
+      if (!ytEnts.length) {
+        showNotification('YouTube live webcams are loading...', 'info');
+        return;
+      }
+      if (forward) {
+        currentYtCamIndexRef.current = (currentYtCamIndexRef.current + 1) % ytEnts.length;
+      } else {
+        currentYtCamIndexRef.current = (currentYtCamIndexRef.current - 1 + ytEnts.length) % ytEnts.length;
+      }
+      const target = ytEnts[currentYtCamIndexRef.current];
+      const pos = target.position?.getValue(Cesium.JulianDate.now());
+      if (pos) {
+        const carto = Cesium.Cartographic.fromCartesian(pos);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+        v.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 12000),
+          duration: 1.5,
+          complete: () => {
+            showInfoPanel(target);
+          }
+        });
+        const meta = cctvMetaRef.current.get(target.id);
+        showNotification(`🔴 Live Cam [${currentYtCamIndexRef.current + 1}/${ytEnts.length}]: ${meta?.title || target.name}`, 'info');
+      }
+    };
+
+    const ents = entityStoreRef.current['india_cctv'] || [];
+    if (!ents.length) {
+      void loadIndiaCctv(v).then(() => {
+        setTimeout(doCycle, 500);
+      });
+    } else {
+      doCycle();
+    }
+  }, [isLayerEnabled, toggleLayer, showInfoPanel]);
 
   // Simple frontend geo extraction from text (city/country lookup)
   function geoFromText(text: string): { lat: number; lon: number } {
@@ -11574,7 +11709,14 @@ case 'openPanel':
               {(() => {
                 const thumbUrl = String(p.thumbnailUrl ?? p.previewUrl ?? '');
                 const streamUrl = String(p.streamUrl ?? '');
+                const pageUrl = String(p.pageUrl ?? '');
                 const feedType = String(p.feedType ?? '');
+                const ytId = String(p.youtubeVideoId || '') || extractYoutubeId(streamUrl) || extractYoutubeId(pageUrl) || extractYoutubeId(thumbUrl);
+
+                if (feedType === 'youtube' || ytId) {
+                  return <YoutubePlayer key={`yt-${ytId || streamUrl}`} videoId={ytId} src={streamUrl || pageUrl} />;
+                }
+
                 const isHls = feedType === 'm3u8' || streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
                 if (isHls && streamUrl && !cctvPreviewFailed) {
                   // Key on stream + a manual-refresh nonce only — NOT the 10s
@@ -11591,10 +11733,45 @@ case 'openPanel':
 
           {layer === 'india_cctv' && (
             <div className="sparkline-wrap">
-              <div className="sparkline-title">Public feed</div>
+              <div className="sparkline-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {p.feedType === 'youtube' || p.youtubeVideoId ? (
+                  <>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ef4444', boxShadow: '0 0 6px #ef4444' }} />
+                    <span>24/7 Global Live Feed</span>
+                  </>
+                ) : (
+                  <span>Public Feed</span>
+                )}
+              </div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>Open-source live public webcam feed.</div>
+                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>
+                  {p.feedType === 'youtube' || p.youtubeVideoId
+                    ? 'Verified worldwide 24/7 live video stream.'
+                    : 'Open-source live public webcam feed.'}
+                </div>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  {(p.feedType === 'youtube' || Boolean(p.youtubeVideoId)) && (
+                    <>
+                      <button
+                        type="button"
+                        className="cctv-link"
+                        style={{border:'none',background:'none',cursor:'pointer',padding:0,color:'#ec4899'}}
+                        onClick={() => cycleYoutubeCamera(false)}
+                        title="Jump to previous YouTube 24/7 live cam"
+                      >
+                        ◀ Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="cctv-link"
+                        style={{border:'none',background:'none',cursor:'pointer',padding:0,color:'#ec4899'}}
+                        onClick={() => cycleYoutubeCamera(true)}
+                        title="Jump to next YouTube 24/7 live cam"
+                      >
+                        Next ▶
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className="cctv-link"
@@ -11603,7 +11780,21 @@ case 'openPanel':
                   >
                     Refresh
                   </button>
-                  <a className="cctv-link" href={String(p.pageUrl ?? '')} target="_blank" rel="noreferrer">Open live</a>
+                  <a
+                    className="cctv-link"
+                    href={String(p.pageUrl ?? p.streamUrl ?? '')}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => {
+                      const url = String(p.pageUrl ?? p.streamUrl ?? '');
+                      if (url) {
+                        e.preventDefault();
+                        openInBrowser(url);
+                      }
+                    }}
+                  >
+                    {p.feedType === 'youtube' || p.youtubeVideoId ? 'Watch on YouTube ↗' : 'Open live'}
+                  </a>
                 </div>
               </div>
             </div>
@@ -12898,14 +13089,97 @@ case 'openPanel':
         </div>
       )}
 
-      {/* CCTV Feed Legend */}
+      {/* CCTV Feed Legend & Tactical Filter */}
       {isLayerEnabled('india_cctv') && (
-        <div className="legend-panel show glass-panel">
-          <div className="heatmap-legend-title">Camera Feeds</div>
-          <div className="legend-row"><span className="legend-color" style={{ background: '#22c55e' }} />Live video (HLS / MJPEG)</div>
-          <div className="legend-row"><span className="legend-color" style={{ background: '#f59e0b' }} />Snapshot image</div>
-          <div className="legend-row"><span className="legend-color" style={{ background: '#ec4899' }} />Embedded player (YouTube)</div>
-          <div className="legend-row"><span className="legend-color" style={{ background: '#64748b' }} />Unknown feed type</div>
+        <div
+          className="legend-panel show glass-panel cctv-legend-interactive"
+          style={{
+            bottom: 42,
+            right: infoEntity ? 348 : 80,
+            zIndex: 90,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
+            <span className="heatmap-legend-title" style={{ margin: 0 }}>Camera Feeds</span>
+            {cctvFilter !== 'all' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCctvFilter('all');
+                  applyCctvFilter('all');
+                  showNotification('Showing all camera feeds', 'info');
+                }}
+                className="cctv-filter-reset-btn"
+                title="Reset filter to show all cameras"
+              >
+                Reset (All)
+              </button>
+            ) : (
+              <span style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.04em' }}>
+                ALL {cctvCounts.all > 0 ? `(${cctvCounts.all})` : ''}
+              </span>
+            )}
+          </div>
+
+          <div
+            className={`legend-row legend-row-interactive ${cctvFilter === 'video' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'video' ? 'dimmed' : ''}`}
+            onClick={() => {
+              const next = cctvFilter === 'video' ? 'all' : 'video';
+              setCctvFilter(next);
+              applyCctvFilter(next);
+              showNotification(next === 'all' ? 'Showing all camera feeds' : 'Isolating Live Video (HLS/MJPEG) feeds only', 'info');
+            }}
+            title={cctvFilter === 'video' ? 'Click to show all feeds' : 'Click to isolate Live Video feeds only'}
+          >
+            <span className="legend-color" style={{ background: '#22c55e', boxShadow: cctvFilter === 'video' ? '0 0 8px #22c55e' : undefined }} />
+            <span style={{ flex: 1 }}>Live video (HLS / MJPEG)</span>
+            {cctvCounts.video > 0 && <span className="cctv-count-badge">{cctvCounts.video}</span>}
+          </div>
+
+          <div
+            className={`legend-row legend-row-interactive ${cctvFilter === 'image' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'image' ? 'dimmed' : ''}`}
+            onClick={() => {
+              const next = cctvFilter === 'image' ? 'all' : 'image';
+              setCctvFilter(next);
+              applyCctvFilter(next);
+              showNotification(next === 'all' ? 'Showing all camera feeds' : 'Isolating Snapshot image feeds only', 'info');
+            }}
+            title={cctvFilter === 'image' ? 'Click to show all feeds' : 'Click to isolate Snapshot image feeds only'}
+          >
+            <span className="legend-color" style={{ background: '#f59e0b', boxShadow: cctvFilter === 'image' ? '0 0 8px #f59e0b' : undefined }} />
+            <span style={{ flex: 1 }}>Snapshot image</span>
+            {cctvCounts.image > 0 && <span className="cctv-count-badge">{cctvCounts.image}</span>}
+          </div>
+
+          <div
+            className={`legend-row legend-row-interactive ${cctvFilter === 'youtube' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'youtube' ? 'dimmed' : ''}`}
+            onClick={() => {
+              const next = cctvFilter === 'youtube' ? 'all' : 'youtube';
+              setCctvFilter(next);
+              applyCctvFilter(next);
+              showNotification(next === 'all' ? 'Showing all camera feeds' : 'Isolating YouTube 24/7 live streams only', 'info');
+            }}
+            title={cctvFilter === 'youtube' ? 'Click to show all feeds' : 'Click to isolate YouTube live streams only'}
+          >
+            <span className="legend-color" style={{ background: '#ec4899', boxShadow: cctvFilter === 'youtube' ? '0 0 8px #ec4899' : undefined }} />
+            <span style={{ flex: 1 }}>Embedded player (YouTube)</span>
+            {cctvCounts.youtube > 0 && <span className="cctv-count-badge">{cctvCounts.youtube}</span>}
+          </div>
+
+          <div
+            className={`legend-row legend-row-interactive ${cctvFilter === 'unknown' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'unknown' ? 'dimmed' : ''}`}
+            onClick={() => {
+              const next = cctvFilter === 'unknown' ? 'all' : 'unknown';
+              setCctvFilter(next);
+              applyCctvFilter(next);
+              showNotification(next === 'all' ? 'Showing all camera feeds' : 'Isolating unknown feed types only', 'info');
+            }}
+            title={cctvFilter === 'unknown' ? 'Click to show all feeds' : 'Click to isolate unknown feed types only'}
+          >
+            <span className="legend-color" style={{ background: '#64748b', boxShadow: cctvFilter === 'unknown' ? '0 0 8px #64748b' : undefined }} />
+            <span style={{ flex: 1 }}>Unknown feed type</span>
+            {cctvCounts.unknown > 0 && <span className="cctv-count-badge">{cctvCounts.unknown}</span>}
+          </div>
         </div>
       )}
 
