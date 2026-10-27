@@ -195,7 +195,8 @@ interface IntelFeedItem {
   lat: number; lon: number; timestamp: number; timeLabel: string;
   desc?: string;
   url?: string;
-  platform?: 'internal' | 'news' | 'twitter' | 'facebook' | 'social';
+  platform?: 'internal' | 'news' | 'twitter' | 'facebook' | 'social' | 'youtube';
+  youtubeVideoId?: string;
 }
 
 interface HeatmapPoint { lon: number; lat: number; count: number; }
@@ -490,6 +491,17 @@ const CITY_DATA = [
 ];
 
 const EXTRA_GEO: Array<{ name: string; lat: number; lon: number }> = [
+  { name: 'Tibet', lat: 31.6927, lon: 88.0924 },
+  { name: 'Taiwan', lat: 23.6978, lon: 120.9605 },
+  { name: 'Uttarakhand', lat: 30.0668, lon: 79.0193 },
+  { name: 'Delhi', lat: 28.7041, lon: 77.1025 },
+  { name: 'Hawaii', lat: 19.8968, lon: -155.5828 },
+  { name: 'California', lat: 36.7783, lon: -119.4179 },
+  { name: 'Florida', lat: 27.6648, lon: -81.5158 },
+  { name: 'Alaska', lat: 64.2008, lon: -149.4937 },
+  { name: 'Texas', lat: 31.9686, lon: -99.9018 },
+  { name: 'Gaza', lat: 31.5017, lon: 34.4668 },
+  { name: 'Kashmir', lat: 33.7782, lon: 76.5762 },
   { name: 'Afghanistan', lat: 33.9391, lon: 67.7100 },
   { name: 'Algeria', lat: 28.0339, lon: 1.6596 },
   { name: 'Angola', lat: -11.2027, lon: 17.8739 },
@@ -3647,12 +3659,12 @@ export default function App() {
             id: item.id,
             title: item.title ?? '',
             source: item.source ?? '',
-            type: ytId ? 'youtube' : (item.type ?? 'news'),
+            type: item.type && item.type !== 'news' ? item.type : (ytId ? 'media' : (item.type || 'news')),
             lat: item.lat || 0,
             lon: item.lon || 0,
             timestamp: item.timestamp ?? Date.now(),
             url: item.url,
-            platform: item.platform,
+            platform: ytId ? 'youtube' : (item.platform || 'news'),
             youtubeVideoId: ytId,
           } as any);
         }
@@ -3699,12 +3711,12 @@ export default function App() {
                 id: item.id,
                 title: item.title ?? '',
                 source: item.source ?? '',
-                type: ytId ? 'youtube' : (item.type ?? 'news'),
+                type: item.type && item.type !== 'news' ? item.type : (ytId ? 'media' : (item.type || 'news')),
                 lat: item.lat || 0,
                 lon: item.lon || 0,
                 timestamp: item.timestamp ?? Date.now(),
                 url: item.url,
-                platform: item.platform,
+                platform: ytId ? 'youtube' : (item.platform || 'news'),
                 youtubeVideoId: ytId,
               } as any);
             }
@@ -12806,53 +12818,140 @@ case 'openPanel':
 
       {/* Social Panel */}
       {showIntelFeed && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('intel-feed', 110), width: 360 }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('intel-feed', 110), width: 380 }}>
           <Panel title="INTEL FEED" icon={<Radio size={16} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowIntelFeed(false)} style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
-          {['all','fused','news','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
-            <button key={f} className={`social-filter-chip ${intelFilter === f ? 'active' : ''}`}
-              onClick={() => setIntelFilter(f)}>
-              {f === 'all' ? 'All' : f === 'fused' ? '⚡ Fused' : f.charAt(0).toUpperCase() + f.slice(1)}
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'fused', label: 'Fused' },
+            { id: 'earthquake', label: 'Seismic' },
+            { id: 'fire', label: 'Wildfire' },
+            { id: 'storm', label: 'Storm' },
+            { id: 'flood', label: 'Flood' },
+            { id: 'conflict', label: 'Conflict' },
+            { id: 'media', label: '▶ Live Video' },
+            { id: 'news', label: 'News' },
+          ].map(f => (
+            <button key={f.id} className={`social-filter-chip ${intelFilter === f.id ? 'active' : ''}`}
+              onClick={() => setIntelFilter(f.id)}>
+              {f.label}
             </button>
           ))}
         </div>
         <div className="social-feed">
-          {intelFeed.filter(p => {
-            if (intelFilter === 'all') return true;
-            if (intelFilter === 'social') return ['news', 'social', 'twitter', 'facebook'].includes(p.type);
-            return p.type === intelFilter;
-          }).map(item => (
-            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 20000 })}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-                <span className="social-user">{item.title}</span>
-                <span className="social-time">{item.timeLabel}</span>
-              </div>
-              {item.desc && <div style={{fontSize:10,color:'var(--text-dim)',marginBottom:4,lineHeight:1.4}}>{item.desc}</div>}
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-                <div>
-                  <div style={{fontSize:10,color:'var(--text-muted)'}}>
-                    {item.type === 'fused' && (
-                      <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: 'rgba(239,68,68,0.25)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)', marginRight: 5, fontWeight: 700 }}>
-                        FUSED CRISIS
-                      </span>
-                    )}
-                    {item.platform === 'twitter' ? <MessageCircle size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'facebook' ? <Share2 size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'news' ? <Newspaper size={10} style={{display:'inline',marginRight:3}} /> : ''}
-                    {item.source} · {item.type}
+          {(() => {
+            const filteredIntel = intelFeed.filter(p => {
+              if (intelFilter === 'all') return true;
+              if (intelFilter === 'fused') return p.type === 'fused';
+              if (intelFilter === 'earthquake') return p.type === 'earthquake' || p.type === 'seismic' || p.type === 'disaster';
+              if (intelFilter === 'fire') return p.type === 'fire' || p.type === 'wildfire';
+              if (intelFilter === 'storm') return p.type === 'storm' || p.type === 'cyclone' || p.type === 'hurricane';
+              if (intelFilter === 'flood') return p.type === 'flood';
+              if (intelFilter === 'conflict') return p.type === 'conflict' || p.type === 'security';
+              if (intelFilter === 'media') return p.platform === 'youtube' || Boolean(p.youtubeVideoId) || p.type === 'media' || p.type === 'youtube';
+              if (intelFilter === 'news') return p.type === 'news' || p.platform === 'news';
+              return p.type === intelFilter;
+            });
+
+            if (filteredIntel.length === 0) {
+              return (
+                <div style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b', fontSize: 11 }}>
+                  <Radio size={24} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
+                  <div style={{ color: '#94a3b8', fontWeight: 500 }}>No reports matching "{intelFilter}"</div>
+                  <div style={{ fontSize: 10, marginTop: 4, color: '#475569' }}>Live hazard feeds update automatically as alerts are issued</div>
+                </div>
+              );
+            }
+
+            const getCategoryBadge = (item: IntelFeedItem) => {
+              if (item.type === 'fused') return { label: 'FUSED CRISIS', bg: 'rgba(239,68,68,0.25)', border: 'rgba(239,68,68,0.5)', color: '#f87171' };
+              if (item.type === 'earthquake' || item.type === 'seismic' || item.type === 'disaster') return { label: 'SEISMIC', bg: 'rgba(245,158,11,0.2)', border: 'rgba(245,158,11,0.4)', color: '#fbbf24' };
+              if (item.type === 'fire' || item.type === 'wildfire') return { label: 'WILDFIRE', bg: 'rgba(249,115,22,0.2)', border: 'rgba(249,115,22,0.4)', color: '#fb923c' };
+              if (item.type === 'storm' || item.type === 'cyclone' || item.type === 'hurricane') return { label: 'STORM', bg: 'rgba(6,182,212,0.2)', border: 'rgba(6,182,212,0.4)', color: '#22d3ee' };
+              if (item.type === 'flood') return { label: 'FLOOD', bg: 'rgba(59,130,246,0.2)', border: 'rgba(59,130,246,0.4)', color: '#60a5fa' };
+              if (item.type === 'conflict') return { label: 'CONFLICT', bg: 'rgba(244,63,94,0.2)', border: 'rgba(244,63,94,0.4)', color: '#fb7185' };
+              if (item.platform === 'youtube' || Boolean(item.youtubeVideoId)) return { label: 'LIVE VIDEO', bg: 'rgba(239,68,68,0.2)', border: 'rgba(239,68,68,0.4)', color: '#f87171' };
+              return { label: 'NEWS', bg: 'rgba(148,163,184,0.15)', border: 'rgba(148,163,184,0.3)', color: '#cbd5e1' };
+            };
+
+            return filteredIntel.map(item => {
+              const hasGeo = (item.lat !== 0 || item.lon !== 0) && Math.abs(item.lat) <= 90 && Math.abs(item.lon) <= 180;
+              const badge = getCategoryBadge(item);
+              const isYt = item.platform === 'youtube' || Boolean(item.youtubeVideoId);
+
+              return (
+                <div
+                  key={item.id}
+                  className="social-post"
+                  style={{ cursor: hasGeo ? 'pointer' : 'default', transition: 'all 0.15s ease' }}
+                  onClick={() => {
+                    if (hasGeo) {
+                      focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 25000 });
+                    }
+                  }}
+                  title={hasGeo ? 'Click to locate on 3D globe' : 'Global report (no precise coordinates)'}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                    <span style={{
+                      fontSize: 8, padding: '1px 5px', borderRadius: 3,
+                      background: badge.bg, color: badge.color,
+                      border: `1px solid ${badge.border}`, fontWeight: 700, letterSpacing: '0.4px'
+                    }}>
+                      {badge.label}
+                    </span>
+                    <span className="social-time" style={{ fontSize: 9, color: 'var(--text-muted)' }}>{item.timeLabel}</span>
                   </div>
-                  <div style={{fontSize:10,color:'var(--text-dim)',marginTop:4}}>
-                    {item.lat !== 0 ? <><MapPin size={10} style={{display:'inline',marginRight:2}} /> {item.lat.toFixed(2)}, {item.lon.toFixed(2)}</> : <><Globe size={10} style={{display:'inline',marginRight:2}} /> Global</>}
+
+                  <div className="social-user" style={{ fontSize: 11, fontWeight: 600, color: '#f1f5f9', lineHeight: 1.4, marginBottom: 4 }}>
+                    {item.title}
+                  </div>
+
+                  {item.desc && <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 5, lineHeight: 1.4 }}>{item.desc}</div>}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 4 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {isYt ? (
+                          <Video size={10} style={{ color: '#ef4444' }} />
+                        ) : item.type === 'fused' ? (
+                          <Zap size={10} style={{ color: '#f87171' }} />
+                        ) : (
+                          <Newspaper size={10} style={{ color: '#94a3b8' }} />
+                        )}
+                        <span style={{ fontWeight: 500 }}>{item.source}</span>
+                      </div>
+                      <div style={{ fontSize: 10, marginTop: 3 }}>
+                        {hasGeo ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#38bdf8' }}>
+                            <MapPin size={10} />
+                            <span>{item.lat.toFixed(2)}°, {item.lon.toFixed(2)}°</span>
+                          </span>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#64748b' }}>
+                            <Globe size={10} />
+                            <span>Global Report</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {item.url && (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="glass-button"
+                        style={{ fontSize: 10, padding: '2px 8px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span>{isYt ? 'Watch' : item.platform === 'internal' ? 'Details' : 'Read'}</span>
+                        <span style={{ fontSize: 9 }}>↗</span>
+                      </a>
+                    )}
                   </div>
                 </div>
-                {item.url && (
-                  <a href={item.url} target="_blank" rel="noreferrer" 
-                     className="glass-button" style={{fontSize:10, padding:'2px 6px', textDecoration:'none'}}
-                     onClick={(e) => e.stopPropagation()}>
-                    View {item.platform === 'news' ? 'Article' : item.platform === 'internal' ? 'Details' : 'Post'}
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
+              );
+            });
+          })()}
         </div>
       </Panel>
         </div>

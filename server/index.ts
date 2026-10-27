@@ -4374,27 +4374,44 @@ function extractYoutubeId(url: string): string | null {
 
 function socialItem(source: string, title: string, url: string, timestamp: number, lat = 0, lon = 0, type = 'news', platform = 'news'): any {
   const youtubeId = extractYoutubeId(url);
+  const resolvedGeo = (lat !== 0 || lon !== 0) ? { lat, lon } : geoFromText(title);
+  const resolvedType = (type && type !== 'news') ? type : categorizeItem(title);
   return {
-    id: `${platform}_${timestamp}_${Math.random().toString(36).substring(2, 8)}`,
+    id: `${youtubeId ? 'youtube' : platform}_${timestamp}_${Math.random().toString(36).substring(2, 8)}`,
     platform: youtubeId ? 'youtube' : platform,
     title: title?.substring(0, 200) || '',
     source,
     url,
-    lat, lon,
+    lat: resolvedGeo.lat,
+    lon: resolvedGeo.lon,
     timestamp,
-    type,
-    confidence: 0,
+    type: resolvedType,
+    confidence: isTrustedNewsSource(source) ? 0.95 : 0.75,
     youtubeVideoId: youtubeId || undefined,
   };
 }
 
-// ----- YouTube Search (topic-based, no API key needed) -----
+function parseRelativeTime(text: string): number {
+  if (!text) return Date.now();
+  const lower = text.toLowerCase();
+  if (lower.includes('live')) return Date.now();
+  const minMatch = lower.match(/(\d+)\s*(?:minute|min)s?\s*ago/);
+  if (minMatch) return Date.now() - parseInt(minMatch[1], 10) * 60 * 1000;
+  const hrMatch = lower.match(/(\d+)\s*(?:hour|hr|h)s?\s*ago/);
+  if (hrMatch) return Date.now() - parseInt(hrMatch[1], 10) * 3600 * 1000;
+  const dayMatch = lower.match(/(\d+)\s*(?:day|d)s?\s*ago/);
+  if (dayMatch) return Date.now() - parseInt(dayMatch[1], 10) * 86400 * 1000;
+  const wkMatch = lower.match(/(\d+)\s*(?:week|w)s?\s*ago/);
+  if (wkMatch) return Date.now() - parseInt(wkMatch[1], 10) * 7 * 86400 * 1000;
+  return Date.now();
+}
+
+// ----- YouTube Search (topic-based, curated disaster intelligence) -----
 async function fetchYouTubeSearch(signal?: AbortSignal): Promise<any[]> {
   try {
+    const q = '("breaking news" OR "live report") (earthquake OR tsunami OR "volcanic eruption" OR wildfire OR hurricane OR typhoon OR "flash flood" OR "landslide")';
     const resp = await fetch(
-      'https://www.youtube.com/results?search_query=' + encodeURIComponent(
-        'earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR election OR crisis'
-      ),
+      'https://www.youtube.com/results?search_query=' + encodeURIComponent(q),
       {
         signal,
         headers: {
@@ -4410,6 +4427,10 @@ async function fetchYouTubeSearch(signal?: AbortSignal): Promise<any[]> {
     const data = JSON.parse(match[1]);
     const videos: any[] = [];
     const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents ?? [];
+
+    const JUNK_TITLE_RE = /\b(nicki minaj|gossip|entertainment|fashion|movie|trailer|review|drama|ass\b|celeb|prank|comedy|vlog|gaming|fortnite|minecraft|song|music|album|remix|lyrics|vevo|sports|nfl|nba|highlights|unboxing|crypto|bitcoin|reaction|ballon d\'or|mbbs|exam|neet|midterms|election campaign|funny|parody|interview with)\b/i;
+    const JUNK_CHANNEL_RE = /(vevo|music|gaming|entertainment|records|official audio|lyrics|records|parody|comedy)/i;
+
     for (const section of sections) {
       const items = section?.itemSectionRenderer?.contents ?? [];
       for (const item of items) {
@@ -4417,14 +4438,23 @@ async function fetchYouTubeSearch(signal?: AbortSignal): Promise<any[]> {
         if (!vr?.videoId) continue;
         const title = vr?.title?.runs?.[0]?.text || '';
         const author = vr?.ownerText?.runs?.[0]?.text || 'YouTube';
-        if (!title) continue;
+        const publishedText = vr?.publishedTimeText?.simpleText || '';
+
+        if (!title || JUNK_TITLE_RE.test(title) || JUNK_CHANNEL_RE.test(author)) continue;
+        // Skip ancient/old videos (more than a month old)
+        if (/\b(\d+\s*(?:year|yr|month|mo)s?\s*ago)\b/i.test(publishedText)) continue;
+
+        const timestamp = parseRelativeTime(publishedText);
+        const geo = geoFromText(title);
+        const type = categorizeItem(title);
+
         videos.push(socialItem(
           author, title, `https://www.youtube.com/watch?v=${vr.videoId}`,
-          Date.now()
+          timestamp, geo.lat, geo.lon, type, 'youtube'
         ));
       }
     }
-    return videos.slice(0, 20);
+    return videos.slice(0, 10);
   } catch (e) {
     logger.warn({ err: e }, 'YouTube crisis videos fetch failed');
     return [];
@@ -4447,6 +4477,9 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   djibouti: [11.825, 42.590], dominican: [18.736, -70.163], ecuador: [-1.831, -78.183],
   egypt: [26.821, 30.802], salvador: [13.794, -88.896], eritrea: [15.179, 39.782],
   estonia: [58.595, 25.013], ethiopia: [9.145, 40.490], fiji: [-17.713, 178.065],
+  tibet: [31.692, 88.092], uttarakhand: [30.066, 79.019], california: [36.778, -119.417],
+  florida: [27.664, -81.515], hawaii: [19.896, -155.582], alaska: [64.200, -149.493],
+  gaza: [31.501, 34.466], kashmir: [33.778, 76.576],
   finland: [61.924, 25.748], france: [46.604, 1.888], gabon: [-0.804, 11.609],
   gambia: [13.443, -15.310], georgia: [42.315, 43.357], germany: [51.165, 10.451],
   ghana: [7.946, -1.023], greece: [39.074, 21.824], guatemala: [15.783, -90.231],
@@ -4573,13 +4606,13 @@ const TRUSTED_NEWS_SOURCES = new Set([
 ]);
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  disaster: ['earthquake', 'tsunami', 'landslide', 'mudslide', 'avalanche', 'eruption', 'volcano',
-    'explosion'],
-  weather: ['hurricane', 'typhoon', 'cyclone', 'tornado', 'wildfire', 'flood', 'flooding', 'storm',
-    'blizzard', 'drought', 'monsoon'],
-  conflict: ['war', 'bombing', 'airstrike', 'missile', 'invasion', 'insurgent', 'ceasefire', 'truce',
-    'coup', 'rebellion', 'battle', 'offensive'],
-  science: ['discover', 'research', 'study', 'scientist', 'nasa', 'climate', 'lab', 'experiment', 'breakthrough'],
+  earthquake: ['earthquake', 'quake', 'tremor', 'seismic', 'tsunami', 'aftershock', 'faultline', 'fault line', 'richter'],
+  fire: ['wildfire', 'bushfire', 'forest fire', 'brush fire', 'grass fire', 'blaze', 'firms', 'firestorm'],
+  storm: ['hurricane', 'typhoon', 'cyclone', 'tornado', 'twister', 'blizzard', 'gale', 'storm', 'supercell'],
+  flood: ['flood', 'flooding', 'flash flood', 'deluge', 'inundat', 'river overflow', 'dam break', 'submerged'],
+  volcano: ['volcano', 'volcanic', 'eruption', 'caldera', 'ash plume', 'pyroclastic', 'lava'],
+  conflict: ['war', 'bombing', 'airstrike', 'missile', 'invasion', 'insurgent', 'ceasefire', 'truce', 'coup', 'rebellion', 'battle', 'artillery', 'shelling', 'combat'],
+  weather: ['extreme weather', 'heatwave', 'heat wave', 'drought', 'cold snap', 'monsoon', 'polar vortex'],
 };
 
 function geoFromText(title: string): { lat: number; lon: number; country?: string } {
@@ -4707,7 +4740,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
     const key = keyManager.get('NEWSAPI_API_KEY');
     if (!key) return;
     const resp = await fetch(
-      `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR election OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
+      `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
       { signal }
     );
     if (!resp.ok) return;
@@ -4722,7 +4755,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
   // ── 2. Google News RSS ──
   sources.push(safeFetch('GoogleNews', async (signal) => {
     const feed = await parseRSS(
-      'https://news.google.com/rss/search?q=earthquake+OR+tsunami+OR+disaster+OR+hurricane+OR+wildfire+OR+flood+OR+storm+OR+conflict+OR+election+OR+crisis&hl=en-US&gl=US&ceid=US:en'
+      'https://news.google.com/rss/search?q=earthquake+OR+tsunami+OR+disaster+OR+hurricane+OR+wildfire+OR+flood+OR+storm+OR+conflict+OR+crisis&hl=en-US&gl=US&ceid=US:en'
     );
     if (!feed.items?.length) return;
     add(feed.items.slice(0, 8).map((item: any) => socialItem(
@@ -4764,13 +4797,14 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
   sources.push(safeFetch('GDACS', async (signal) => {
     const feed = await parseRSS('https://www.gdacs.org/xml/rss_24h.xml', { signal });
     if (!feed.items?.length) return;
-    add(feed.items.slice(0, 5).map((item: any) => {
+    add(feed.items.slice(0, 8).map((item: any) => {
       const desc = item.content || item.contentSnippet || '';
       const lat = parseFloat(desc.match(/lat[=:]\s*([-\d.]+)/i)?.[1] || '0');
       const lon = parseFloat(desc.match(/lon[=:]\s*([-\d.]+)/i)?.[1] || '0');
+      const cat = categorizeItem(item.title || desc);
       return socialItem('GDACS', item.title || '', item.link || '',
         item.pubDate ? new Date(item.pubDate).getTime() : Date.now(),
-        lat, lon, 'news', 'news'
+        lat, lon, cat, 'news'
       );
     }));
   }));
@@ -4838,7 +4872,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
       return socialItem(
         'USGS', `M${p.mag} ${p.place || 'Earthquake'}`,
         p.url || '', p.time || Date.now(),
-        coords[1] || 0, coords[0] || 0, 'news', 'news'
+        coords[1] || 0, coords[0] || 0, 'earthquake', 'news'
       );
     }));
   }));
@@ -4975,7 +5009,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
     const key = keyManager.get('NEWSAPI_API_KEY');
     if (!key) return;
     const resp = await fetch(
-      `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR election OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
+      `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
       { signal }
     );
     if (!resp.ok) return;
@@ -4991,7 +5025,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
 
   sources.push(safeFetch('GoogleNews', async (_signal) => {
     const feed = await parseRSS(
-      'https://news.google.com/rss/search?q=earthquake+OR+tsunami+OR+disaster+OR+hurricane+OR+wildfire+OR+flood+OR+storm+OR+conflict+OR+election+OR+crisis&hl=en-US&gl=US&ceid=US:en'
+      'https://news.google.com/rss/search?q=earthquake+OR+tsunami+OR+disaster+OR+hurricane+OR+wildfire+OR+flood+OR+storm+OR+conflict+OR+crisis&hl=en-US&gl=US&ceid=US:en'
     );
     if (!feed.items?.length) return;
     const items = feed.items.slice(0, 8).map((item: any) => socialItem(
@@ -5036,13 +5070,14 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
   sources.push(safeFetch('GDACS', async (signal) => {
     const feed = await parseRSS('https://www.gdacs.org/xml/rss_24h.xml', { signal });
     if (!feed.items?.length) return;
-    const items = feed.items.slice(0, 5).map((item: any) => {
+    const items = feed.items.slice(0, 8).map((item: any) => {
       const desc = item.content || item.contentSnippet || '';
       const lat = parseFloat(desc.match(/lat[=:]\s*([-\d.]+)/i)?.[1] || '0');
       const lon = parseFloat(desc.match(/lon[=:]\s*([-\d.]+)/i)?.[1] || '0');
+      const cat = categorizeItem(item.title || desc);
       return socialItem('GDACS', item.title || '', item.link || '',
         item.pubDate ? new Date(item.pubDate).getTime() : Date.now(),
-        lat, lon, 'news', 'news'
+        lat, lon, cat, 'news'
       );
     });
     add(items);
@@ -5115,7 +5150,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
       return socialItem(
         'USGS', `M${p.mag} ${p.place || 'Earthquake'}`,
         p.url || '', p.time || Date.now(),
-        coords[1] || 0, coords[0] || 0, 'news', 'news'
+        coords[1] || 0, coords[0] || 0, 'earthquake', 'news'
       );
     });
     add(items);
