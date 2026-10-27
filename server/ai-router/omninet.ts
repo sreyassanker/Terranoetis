@@ -230,7 +230,7 @@ export class Omninet {
       const pings = this.providers
         .filter(state => !state.config.local)
         .filter(state => {
-          const apiKey = state.config.apiKeyEnvVar ? process.env[state.config.apiKeyEnvVar] : undefined;
+          const apiKey = this.resolveApiKey(state.config);
           return !!apiKey;
         })
         .map(async (state) => {
@@ -389,13 +389,10 @@ export class Omninet {
 
   // ── Routing Logic ─────────────────────────────────────────────
 
-  /** Resolve the API key for a provider: user-configured key (encrypted store) > process.env fallback. */
+  /** Resolve the API key for a provider exclusively from KeyManager vault. */
   private resolveApiKey(config: ProviderConfig): string | undefined {
     if (config.apiKeyEnvVar) {
-      const userKey = keyManager.get(config.apiKeyEnvVar);
-      if (userKey) return userKey;
-      const envKey = process.env[config.apiKeyEnvVar];
-      if (envKey) return envKey;
+      return keyManager.get(config.apiKeyEnvVar) || undefined;
     }
     return undefined;
   }
@@ -504,7 +501,7 @@ export class Omninet {
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
+    const apiKey = this.resolveApiKey(config) || '';
     if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in .env');
 
     // Try multiple models in order of preference — if the first fails with 429/404, try the next
@@ -799,7 +796,7 @@ export class Omninet {
 
   private async callApiEmbedding(config: ProviderConfig, text: string): Promise<Float32Array> {
     if (config.type === 'gemini') {
-      const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
+      const apiKey = this.resolveApiKey(config) || '';
       const resp = await fetch(`${config.baseUrl}/models/gemini-embedding-001:embedContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -813,7 +810,7 @@ export class Omninet {
       return new Float32Array(values);
     }
     if (config.type === 'openai-compatible') {
-      const apiKey = process.env[config.apiKeyEnvVar!];
+      const apiKey = this.resolveApiKey(config);
       const resp = await fetch(`${config.baseUrl}/embeddings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -965,7 +962,7 @@ export class Omninet {
             }
             if (yieldedChars === 0) throw new Error(`${config.name}/${model} streamed no content (reasoning-only or empty response)`);
           } else if (config.type === 'gemini') {
-          const gApiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
+          const gApiKey = this.resolveApiKey(config) || '';
           // Audit T1: native function-calling for Gemini (functionDeclarations).
           const geminiTools = options?.tools && options.tools.length > 0
             ? [{ functionDeclarations: options.tools.slice(0, 60).map(t => ({
@@ -1022,7 +1019,7 @@ export class Omninet {
             return;
           }
         } else if (config.type === 'claude') {
-          const cApiKey = this.resolveApiKey(config) || process.env.ANTHROPIC_API_KEY || '';
+          const cApiKey = this.resolveApiKey(config) || '';
           if (!cApiKey) throw new Error('Claude: missing ANTHROPIC_API_KEY');
           const resp = await fetch(`${config.baseUrl}/messages`, {
             method: 'POST',

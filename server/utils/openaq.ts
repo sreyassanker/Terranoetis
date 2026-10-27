@@ -12,6 +12,7 @@
  */
 
 import { logger } from '../observability/logger';
+import { keyManager } from '../keyManager';
 
 export interface OpenAQLocation {
   id: number;
@@ -56,7 +57,7 @@ export interface OpenAQAqiResult {
 const BASE_URL = 'https://api.openaq.org/v3';
 
 function getApiKey(): string | null {
-  return process.env.OPENAQ_API_KEY || null;
+  return keyManager.get('OPENAQ_API_KEY') || null;
 }
 
 function getHeaders(): Record<string, string> {

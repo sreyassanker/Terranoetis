@@ -532,13 +532,13 @@ export const API_METADATA: ApiConfig[] = [
   {
     id: 'windy',
     name: 'Windy.com',
-    category: 'Weather & Disaster',
-    description: 'Webcam imagery and weather visualization',
-    registrationUrl: 'https://api.windy.com/',
-    docsUrl: 'https://api.windy.com/docs',
+    category: 'Cameras',
+    description: 'Worldwide live webcams (65,000+ cameras) and weather visualization',
+    registrationUrl: 'https://api.windy.com/keys',
+    docsUrl: 'https://api.windy.com/webcams/docs',
     envKey: 'WINDY_API_KEY',
     free: true,
-    rateLimit: 'Free tier available',
+    rateLimit: 'Free tier available (1,000 requests/day)',
     status: 'authenticated',
   },
   {

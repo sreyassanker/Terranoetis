@@ -15,6 +15,7 @@
  */
 
 import NodeCache from 'node-cache';
+import { keyManager } from '../keyManager';
 
 const cache = new NodeCache({ stdTTL: 86400 * 30, checkperiod: 86400 });
 
@@ -56,8 +57,8 @@ function getLatitudeFallback(lat: number): {
 const GRID_URL = 'https://daacdata.apps.nsidc.org/pub/DATASETS/ggd318/llipa.byte';
 
 function getEarthdataToken(): string | null {
-  const user = process.env.EARTHDATA_USERNAME;
-  const pass = process.env.EARTHDATA_PASSWORD;
+  const user = keyManager.get('EARTHDATA_USERNAME');
+  const pass = keyManager.get('EARTHDATA_PASSWORD');
   if (!user || !pass) return null;
   return Buffer.from(`${user}:${pass}`).toString('base64');
 }

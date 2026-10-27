@@ -28,8 +28,14 @@ const WORLD_IMAGERY_STYLES: Record<'earth' | 'satellite' | 'terrain', Cesium.Ion
   terrain: Cesium.IonWorldImageryStyle.AERIAL_WITH_LABELS,
 };
 
+// Explicitly clear Cesium's internal default demo token so no unauthenticated Ion requests are ever fired,
+// but retain any cached user-configured token so initial base imagery loads seamlessly without a 2-3s flicker.
+const cachedToken = typeof window !== 'undefined' ? localStorage.getItem('terranoetis.cesiumToken.v1')?.trim() : '';
+Cesium.Ion.defaultAccessToken = cachedToken || '';
+
 function hasIonAccess(): boolean {
-  return Boolean((Cesium.Ion.defaultAccessToken ?? '').trim());
+  const t = (Cesium.Ion.defaultAccessToken ?? '').trim();
+  return Boolean(t);
 }
 
 function createFallbackLayer(type: string): Cesium.ImageryLayer {
@@ -76,10 +82,13 @@ export async function applyTerrainProvider(viewer: Cesium.Viewer, ionToken?: str
       console.warn('[Terrain] Cesium World Terrain failed to load. Using flat ellipsoid. Scenario shapes will use ground-clamped heights.');
     }
   } else {
-    console.warn('[Terrain] No VITE_CESIUM_ION_ACCESS_TOKEN found. Terrain is flat ellipsoid. Set the token for real terrain and ocean detection.');
+    console.warn('[Terrain] No Cesium Ion token configured in API Vault. Terrain is flat ellipsoid. Set the token in API Vault for real terrain and ocean detection.');
   }
 
   viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  if (viewer.scene?.globe) {
+    viewer.scene.globe.depthTestAgainstTerrain = true;
+  }
   return false;
 }
 

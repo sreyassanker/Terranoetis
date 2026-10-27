@@ -12,9 +12,7 @@ import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 import * as satellite from 'satellite.js';
 import { createHash } from 'crypto';
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-const papaparse = createRequire(import.meta.url)('papaparse');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -144,6 +142,12 @@ import { auditLog } from './middleware/audit';
 import { validate, askSchema, sandboxExecuteSchema, chatCreateSchema, feedbackSchema, monitorRuleSchema } from './middleware/validate';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { logger, requestLoggerMiddleware, startMemoryLogging, stopMemoryLogging } from './observability/logger';
+import {
+  type WorldwideCctvCamera,
+  getCuratedLiveCams,
+  fetchWindyWebcams,
+  getWebcamCategoryStats,
+} from './cctv/webcamService';
 import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate, omninetCallsTotal, toolExecutionsTotal, toolGenerationsTotal } from './observability/metrics';
 import { AppError, GeminiError, SandboxError, ValidationError, DatabaseError, CircuitOpenError, AuthenticationError, NotFoundError, RateLimitError } from './observability/errors';
 import { validateJwtSecretStrength, generateSecret } from './utils/validation';
@@ -188,31 +192,34 @@ function loadEnvironment(): void {
   // 1. Standard process.cwd() .env
   dotenv.config();
 
-  // 2. In desktop mode or bundled runtime, search AppData and repo parents if key env vars are missing
-  const needsEnv = !process.env.GMAIL_SMTP_USER || !process.env.JWT_SECRET;
-  if (needsEnv) {
-    const platform = process.platform;
-    const baseDir = platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support', 'Terranoetis')
-      : platform === 'win32'
-      ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming', 'Terranoetis'))
-      : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config', 'terranoetis'));
+  // 2. Search OS AppData directory (accessible under desktop sandboxing)
+  const platform = process.platform;
+  const baseDir = platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Terranoetis')
+    : platform === 'win32'
+    ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming', 'Terranoetis'))
+    : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config', 'terranoetis'));
 
-    const appDataEnv = path.join(baseDir, '.env');
-    if (fs.existsSync(appDataEnv)) {
-      dotenv.config({ path: appDataEnv });
-    }
+  const appDataEnv = path.join(baseDir, '.env');
+  if (fs.existsSync(appDataEnv)) {
+    dotenv.config({ path: appDataEnv });
+  }
 
-    // 3. Search upward for project .env until root
-    let cur = path.resolve(import.meta.dirname || process.cwd());
-    while (cur && cur !== path.dirname(cur)) {
-      const candidate = path.join(cur, '.env');
-      if (fs.existsSync(candidate)) {
-        dotenv.config({ path: candidate });
-        break;
-      }
-      cur = path.dirname(cur);
+  // 3. Search bundled directory alongside executable or dist-server
+  const localBundleEnv = path.join(__dirname, '.env');
+  if (fs.existsSync(localBundleEnv)) {
+    dotenv.config({ path: localBundleEnv });
+  }
+
+  // 4. Search upward for project .env until root
+  let cur = path.resolve(__dirname || process.cwd());
+  while (cur && cur !== path.dirname(cur)) {
+    const candidate = path.join(cur, '.env');
+    if (fs.existsSync(candidate)) {
+      dotenv.config({ path: candidate });
+      break;
     }
+    cur = path.dirname(cur);
   }
 }
 loadEnvironment();
@@ -315,10 +322,12 @@ app.use(helmet({
       'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdn.jsdelivr.net', 'blob:'],
       'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       'img-src': ["'self'", 'data:', 'blob:', 'https:', 'http:'],
+      'media-src': ["'self'", 'blob:', 'data:', 'https:', 'http:'],
       'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://fonts.googleapis.com'],
       'connect-src': [
         "'self'",
         'ws:', 'wss:',
+        'https:', 'http:',
         'https://api.cesium.com', 'https://assets.cesium.com',
         'https://*.cesium.com', 'https://tile.googleapis.com',
         'https://tile.openstreetmap.org', 'https://server.arcgisonline.com',
@@ -328,6 +337,9 @@ app.use(helmet({
       ],
       'worker-src': ["'self'", 'blob:'],
       'child-src': ["'self'", 'blob:'],
+      // Windy webcam players are first-party embeds; YouTube uses the
+      // same-origin /api/embed/youtube bridge instead of a direct frame.
+      'frame-src': ["'self'", 'https://webcams.windy.com', 'https://*.windy.com'],
       'object-src': ["'none'"],
       'base-uri': ["'self'"],
       'form-action': ["'self'"],
@@ -550,7 +562,7 @@ app.get('/api/places-in-bbox', async (req: express.Request, res: express.Respons
             places.set(name, { name, lat, lon, type });
           }
         }
-      } catch {}
+      } catch { /* ignore */ }
     });
 
     // Viewbox search probe for major localities
@@ -573,7 +585,7 @@ app.get('/api/places-in-bbox', async (req: express.Request, res: express.Respons
             places.set(name, { name, lat, lon, type: 'major' });
           }
         }
-      } catch {}
+      } catch { /* ignore */ }
     })();
 
     await Promise.allSettled([...reversePromises, searchPromise]);
@@ -1105,7 +1117,9 @@ function registerDefaultTools() {
     { name:'stac_imagery', category:'satellite', description:'STAC satellite imagery search — scene metadata (Sentinel/Landsat) for a bbox and date. Record data.', exampleQueries:['satellite scenes for this area','sentinel imagery search','landsat scenes for a bbox'], schema:{type:'api',endpoint:'/api/stac/search',method:'GET',params:{bbox:'lonMin,latMin,lonMax,latMax',q:'search text',collections:'comma collection ids'}} },
     { name:'guardian_site', category:'hazards', description:'Guardian site monitor — hazard conditions and anomaly checks for a lat/lon site. Record data.', exampleQueries:['site conditions here','anomaly check for this location','site hazard status'], schema:{type:'api',endpoint:'/api/guardian/conditions',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
     { name:'multimodal_seismic_history', category:'seismic', description:'Seismic history for a point — past events near lat/lon from the multimodal processor. Point records.', exampleQueries:['earthquake history near here','seismic history for this point','past quakes near a location'], schema:{type:'api',endpoint:'/api/multimodal/seismic/history',method:'GET',params:{lat:'latitude',lon:'longitude',radius:'radius km'}} },
-    { name:'live_cctv', category:'media', description:'Worldwide public CCTV cameras (health-checked windy-webcams list) — live camera feeds near a location. Point records.', exampleQueries:['live cameras near me','cctv feeds in this area','webcam views of a place'], schema:{type:'api',endpoint:'/api/cctv/health',method:'GET'} },
+    { name:'live_cctv', category:'media', description:'Worldwide public CCTV cameras (health-checked public webcam list) — live camera feeds near a location. Point records.', exampleQueries:['live cameras near me','cctv feeds in this area','webcam views of a place'], schema:{type:'api',endpoint:'/api/cctv/health',method:'GET'} },
+    { name:'windy_webcams', category:'media', description:'Windy.com live webcams search — over 70,000 weather and scenic cameras worldwide. Search by bbox (south,west,north,east) and category (meteo, landscape, city, traffic, beach). Requires a free WINDY_API_KEY.', exampleQueries:['windy webcams near tokyo','weather cameras in the alps','mountain pass webcams'], schema:{type:'api',endpoint:'/api/cctv/windy',method:'GET',params:{bbox:'south,west,north,east',category:'category name',limit:'max results'}} },
+    { name:'curated_live_cams', category:'media', description:'Curated 24/7 live streams for space/ISS, maritime landmarks, wildlife waterholes, and major world cities. Stream availability is controlled by the broadcasters.', exampleQueries:['live space station feed','times square live stream','shibuya live cam'], schema:{type:'api',endpoint:'/api/cctv/youtube',method:'GET'} },
     ];
   for (const t of perLayerTools) toolRegistry.register(t);
 
@@ -1535,8 +1549,6 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   const providerStatus = omninet.getStatus();
   const geminiStatus = providerStatus.find(s => s.name === 'gemini');
   const hasGeminiKey = Boolean(
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
     keyManager.get('GEMINI_API_KEY') ||
     keyManager.get('GOOGLE_GEMINI_API_KEY')
   );
@@ -1690,7 +1702,7 @@ app.get('/api/power/state', (_req: express.Request, res: express.Response) => {
 
 
 app.get('/api/metrics', async (_req: express.Request, res: express.Response) => {
-  const metricsToken = process.env.METRICS_API_TOKEN;
+  const metricsToken = keyManager.get('METRICS_API_TOKEN');
   const provided = (_req.headers.authorization || '').replace('Bearer ', '') || (_req.query.token as string);
   if (metricsToken && provided !== metricsToken) {
     return res.status(401).json({ error: 'Unauthorized — provide METRICS_API_TOKEN' });
@@ -1749,7 +1761,7 @@ async function installFromGitHub(url: string): Promise<{ pluginIds: string[]; er
   if (!parsed) throw new Error('Invalid GitHub URL');
   const { owner, repo, path } = parsed;
   let { branch } = parsed;
-  const ghToken = process.env.GITHUB_TOKEN || '';
+  const ghToken = keyManager.get('GITHUB_TOKEN') || '';
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
   if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
 
@@ -2053,6 +2065,14 @@ app.post('/api/config/vault', authGuard, requireRole('admin'), (req: express.Req
       return res.status(400).json({ error: 'Invalid request body: "keys" object expected' });
     }
     const result = keyManager.saveKeys(keys, Array.isArray(deleteKeys) ? deleteKeys : []);
+    auditLog(
+      (req as any).userId || 'admin',
+      'VAULT_SAVE_KEYS',
+      'vault',
+      JSON.stringify({ savedCount: result.saved, savedKeys: Object.keys(keys), deleteKeys: deleteKeys || [] }),
+      req.ip || '',
+      req.get('user-agent') || '',
+    );
     omninet.reloadProviders();
     res.json({
       success: true,
@@ -2070,6 +2090,14 @@ app.delete('/api/config/vault/:key', authGuard, requireRole('admin'), (req: expr
   try {
     const key = req.params.key;
     const deleted = keyManager.deleteKey(key);
+    auditLog(
+      (req as any).userId || 'admin',
+      'VAULT_DELETE_KEY',
+      'vault',
+      JSON.stringify({ key, deleted }),
+      req.ip || '',
+      req.get('user-agent') || '',
+    );
     omninet.reloadProviders();
     res.json({ success: true, deleted, keys: keyManager.getAllStatuses() });
   } catch (err) {
@@ -2090,8 +2118,38 @@ app.post('/api/config/vault/validate', authGuard, requireRole('admin'), async (r
   }
 });
 
-app.get('/api/config/cesium-token', (_req: express.Request, res: express.Response) => {
-  const token = keyManager.get('CESIUM_ION_ACCESS_TOKEN') || process.env.CESIUM_ION_ACCESS_TOKEN || '';
+app.post('/api/config/vault/reveal', authGuard, requireRole('admin'), (req: express.Request, res: express.Response) => {
+  try {
+    const { key } = req.body || {};
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({ error: 'Key name required' });
+    }
+    const val = keyManager.get(key);
+    if (!val) {
+      return res.status(404).json({ error: `Key "${key}" not found in vault or environment` });
+    }
+    auditLog(
+      (req as any).userId || 'admin',
+      'VAULT_REVEAL_KEY',
+      'vault',
+      JSON.stringify({ key }),
+      req.ip || '',
+      req.get('user-agent') || '',
+    );
+    res.json({ key, value: val });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reveal key', detail: String(err) });
+  }
+});
+
+app.get('/api/config/cesium-token', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const remoteIp = (req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/, '');
+  if (isLoopback(remoteIp)) {
+    return next();
+  }
+  return authGuard(req, res, next);
+}, (_req: express.Request, res: express.Response) => {
+  const token = keyManager.get('CESIUM_ION_ACCESS_TOKEN') || '';
   res.json({ token });
 });
 
@@ -2152,26 +2210,6 @@ app.get('/api/tectonic', async (_req: express.Request, res: express.Response) =>
   }
 });
 
-interface WorldwideCctvCamera {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  pageUrl: string;
-  previewUrl?: string;
-  streamUrl?: string;
-  thumbnailUrl?: string;
-  source: string;
-  category?: string;
-  city?: string;
-  region?: string;
-  location?: string;
-  updatedAt: number;
-  description?: string;
-  feedType?: string;
-  youtubeVideoId?: string;
-}
-
 interface WorldwideCctvPayload {
   source: string;
   country: string;
@@ -2224,6 +2262,9 @@ const CCTV_DEAD_SOURCES = new Set([
   "nycdot",
   "oktraffic",
   "opencctv.org",
+  "autobahn_nrw",
+  "itic",
+  "balticlivecam",
   "paspro",
   "recife-cttu",
   "rtsp.me",
@@ -2241,11 +2282,22 @@ const CCTV_DEAD_SOURCES = new Set([
   "wikaserangpanimbang"
 ]);
 
-function isPlayableFeedUrl(cam: WorldwideCctvCamera): boolean {
+function isPlayableFeed(cam: WorldwideCctvCamera): boolean {
   if (cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId)) return true;
-  const feed = cam.previewUrl ?? cam.streamUrl ?? cam.thumbnailUrl;
-  if (!feed) return true; // pageUrl-only camera; nothing to drop
-  return /^https?:\/\//i.test(feed);
+  if (cam.playerEmbedUrl && /^https:\/\/[a-z0-9.-]*windy\.com/i.test(cam.playerEmbedUrl)) return true;
+  const stream = cam.streamUrl || cam.previewUrl || '';
+  if (!stream || !/^https?:\/\//i.test(stream)) return false;
+  if (CCTV_DEAD_SOURCES.has(cam.source)) return false;
+  if (cam.feedType === 'm3u8' || /\.m3u8(\?|$)/i.test(stream)) {
+    return !/(\.html?|\/webcam|\/cameras)(\?|$)/i.test(stream);
+  }
+  if (cam.feedType === 'video' || /\.mp4(\?|$)/i.test(stream) || cam.feedType === 'mjpeg') {
+    return true;
+  }
+  if (cam.feedType === 'image' || cam.thumbnailUrl || cam.previewUrl) {
+    return !/(\.html?|\/cameras\/)(\?|$)/i.test(stream);
+  }
+  return false;
 }
 
 function filterHealthyCctvCams(cams: WorldwideCctvCamera[]): {
@@ -2257,12 +2309,11 @@ function filterHealthyCctvCams(cams: WorldwideCctvCamera[]): {
   let removedByScheme = 0;
   let removedBySource = 0;
   const cameras = cams.filter(cam => {
-    if (cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId)) return true;
     if (CCTV_DEAD_SOURCES.has(cam.source)) {
       removedBySource++;
       return false;
     }
-    if (!isPlayableFeedUrl(cam)) {
+    if (!isPlayableFeed(cam)) {
       removedByScheme++;
       return false;
     }
@@ -2277,7 +2328,7 @@ function computeCctvHealth(cams: WorldwideCctvCamera[]) {
     const key = cam.source || 'opencctv.org';
     const row = bySource.get(key) ?? { total: 0, playable: 0, deadByScheme: 0 };
     row.total++;
-    if (isPlayableFeedUrl(cam)) row.playable++;
+    if (isPlayableFeed(cam)) row.playable++;
     else row.deadByScheme++;
     bySource.set(key, row);
   }
@@ -2315,217 +2366,114 @@ const BOUNDS = [
   { s: -35, w: -20, n: 35, e: 55 }     // Africa
 ];
 
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-// ── SkylineWebcams (3,300+ cameras, 90+ countries, no key) ──
-async function fetchSkylineWebcams(): Promise<WorldwideCctvCamera[]> {
-  const cams: WorldwideCctvCamera[] = [];
+async function fetchTflJamCams(): Promise<WorldwideCctvCamera[]> {
   try {
-    const resp = await fetch('https://www.skylinewebcams.com/en/webcam', {
-      headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)', 'Accept-Language': 'en-US,en;q=0.9' },
-      signal: AbortSignal.timeout(10000),
+    const resp = await fetch('https://api.tfl.gov.uk/Place/Type/JamCam', {
+      headers: { 'User-Agent': 'Terranoetis/3.0 (Earth Intelligence Desktop)' },
+      signal: AbortSignal.timeout(6000),
     });
     if (!resp.ok) return [];
-    const html = await resp.text();
-    const items: any[] = [];
-    // Try parsing embedded JSON-LD
-    const ldMatch = html.match(/<script[^>]+type="application\/ld\+json"[^>]*>(.*?)<\/script>/gs);
-    if (ldMatch) {
-      for (const block of ldMatch) {
-        try {
-          const json = JSON.parse(block.replace(/<[^>]+>/g, ''));
-          if (json?.itemListElement) {
-            for (const el of json.itemListElement) {
-              if (el?.url) items.push(el.url);
-            }
-          }
-        } catch (e) { logger.warn({ err: e }, 'Skipping item list entry'); }
-      }
-    }
-    // Fallback: extract camera links from HTML
-    if (!items.length) {
-      const linkRe = /href="(\/en\/webcam\/[^"]+)"/g;
-      let m;
-      while ((m = linkRe.exec(html)) !== null) {
-        items.push('https://www.skylinewebcams.com' + m[1]);
-      }
-    }
-    // Fetch individual camera pages for details (limit to 50 to avoid overload)
-    const unique = [...new Set(items as string[])];
-    const batch = unique.slice(0, 50);
-    const pages = await Promise.allSettled(
-      batch.map(url =>
-        fetch(url, { headers: { 'User-Agent': 'Terranoetis/1.0' }, signal: AbortSignal.timeout(8000) })
-          .then(r => r.ok ? r.text() : null)
-      )
-    );
-    for (const result of pages) {
-      if (result.status !== 'fulfilled' || !result.value) continue;
-      const pageHtml = result.value;
-      const nameMatch = pageHtml.match(/<h1[^>]*>([^<]+)<\/h1>/);
-      const latMatch = pageHtml.match(/"latitude"\s*:\s*([\d.-]+)/);
-      const lonMatch = pageHtml.match(/"longitude"\s*:\s*([\d.-]+)/);
-      const imgMatch = pageHtml.match(/<img[^>]+id="webcamImage"[^>]+src="([^"]+)"/);
-      if (nameMatch && latMatch && lonMatch) {
-        const lat = parseFloat(latMatch[1]);
-        const lon = parseFloat(lonMatch[1]);
-        if (Number.isFinite(lat) && Number.isFinite(lon)) {
-          cams.push({
-            id: 'swc_' + lat + '_' + lon,
-            name: nameMatch[1].trim(),
-            lat, lon,
-            pageUrl: batch[cams.length] || '',
-            previewUrl: imgMatch?.[1] || undefined,
-            streamUrl: undefined,
-            thumbnailUrl: imgMatch?.[1] || undefined,
-            source: 'skylinewebcams.com',
-            category: 'scenic webcam',
-            city: undefined,
-            region: undefined,
-            location: 'Worldwide',
-            updatedAt: Date.now(),
-            feedType: 'image',
-          });
-        }
-      }
-    }
-  } catch (e) { logger.warn({ err: e }, 'Skyline webcam scrape failed'); }
-  return cams;
-}
+    const data = await resp.json() as any[];
+    if (!Array.isArray(data)) return [];
 
-// ── Live-Environment-Streams (5,172 cameras, 80 countries, pre-verified GeoJSON) ──
-async function fetchLiveEnvStreams(): Promise<WorldwideCctvCamera[]> {
-  const cams: WorldwideCctvCamera[] = [];
-  try {
-    const resp = await fetch(
-      'https://raw.githubusercontent.com/willytop8/Live-Environment-Streams/main/streams.geojson',
-      { headers: { 'User-Agent': 'Terranoetis/1.0' }, signal: AbortSignal.timeout(15000) }
-    );
-    if (!resp.ok) return [];
-    const geojson = await resp.json() as any;
-    const features = Array.isArray(geojson?.features) ? geojson.features : [];
-    for (const f of features) {
-      const p = f?.properties || {};
-      const coords = f?.geometry?.coordinates;
-      const lat = coords?.[1];
-      const lon = coords?.[0];
+    const cams: WorldwideCctvCamera[] = [];
+    for (const item of data) {
+      const lat = Number(item.lat);
+      const lon = Number(item.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      if (p.status === 'deprecated') continue;
-      const feedUrl = p.url || '';
-      const isHls = p.url_type === 'hls';
+      const props = Object.fromEntries(
+        (item.additionalProperties || []).map((p: any) => [p.key, { value: p.value, modified: p.modified }])
+      );
+      if (props.available?.value !== 'true') continue;
+      const imageUrl = props.imageUrl?.value;
+      const videoUrl = props.videoUrl?.value;
+      if (!imageUrl && !videoUrl) continue;
+
+      const modifiedTime = props.imageUrl?.modified || props.videoUrl?.modified;
+      const updatedAt = modifiedTime ? new Date(modifiedTime).getTime() : Date.now();
+
       cams.push({
-        id: 'les_' + (p.name || 'cam') + '_' + lat + '_' + lon,
-        name: p.display_name || p.name || 'Live Camera',
-        lat, lon,
-        pageUrl: feedUrl.startsWith('http') ? feedUrl : `https://www.google.com/search?q=${encodeURIComponent(p.name || 'camera')}`,
-        previewUrl: feedUrl.startsWith('http') ? feedUrl : undefined,
-        streamUrl: isHls ? feedUrl : undefined,
-        thumbnailUrl: undefined,
-        source: p.source_family || 'live-environment-streams',
-        category: p.environment || p.scene_type || 'public webcam',
-        city: undefined,
-        region: undefined,
-        location: p.country_code || 'Worldwide',
-        updatedAt: Date.now(),
-        feedType: isHls ? 'm3u8' : (p.url_type === 'http_image' ? 'image' : undefined),
+        id: `tfl_${String(item.id || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+        name: `London — ${item.commonName || 'Traffic Cam'}`,
+        lat,
+        lon,
+        pageUrl: 'https://tfl.gov.uk/traffic/status/',
+        previewUrl: imageUrl || videoUrl,
+        streamUrl: videoUrl || imageUrl,
+        thumbnailUrl: imageUrl,
+        source: 'tfl.gov.uk',
+        category: 'traffic webcam',
+        city: 'London',
+        region: 'Greater London',
+        country: 'GB',
+        location: 'London, United Kingdom',
+        updatedAt,
+        description: `Live London traffic camera (${item.commonName || 'London'}) via Transport for London`,
+        feedType: videoUrl ? 'video' : 'image',
       });
     }
-  } catch (e) { logger.warn({ err: e }, 'LiveEnv stream scrape failed'); }
-  return cams;
+    return cams;
+  } catch (err) {
+    logger.warn({ err }, 'TfL JamCams fetch skipped');
+    return [];
+  }
 }
 
-// ── Verified 24/7 Global YouTube Live Streams ──
-// Tested and confirmed embeddable 24/7 live streams across major global cities, landmarks & space.
-const VERIFIED_YOUTUBE_LIVE_STREAMS = [
-  { id: 'VGnFLdQW39A', city: 'New York', country: 'US', region: 'New York', lat: 40.7580, lon: -73.9855, name: 'New York - Times Square 24/7 Live 4K Cam' },
-  { id: 'dfVK7ld38Ys', city: 'Tokyo', country: 'JP', region: 'Kanto', lat: 35.6595, lon: 139.7005, name: 'Tokyo - Shibuya Scramble Crossing 24/7 Cam' },
-  { id: 'zMCea32gpmg', city: 'London', country: 'GB', region: 'England', lat: 51.5320, lon: -0.1774, name: 'London - Abbey Road Crossing Live Cam' },
-  { id: 'QI-PPEW2Bgc', city: 'Paris', country: 'FR', region: 'Île-de-France', lat: 48.8584, lon: 2.2945, name: 'Paris - Eiffel Tower & Skyline Live Cam' },
-  { id: 'r8N6IsoIkTk', city: 'Venice', country: 'IT', region: 'Veneto', lat: 45.4371, lon: 12.3326, name: 'Venice - Grand Canal & Rialto 4K Live Cam' },
-  { id: 'BSWhGNXxT9A', city: 'San Francisco', country: 'US', region: 'California', lat: 37.8199, lon: -122.4783, name: 'San Francisco - Golden Gate Bridge & Bay Live' },
-  { id: 'v97JpT3ZA0w', city: 'Los Angeles', country: 'US', region: 'California', lat: 34.0195, lon: -118.4912, name: 'Los Angeles - Santa Monica Pier & Pacific Beach Cam' },
-  { id: 'yVS7l0AsJW0', city: 'Chicago', country: 'US', region: 'Illinois', lat: 41.8781, lon: -87.6298, name: 'Chicago - Downtown Skyline & River Live Cam' },
-  { id: 'cmkAbDUEoyA', city: 'Miami Beach', country: 'US', region: 'Florida', lat: 25.7907, lon: -80.1300, name: 'Miami Beach - Ocean Boardwalk Live Cam' },
-  { id: '4CK0CsimBHs', city: 'Honolulu', country: 'US', region: 'Hawaii', lat: 21.2766, lon: -157.8284, name: 'Honolulu - Waikiki Beach & Diamond Head Live' },
-  { id: '1EiC9bvVGnk', city: 'Jackson Hole', country: 'US', region: 'Wyoming', lat: 43.4799, lon: -110.7624, name: 'Jackson Hole - Town Square Live Cam' },
-  { id: '7gBzLGlJnwk', city: 'Niagara Falls', country: 'CA', region: 'Ontario', lat: 43.0896, lon: -79.0849, name: 'Niagara Falls - Horseshoe Falls Live 4K Stream' },
-  { id: 'WEl_I5vmuSs', city: 'Rio de Janeiro', country: 'BR', region: 'Rio de Janeiro', lat: -22.9711, lon: -43.1822, name: 'Rio de Janeiro - Copacabana Beach Live Cam' },
-  { id: 'Gd9d4q6WvUY', city: 'Amsterdam', country: 'NL', region: 'North Holland', lat: 52.3702, lon: 4.8952, name: 'Amsterdam - Dam Square 4K Ultra HD Live' },
-  { id: '4Xg-wkPazp4', city: 'Berlin', country: 'DE', region: 'Berlin', lat: 52.5200, lon: 13.4050, name: 'Berlin - Tiergarten & Skyline Live Cam' },
-  { id: 'Rvn7Z5bwJWE', city: 'Madrid', country: 'ES', region: 'Community of Madrid', lat: 40.4168, lon: -3.7038, name: 'Madrid - Gran Vía & Puerta del Sol Live 4K' },
-  { id: '03pYP2Nmreo', city: 'Rome', country: 'IT', region: 'Lazio', lat: 41.8902, lon: 12.4922, name: 'Rome - Vatican City & St. Peters Square Live' },
-  { id: 'tmlE1ct0cYk', city: 'Prague', country: 'CZ', region: 'Prague', lat: 50.0875, lon: 14.4214, name: 'Prague - Central Station & Old Town 4K Live' },
-  { id: '3nyPER2kzqk', city: 'Dublin', country: 'IE', region: 'Leinster', lat: 53.3498, lon: -6.2603, name: 'Dublin - OConnell Bridge & Liffey River Live' },
-  { id: 'HfgIFGbdGJ0', city: 'Dubai', country: 'AE', region: 'Dubai', lat: 25.1972, lon: 55.2744, name: 'Dubai - Burj Khalifa & Downtown Marina Skyline' },
-  { id: 'UemFRPrl1hk', city: 'Bangkok', country: 'TH', region: 'Bangkok', lat: 13.7563, lon: 100.5018, name: 'Bangkok - Sukhumvit Boulevard 4K Live Cam' },
-  { id: 'vk5BHoDxXf0', city: 'Seoul', country: 'KR', region: 'Seoul Capital', lat: 37.5665, lon: 126.9780, name: 'Seoul - Han River & Yeouido Skyline 4K Live' },
-  { id: 'z_fY1pj1VBw', city: 'Taipei', country: 'TW', region: 'Taipei', lat: 25.0330, lon: 121.5654, name: 'Taipei - Taipei 101 & Xiangshan Summit 4K' },
-  { id: '5uZa3-RMFos', city: 'Sydney', country: 'AU', region: 'New South Wales', lat: -33.8568, lon: 151.2153, name: 'Sydney - Sydney Harbour & Opera House 4K Live' },
-  { id: 'ydYDqZQpim8', city: 'Namib Desert', country: 'NA', region: 'Hardap', lat: -24.0000, lon: 16.0000, name: 'Namibia - Namib Desert Wildlife Waterhole 24/7' },
-  { id: 'jOqASqt3vVI', city: 'Cape Town', country: 'ZA', region: 'Western Cape', lat: -33.9249, lon: 18.4241, name: 'Cape Town - Table Mountain & Camps Bay Live' },
-  { id: 'awQzjn72bI0', city: 'Low Earth Orbit', country: 'INTL', region: 'Space', lat: 0.0000, lon: 0.0000, name: 'Orbit - ISS Space Station Live High-Definition Views' },
-];
-
-function getVerifiedYoutubeLiveCams(): WorldwideCctvCamera[] {
-  return VERIFIED_YOUTUBE_LIVE_STREAMS.map(item => ({
-    id: `yt_live_${item.id}`,
-    name: item.name,
-    lat: item.lat,
-    lon: item.lon,
-    pageUrl: `https://www.youtube.com/watch?v=${item.id}`,
-    previewUrl: `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
-    streamUrl: `https://www.youtube.com/watch?v=${item.id}`,
-    thumbnailUrl: `https://img.youtube.com/vi/${item.id}/hqdefault.jpg`,
-    source: 'youtube',
-    category: 'live webcam',
-    city: item.city,
-    region: item.region,
-    location: `${item.city}, ${item.country}`,
-    updatedAt: Date.now(),
-    description: `24/7 Verified Live YouTube Stream: ${item.name}`,
-    feedType: 'youtube',
-    youtubeVideoId: item.id,
-  }));
-}
+// ── Worldwide Public Webcams & CCTV (YouTube 24/7, Windy API v3, OpenCCTV, TfL) ──
 
 async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
-  // Fetch from additional open sources concurrently
-  const [extraSkyline, extraLiveEnv] = await Promise.allSettled([
-    fetchSkylineWebcams(),
-    fetchLiveEnvStreams(),
-  ]);
-  const extraCams: WorldwideCctvCamera[] = [];
-  if (extraSkyline.status === 'fulfilled') extraCams.push(...extraSkyline.value);
-  if (extraLiveEnv.status === 'fulfilled') extraCams.push(...extraLiveEnv.value);
+  const allCams = new Map<string, WorldwideCctvCamera>();
 
-  // Fetch India cameras from webpage first to guarantee their inclusion
-  let indiaCams: WorldwideCctvCamera[] = [];
-  try {
-    const resp = await fetch('https://opencctv.org/cameras/india', {
-      headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)' },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (resp.ok) {
-      const html = await resp.text();
-      indiaCams = extractIndiaCctvCameras(html);
+  // 1. Curated 24/7 global YouTube live streams (verified 100% active video feeds)
+  const ytCams = getCuratedLiveCams();
+  for (const cam of ytCams) {
+    if (isPlayableFeed(cam)) {
+      allCams.set(cam.id, cam);
     }
-  } catch (e) {
-    logger.warn({ err: e }, 'opencctv.org India feed unavailable');
   }
 
+  // 2. Windy live webcams with embeddable video players
+  try {
+    const [windyGeneral, windyLandscape] = await Promise.allSettled([
+      fetchWindyWebcams({ limit: 50 }),
+      fetchWindyWebcams({ limit: 50, category: 'landscape' }),
+    ]);
+    const windyCams: WorldwideCctvCamera[] = [];
+    if (windyGeneral.status === 'fulfilled') windyCams.push(...windyGeneral.value.cameras);
+    if (windyLandscape.status === 'fulfilled') windyCams.push(...windyLandscape.value.cameras);
+
+    for (const cam of windyCams) {
+      if (!allCams.has(cam.id) && isPlayableFeed(cam)) {
+        allCams.set(cam.id, cam);
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Windy webcams auto-merge skipped');
+  }
+
+  // 3. Transport for London (TfL JamCams: verified live traffic video + real-time images)
+  try {
+    const tflCams = await fetchTflJamCams();
+    for (const cam of tflCams) {
+      if (!allCams.has(cam.id) && isPlayableFeed(cam)) {
+        allCams.set(cam.id, cam);
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'TfL JamCams auto-merge skipped');
+  }
+
+  // 4. OpenCCTV Worldwide Camera Network (queried with browser headers + strict health gate)
   const fetchBox = async (box: typeof BOUNDS[0]) => {
     try {
       const url = `https://opencctv.org/api/cameras?bounds=${box.s},${box.w},${box.n},${box.e}`;
       const resp = await fetch(url, {
-        headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)' },
-        signal: AbortSignal.timeout(15000),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+          'Referer': 'https://opencctv.org/',
+          'Accept': 'application/json',
+        },
+        signal: AbortSignal.timeout(10000),
       });
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -2536,145 +2484,137 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
     }
   };
 
-  const results = await Promise.all(BOUNDS.map(fetchBox));
-  const allCams = new Map<string, any>();
+  try {
+    const results = await Promise.allSettled(BOUNDS.map(fetchBox));
+    const proxied = (url: string | undefined): string | undefined => {
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) return url;
+      if (!url.startsWith('https://opencctv.org/api/')) return url;
+      return `/api/cctv/proxy?url=${encodeURIComponent(url)}`;
+    };
 
-  // Prepopulate with scraped India cameras
-  for (const c of indiaCams) {
-    allCams.set(c.id, {
-      id: c.id,
-      name: c.name,
-      lat: c.lat,
-      lng: c.lon,
-      feed_url: c.previewUrl ?? c.streamUrl ?? c.pageUrl,
-      feed_type: (c.streamUrl?.includes('m3u8') || c.previewUrl?.includes('m3u8')) ? 'm3u8' : 'image',
-      source: c.source || 'opencctv.org',
-      category: c.category,
-      city: c.city,
-      state: c.region,
-      country: 'IN'
-    });
-  }
+    for (const res of results) {
+      if (res.status !== 'fulfilled' || !Array.isArray(res.value)) continue;
+      for (const c of res.value) {
+        if (!c || !c.id) continue;
+        if (c.active !== 1 || c.ignored === 1 || c.deactivated_at || c.consecutive_failures > 0 || c.feed_stale_since) continue;
+        if (!c.feed_url || typeof c.feed_url !== 'string' || !/^https?:\/\//i.test(c.feed_url)) continue;
+        if (CCTV_DEAD_SOURCES.has(c.source)) continue;
 
-  for (const list of results) {
-    for (const cam of list) {
-      if (cam && cam.id && Number.isFinite(cam.lat) && Number.isFinite(cam.lng)) {
-        allCams.set(cam.id, cam);
+        const lat = Number(c.lat);
+        const lon = Number(c.lng ?? c.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+
+        const id = `cctv_${c.id}`;
+        if (allCams.has(id)) continue;
+
+        const feedUrl = c.feed_url;
+        const isHls = c.feed_type === 'm3u8' || /\.m3u8(\?|$)/i.test(feedUrl);
+        const isYt = c.feed_type === 'iframe' && /youtube\.com\/embed\/([a-zA-Z0-9_-]+)/i.test(feedUrl);
+        const ytMatch = feedUrl.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/i);
+        const ytId = ytMatch ? ytMatch[1] : undefined;
+
+        const updatedAt = c.last_checked
+          ? new Date(c.last_checked).getTime()
+          : (c.feed_last_modified ? new Date(c.feed_last_modified).getTime() : Date.now());
+
+        const camObj: WorldwideCctvCamera = {
+          id,
+          name: c.name || `Camera ${c.camera_code || c.id}`,
+          lat,
+          lon,
+          pageUrl: `https://opencctv.org/cameras/${c.id}`,
+          previewUrl: isYt ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : proxied(feedUrl),
+          streamUrl: isYt ? `https://www.youtube.com/watch?v=${ytId}` : (isHls ? feedUrl : proxied(feedUrl)),
+          thumbnailUrl: isYt ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : proxied(feedUrl),
+          source: c.source || 'opencctv.org',
+          category: c.category || (isHls ? 'traffic video' : 'public webcam'),
+          city: c.city || undefined,
+          region: c.state || undefined,
+          country: c.country || undefined,
+          location: [c.city, c.state, c.country].filter(Boolean).join(', ') || 'Worldwide',
+          updatedAt,
+          description: c.description || undefined,
+          feedType: isYt ? 'youtube' : (isHls ? 'm3u8' : (c.feed_type === 'mjpeg' ? 'mjpeg' : 'image')),
+          youtubeVideoId: ytId,
+        };
+
+        if (isPlayableFeed(camObj)) {
+          allCams.set(id, camObj);
+        }
       }
     }
+  } catch (err) {
+    logger.warn({ err }, 'OpenCCTV worldwide merge failed');
   }
 
-  // Merge extra sources (SkylineWebcams, Live-Environment-Streams)
-  for (const cam of extraCams) {
-    if (!allCams.has(cam.id)) {
-      allCams.set(cam.id, {
-        id: cam.id,
-        name: cam.name,
-        lat: cam.lat,
-        lng: cam.lon,
-        feed_url: cam.previewUrl ?? cam.streamUrl ?? cam.pageUrl,
-        feed_type: cam.feedType === 'm3u8' ? 'm3u8' : 'image',
-        source: cam.source,
-        category: cam.category,
-        city: cam.city,
-        state: cam.region,
-        country: cam.location?.slice(-2) || undefined,
-      });
+  // 5. Indian CCTV / Webcams
+  try {
+    const resp = await fetch('https://opencctv.org/cameras/india', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'Referer': 'https://opencctv.org/',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resp.ok) {
+      const html = await resp.text();
+      const indiaCams = extractIndiaCctvCameras(html);
+      for (const c of indiaCams) {
+        const isHls = Boolean(c.streamUrl?.includes('m3u8') || c.previewUrl?.includes('m3u8'));
+        const cam: WorldwideCctvCamera = {
+          id: c.id,
+          name: c.name,
+          lat: c.lat,
+          lon: c.lon,
+          pageUrl: c.pageUrl,
+          previewUrl: c.previewUrl,
+          streamUrl: c.streamUrl,
+          thumbnailUrl: c.thumbnailUrl,
+          source: c.source || 'opencctv.org',
+          category: c.category || 'public webcam',
+          city: c.city,
+          region: c.region,
+          location: [c.city, c.region, 'India'].filter(Boolean).join(', '),
+          country: 'IN',
+          updatedAt: Date.now(),
+          feedType: isHls ? 'm3u8' : 'image',
+        };
+        if (!allCams.has(cam.id) && isPlayableFeed(cam)) {
+          allCams.set(cam.id, cam);
+        }
+      }
     }
+  } catch (e) {
+    logger.warn({ err: e }, 'opencctv.org India feed unavailable');
   }
 
-  const cams = Array.from(allCams.values());
-  const hlsCams = shuffleArray(cams.filter(c => c.feed_type === 'm3u8' && c.feed_url && c.feed_url.startsWith('http')));
-  const otherCams = shuffleArray(cams.filter(c => c.feed_type !== 'm3u8'));
-
-  // Merge all cameras without hard limits — prefer YouTube first, then India, then HLS, then all others
-  const addedIds = new Set<string>();
-  const filteredCams: any[] = [];
-
-  // 0. Prepend verified 24/7 global YouTube live streams
-  const ytCams = getVerifiedYoutubeLiveCams();
-  for (const cam of ytCams) {
-    if (addedIds.has(cam.id)) continue;
-    addedIds.add(cam.id);
-    filteredCams.push(cam);
-  }
-
-  // 1. Guarantee scraped Indian cameras are added
-  const indiaSpecific = cams.filter(c => c.country === 'IN');
-  for (const cam of indiaSpecific) {
-    if (addedIds.has(cam.id)) continue;
-    addedIds.add(cam.id);
-    filteredCams.push(cam);
-  }
-
-  // 2. Add all valid HLS (video) streams
-  for (const cam of hlsCams) {
-    if (addedIds.has(cam.id)) continue;
-    addedIds.add(cam.id);
-    filteredCams.push(cam);
-  }
-
-  // 3. Add all other feeds (mjpeg/images)
-  for (const cam of otherCams) {
-    if (addedIds.has(cam.id)) continue;
-    addedIds.add(cam.id);
-    filteredCams.push(cam);
-  }
-
-  const proxied = (url: string | undefined): string | undefined => {
-    if (!url || typeof url !== 'string' || !url.startsWith('http')) return url;
-    if (!url.startsWith('https://opencctv.org/api/')) return url;
-    return `/api/cctv/proxy?url=${encodeURIComponent(url)}`;
-  };
-  return filteredCams.map(cam => {
-    const isYt = cam.feedType === 'youtube' || cam.source === 'youtube' || Boolean(cam.youtubeVideoId);
-    if (isYt) {
-      return {
-        id: cam.id,
-        name: cam.name,
-        lat: cam.lat,
-        lon: cam.lon ?? cam.lng,
-        pageUrl: cam.pageUrl,
-        previewUrl: cam.previewUrl,
-        streamUrl: cam.streamUrl,
-        thumbnailUrl: cam.thumbnailUrl,
-        source: 'youtube',
-        category: cam.category || 'live webcam',
-        city: cam.city,
-        region: cam.region,
-        location: cam.location,
-        updatedAt: cam.updatedAt || Date.now(),
-        description: cam.description,
-        feedType: 'youtube',
-        youtubeVideoId: cam.youtubeVideoId,
-      };
-    }
-    const pageUrl = `https://opencctv.org/cameras/${cam.id}`;
-    const feedUrl = cam.feed_url;
-    return {
-      id: cam.id,
-      name: cam.name || `Camera ${cam.camera_code}`,
-      lat: cam.lat,
-      lon: cam.lng ?? cam.lon,
-      pageUrl,
-      previewUrl: proxied(feedUrl),
-      streamUrl: proxied(feedUrl),
-      thumbnailUrl: proxied(feedUrl),
-      source: cam.source || 'opencctv.org',
-      category: cam.category || 'public webcam',
-      city: cam.city || undefined,
-      region: cam.state || cam.region || undefined,
-      location: [cam.city, cam.state || cam.region, cam.country].filter(Boolean).join(', ') || 'Worldwide',
-      updatedAt: Date.now(),
-      description: cam.description || undefined,
-      feedType: cam.feed_type
-    };
-  });
+  return Array.from(allCams.values());
 }
 
-// Dedicated endpoint for verified 24/7 YouTube live webcams
+/**
+ * Merged worldwide webcam snapshot. Windy image/player URLs are tokenised and
+ * expire after ~15 minutes, so the snapshot is cached inside that window.
+ */
+const CCTV_WORLDWIDE_CACHE_TTL_SECONDS = 15 * 60;
+
+async function getWorldwideCctvPayload(): Promise<WorldwideCctvPayload> {
+  const cached = cache.get<WorldwideCctvPayload>('cctv_worldwide');
+  if (cached) return cached;
+
+  const payload: WorldwideCctvPayload = {
+    source: 'opencctv.org',
+    country: 'Worldwide',
+    updatedAt: Date.now(),
+    cameras: await fetchWorldwideCameras(),
+  };
+  cache.set('cctv_worldwide', payload, CCTV_WORLDWIDE_CACHE_TTL_SECONDS);
+  cache.set('cctv_worldwide_health', computeCctvHealth(payload.cameras), CCTV_WORLDWIDE_CACHE_TTL_SECONDS);
+  return payload;
+}
+
+// Dedicated endpoint for the curated 24/7 YouTube live webcams.
 app.get('/api/cctv/youtube', (_req: express.Request, res: express.Response) => {
-  const cameras = getVerifiedYoutubeLiveCams();
+  const cameras = getCuratedLiveCams();
   res.json({
     source: 'youtube',
     country: 'Worldwide',
@@ -2682,6 +2622,51 @@ app.get('/api/cctv/youtube', (_req: express.Request, res: express.Response) => {
     total: cameras.length,
     cameras,
   });
+});
+
+// Dedicated endpoint for Windy Webcams v3 (supports bbox and category filters)
+app.get('/api/cctv/windy', async (req: express.Request, res: express.Response) => {
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return res.status(400).json({ error: 'limit must be an integer from 1 to 100' });
+  }
+
+  const category = typeof req.query.category === 'string' && req.query.category.trim()
+    ? req.query.category.trim()
+    : undefined;
+
+  let bbox: { south: number; west: number; north: number; east: number } | undefined;
+  if (req.query.bbox !== undefined) {
+    if (typeof req.query.bbox !== 'string') {
+      return res.status(400).json({ error: 'bbox must be "south,west,north,east"' });
+    }
+    const parts = req.query.bbox.split(',').map(Number);
+    const [south, west, north, east] = parts;
+    if (parts.length !== 4 || !parts.every(Number.isFinite)) {
+      return res.status(400).json({ error: 'bbox must contain four finite numbers: south,west,north,east' });
+    }
+    if (south < -90 || north > 90 || south >= north || west < -180 || east > 180 || west >= east) {
+      return res.status(400).json({ error: 'bbox must satisfy -90 <= south < north <= 90 and -180 <= west < east <= 180' });
+    }
+    bbox = { south, west, north, east };
+  }
+
+  try {
+    const result = await fetchWindyWebcams({ bbox, category, limit });
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// Category stats for the global webcam feed
+app.get('/api/cctv/categories', async (_req: express.Request, res: express.Response) => {
+  try {
+    const payload = await getWorldwideCctvPayload();
+    res.json(getWebcamCategoryStats(payload.cameras));
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
 });
 
 
@@ -2780,20 +2765,130 @@ app.get('/api/cctv/proxy', async (req: express.Request, res: express.Response) =
   }
 });
 
+// Robust CORS-enabled streaming proxy for external HLS manifests and TS video chunks
+app.all('/api/cctv/stream-proxy', async (req: express.Request, res: express.Response) => {
+  try {
+    const target = String(req.query.url ?? '');
+    if (!target || !/^https?:\/\//i.test(target)) {
+      return res.status(400).json({ error: 'url query param must be a valid http(s) URL' });
+    }
+    const ssrfCheck = await validateOutboundUrl(target);
+    if (!ssrfCheck.safe) {
+      return res.status(400).json({ error: `Refused: ${ssrfCheck.reason ?? 'unsafe URL'}` });
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+
+    const isHls = /\.m3u8(\?|$)/i.test(target);
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+    };
+
+    if (req.headers.range) {
+      headers['Range'] = String(req.headers.range);
+    }
+
+    try {
+      headers['Referer'] = new URL(target).origin + '/';
+    } catch { /* ignore */ }
+
+    const upstream = await fetch(target, {
+      headers,
+      signal: AbortSignal.timeout(isHls ? 10000 : 25000),
+    });
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `Upstream returned HTTP ${upstream.status}` });
+    }
+
+    const contentType = upstream.headers.get('content-type') || '';
+
+    // If HLS playlist (.m3u8 or mpegurl content type)
+    if (isHls || contentType.includes('mpegurl') || contentType.includes('application/x-mpegURL')) {
+      const manifestText = await upstream.text();
+      if (manifestText.includes('#EXTM3U')) {
+        const host = req.get('host') || '127.0.0.1:3001';
+        const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+        const proxyBase = `${proto}://${host}/api/cctv/stream-proxy`;
+        const lines = manifestText.split('\n');
+        const rewrittenLines = lines.map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return line;
+
+          // Rewrite key URIs (e.g. #EXT-X-KEY:METHOD=AES-128,URI="...")
+          if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
+            return line.replace(/URI="([^"]+)"/, (_match, keyUri) => {
+              try {
+                const resolved = new URL(keyUri, target).href;
+                return `URI="${proxyBase}?url=${encodeURIComponent(resolved)}"`;
+              } catch {
+                return `URI="${keyUri}"`;
+              }
+            });
+          }
+
+          if (trimmed.startsWith('#')) return line;
+
+          try {
+            const resolved = new URL(trimmed, target).href;
+            return `${proxyBase}?url=${encodeURIComponent(resolved)}`;
+          } catch {
+            return line;
+          }
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(rewrittenLines.join('\n'));
+      }
+    }
+
+    // Media chunk or direct stream
+    res.setHeader('Content-Type', contentType || 'video/mp2t');
+    if (upstream.headers.has('content-length')) {
+      res.setHeader('Content-Length', upstream.headers.get('content-length')!);
+    }
+    if (upstream.headers.has('content-range')) {
+      res.setHeader('Content-Range', upstream.headers.get('content-range')!);
+      res.status(206);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=60');
+
+    if (!upstream.body) {
+      return res.status(502).json({ error: 'No upstream body' });
+    }
+
+    const reader = upstream.body.getReader();
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } catch {
+        if (!res.writableEnded) res.end();
+      }
+    };
+    await pump();
+  } catch (e) {
+    logger.warn({ err: e }, 'cctv stream-proxy failed');
+    if (!res.headersSent) res.status(502).json({ error: String(e) });
+  }
+});
+
 // Backward-compatible camera route documented by earlier releases.
 app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius', '/api/cctv/worldwide'], async (req: express.Request, res: express.Response) => {
   try {
-    let payload = cache.get<WorldwideCctvPayload>('cctv_worldwide');
-    if (!payload) {
-      payload = {
-        source: 'opencctv.org',
-        country: 'Worldwide',
-        updatedAt: Date.now(),
-        cameras: await fetchWorldwideCameras(),
-      };
-      cache.set('cctv_worldwide', payload, 1800);
-      cache.set('cctv_worldwide_health', computeCctvHealth(payload.cameras), 1800);
-    }
+    const payload = await getWorldwideCctvPayload();
 
     // Serve only playable cameras: drop all-dead provider sources and any
     // feed URLs that use a non-http scheme (txdot://, boating-vic://, ...).
@@ -2837,7 +2932,7 @@ app.get('/api/cctv/health', (_req: express.Request, res: express.Response) => {
       const payload = cache.get<WorldwideCctvPayload>('cctv_worldwide');
       if (!payload) return res.status(503).json({ error: 'CCTV feed not loaded yet — it warms on first request to /api/cctv/worldwide (takes a few seconds)' });
       health = computeCctvHealth(payload.cameras);
-      cache.set('cctv_worldwide_health', health, 1800);
+      cache.set('cctv_worldwide_health', health, CCTV_WORLDWIDE_CACHE_TTL_SECONDS);
     }
     res.json(health);
   } catch (e) {
@@ -3395,9 +3490,9 @@ app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
 
 // AirLabs API (requires API key)
 app.get('/api/airlabs', async (req: express.Request, res: express.Response) => {
-  const apiKey = req.headers['x-airlabs-key'] as string || process.env.AIRLABS_API_KEY;
+  const apiKey = req.headers['x-airlabs-key'] as string || keyManager.get('AIRLABS_API_KEY');
   if (!apiKey) {
-    res.status(503).json({ error: 'AirLabs API key not configured. Add in Settings or set AIRLABS_API_KEY in .env' });
+    res.status(503).json({ error: 'AirLabs API key not configured. Please configure it in Settings -> API Vault.' });
     return;
   }
   try {
@@ -4188,14 +4283,14 @@ app.get('/api/firms', async (req: express.Request, res: express.Response) => {
     dayRange = 7;
   }
 
-  const mapKey = process.env.NASA_FIRMS_MAP_KEY;
+  const mapKey = keyManager.get('NASA_FIRMS_MAP_KEY');
   if (!mapKey) {
     res.json({
       hotspots: [],
       configured: false,
       source: 'NASA FIRMS VIIRS SNPP NRT',
       dayRange,
-      message: 'NASA FIRMS is not configured. Set NASA_FIRMS_MAP_KEY to enable satellite fire detections.',
+      message: 'NASA FIRMS is not configured. Configure NASA_FIRMS_MAP_KEY in the API Vault to enable satellite fire detections.',
     });
     return;
   }
@@ -4609,7 +4704,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
 
   // ── 1. NewsAPI ──
   sources.push(safeFetch('NewsAPI', async (signal) => {
-    const key = process.env.NEWSAPI_API_KEY;
+    const key = keyManager.get('NEWSAPI_API_KEY');
     if (!key) return;
     const resp = await fetch(
       `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR election OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
@@ -4877,7 +4972,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
   const sources: Promise<void>[] = [];
 
   sources.push(safeFetch('NewsAPI', async (signal) => {
-    const key = process.env.NEWSAPI_API_KEY;
+    const key = keyManager.get('NEWSAPI_API_KEY');
     if (!key) return;
     const resp = await fetch(
       `https://newsapi.org/v2/everything?q=(earthquake OR disaster OR hurricane OR flood OR wildfire OR storm OR conflict OR election OR crisis)&sortBy=publishedAt&pageSize=10&language=en&apiKey=${key}`,
@@ -5483,9 +5578,9 @@ app.get('/api/submarine-cables', async (_req: express.Request, res: express.Resp
 //    ?point={lat},{lon}&unit=KMPH&key=...   (service version 4, verified live)
 //    Key stays server-side (.env TOMTOM_API_KEY) — never shipped to the browser.
 async function fetchTomTomFlowSegment(lat: number, lon: number, unit: string): Promise<any> {
-  const apiKey = process.env.TOMTOM_API_KEY;
+  const apiKey = keyManager.get('TOMTOM_API_KEY');
   if (!apiKey) {
-    throw new Error('TOMTOM_API_KEY is not configured — get a key at https://developer.tomtom.com/ and set it in the server .env');
+    throw new Error('TOMTOM_API_KEY is not configured — please configure it in Settings -> API Vault');
   }
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     throw new Error('TomTom flow requires numeric lat/lon');
@@ -5583,7 +5678,7 @@ app.get('/api/ais/status', async (_req: express.Request, res: express.Response) 
   res.json({
     connected: tracker?.isConnected() ?? false,
     vesselCount: tracker?.getVesselCount() ?? 0,
-    apiKeyConfigured: !!process.env.AIS_STREAM_API_KEY,
+    apiKeyConfigured: !!keyManager.get('AIS_STREAM_API_KEY'),
   });
 });
 
@@ -5616,9 +5711,9 @@ app.get('/api/ucs-satellites', (_req: express.Request, res: express.Response) =>
 // failures return 502. A zone is only ever reported with the carbon
 // intensity Electricity Maps actually returned for it.
 async function fetchElectricityMapZones(): Promise<any[]> {
-  const apiKey = process.env.ELECTRICITY_MAPS_API_KEY;
+  const apiKey = keyManager.get('ELECTRICITY_MAPS_API_KEY');
   if (!apiKey) {
-    throw new Error('ELECTRICITY_MAPS_API_KEY is not configured — set it in the server .env (register at https://www.electricitymaps.com/)');
+    throw new Error('ELECTRICITY_MAPS_API_KEY is not configured — please configure it in Settings -> API Vault');
   }
   const headers = { 'auth-token': apiKey };
 
@@ -5738,7 +5833,7 @@ app.get('/api/animal-migrations', async (_req: express.Request, res: express.Res
 // ── WAQI (World Air Quality Index) ──────────────────────────────
 app.get('/api/waqi', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.WAQI_API_KEY;
+    const apiKey = keyManager.get('WAQI_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'WAQI_API_KEY not configured' });
 
     const { city = 'here', lat, lon } = req.query;
@@ -5794,7 +5889,7 @@ app.get('/api/reliefweb', async (req: express.Request, res: express.Response) =>
 // ── Cloudflare Radar (Internet Traffic) ─────────────────────────
 app.get('/api/cloudflare-radar', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.CLOUDFLARE_RADAR_API_KEY;
+    const apiKey = keyManager.get('CLOUDFLARE_RADAR_API_KEY') || keyManager.get('CLOUDFLARE_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'CLOUDFLARE_RADAR_API_KEY not configured' });
 
     const { location = 'ALL', dateRange = '1d' } = req.query;
@@ -5818,7 +5913,7 @@ app.get('/api/cloudflare-radar', async (req: express.Request, res: express.Respo
 // ── AbuseIPDB (Cyber Threat Intel) ──────────────────────────────
 app.get('/api/abuseipdb', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.ABUSEIPDB_API_KEY;
+    const apiKey = keyManager.get('ABUSEIPDB_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'ABUSEIPDB_API_KEY not configured' });
 
     const { ipAddress, maxAgeInDays = '90', verbose = '' } = req.query;
@@ -5855,8 +5950,8 @@ app.get('/api/urlhaus', async (req: express.Request, res: express.Response) => {
     const upstream = (url || host)
       ? (url ? 'https://urlhaus-api.abuse.ch/v1/url/' : 'https://urlhaus-api.abuse.ch/v1/host/')
       : `https://urlhaus-api.abuse.ch/v1/urls/recent/limit/${encodeURIComponent(String(Math.min(Math.max(parseInt(String(limit), 10) || 100, 1), 1000)))}/`;
-    const authKey = process.env.URLHAUS_AUTH_KEY;
-    if (!authKey) return res.status(503).json({ error: 'URLHAUS_AUTH_KEY is not configured — abuse.ch requires an auth key (register at https://urlhaus.abuse.ch/api/)' });
+    const authKey = keyManager.get('URLHAUS_AUTH_KEY');
+    if (!authKey) return res.status(503).json({ error: 'URLHAUS_AUTH_KEY is not configured — please configure it in Settings -> API Vault' });
     const postBody = url ? new URLSearchParams({ url: String(url) }) : host ? new URLSearchParams({ host: String(host) }) : undefined;
     const resp = await fetch(upstream, {
       method: url || host ? 'POST' : 'GET',
@@ -5875,7 +5970,7 @@ app.get('/api/urlhaus', async (req: express.Request, res: express.Response) => {
 // ── FRED (Federal Reserve Economic Data) ────────────────────────
 app.get('/api/fred', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.FRED_API_KEY;
+    const apiKey = keyManager.get('FRED_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'FRED_API_KEY not configured' });
 
     const { series_id, limit = '100', sort_order = 'desc' } = req.query;
@@ -5903,7 +5998,7 @@ app.get('/api/fred', async (req: express.Request, res: express.Response) => {
 // ── EIA (Energy Information Administration) ─────────────────────
 app.get('/api/eia', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.EIA_API_KEY;
+    const apiKey = keyManager.get('EIA_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'EIA_API_KEY not configured' });
 
     const route = String(req.query.route || 'electricity/rto/fuel-type-data/data');
@@ -5935,7 +6030,7 @@ app.get('/api/eia', async (req: express.Request, res: express.Response) => {
 // ── Alpha Vantage (Financial Data) ──────────────────────────────
 app.get('/api/alphavantage', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.ALPHAVANTAGE_API_KEY;
+    const apiKey = keyManager.get('ALPHAVANTAGE_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'ALPHAVANTAGE_API_KEY not configured' });
 
     const { function: fn = 'TIME_SERIES_DAILY', symbol, interval = 'daily', outputsize = 'compact' } = req.query;
@@ -5967,7 +6062,15 @@ app.get('/api/coingecko', async (req: express.Request, res: express.Response) =>
     if (cached) return res.json(cached);
 
     const params = new URLSearchParams({ vs_currency: String(vs_currency), ids: String(ids), sparkline: String(sparkline) });
-    const resp = await fetch(`https://api.coingecko.com/api/v3/coins/markets?${params}`);
+    const cgHeaders: Record<string, string> = { Accept: 'application/json' };
+    const cgProKey = keyManager.get('COINGECKO_API_KEY');
+    const cgDemoKey = keyManager.get('COINGECKO_DEMO_API_KEY');
+    if (cgProKey) {
+      cgHeaders['x-cg-pro-api-key'] = cgProKey;
+    } else if (cgDemoKey) {
+      cgHeaders['x-cg-demo-api-key'] = cgDemoKey;
+    }
+    const resp = await fetch(`https://api.coingecko.com/api/v3/coins/markets?${params}`, { headers: cgHeaders });
     if (!resp.ok) return res.status(resp.status).json({ error: `CoinGecko ${resp.status}` });
     const data = await resp.json();
     cache.set(cacheKey, data, 120);
@@ -5997,7 +6100,7 @@ app.get('/api/gie', async (_req: express.Request, res: express.Response) => {
 // ── ENTSO-E (European Electricity Transparency Platform) ────────
 app.get('/api/entsoe', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.ENTSOE_API_KEY;
+    const apiKey = keyManager.get('ENTSOE_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'ENTSOE_API_KEY not configured' });
 
     const { in_domain = '10YDE-RWENET--I', out_domain = '10YDE-RWENET--I', period_start, period_end } = req.query;
@@ -6026,7 +6129,7 @@ app.get('/api/entsoe', async (req: express.Request, res: express.Response) => {
 // ── Brave Search ────────────────────────────────────────────────
 app.get('/api/brave-search', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+    const apiKey = keyManager.get('BRAVE_SEARCH_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'BRAVE_SEARCH_API_KEY not configured' });
 
     const { q, count = '10' } = req.query;
@@ -6057,7 +6160,7 @@ app.get('/api/brave-search', async (req: express.Request, res: express.Response)
 // ── NewsAPI (News Aggregation) ───────────────────────────────────
 app.get('/api/newsapi', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.NEWSAPI_API_KEY;
+    const apiKey = keyManager.get('NEWSAPI_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'NEWSAPI_API_KEY not configured' });
 
     const { q = 'global', sources, category, pageSize = '20', page = '1' } = req.query;
@@ -6084,7 +6187,7 @@ app.get('/api/newsapi', async (req: express.Request, res: express.Response) => {
 app.get('/api/sentiment/news', async (req: express.Request, res: express.Response) => {
   try {
     const q = String(req.query.q || 'disaster OR crisis OR event OR weather').replace(/[^a-zA-Z0-9 ]/g, '');
-    const apiKey = process.env.NEWSAPI_API_KEY;
+    const apiKey = keyManager.get('NEWSAPI_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'NEWSAPI_API_KEY not configured' });
 
     const cacheKey = `sentiment_${q}`;
@@ -6191,7 +6294,7 @@ app.get('/api/imf', async (req: express.Request, res: express.Response) => {
 // ── UN Comtrade (Trade Data) ────────────────────────────────────
 app.get('/api/comtrade', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.COMTRADE_API_KEY;
+    const apiKey = keyManager.get('COMTRADE_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'COMTRADE_API_KEY not configured' });
 
     const { reporterCode = '842', partnerCode = '156', period = '2024', flowCode = 'M', cmdCode = 'TOTAL' } = req.query;
@@ -6220,8 +6323,8 @@ app.get('/api/comtrade', async (req: express.Request, res: express.Response) => 
 // ── OTX (AlienVault Threat Intelligence) ────────────────────────
 app.get('/api/otx', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.OTX_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'OTX_API_KEY is not configured — register at otx.alienvault.com and set it in the server .env' });
+    const apiKey = keyManager.get('OTX_API_KEY');
+    if (!apiKey) return res.status(503).json({ error: 'OTX_API_KEY is not configured — please configure it in Settings -> API Vault' });
 
     const { section = 'general', limit = '50' } = req.query;
 
@@ -6244,7 +6347,7 @@ app.get('/api/otx', async (req: express.Request, res: express.Response) => {
 // ── Exa (AI Search) ─────────────────────────────────────────────
 app.post('/api/exa', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.EXA_API_KEY;
+    const apiKey = keyManager.get('EXA_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'EXA_API_KEY not configured' });
 
     const { query, numResults = 10, type = 'neural' } = req.body;
@@ -6266,7 +6369,7 @@ app.post('/api/exa', async (req: express.Request, res: express.Response) => {
 // ── Firecrawl (Web Scraping) ────────────────────────────────────
 app.post('/api/firecrawl', async (req: express.Request, res: express.Response) => {
   try {
-    const apiKey = process.env.FIRECRAWL_API_KEY;
+    const apiKey = keyManager.get('FIRECRAWL_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'FIRECRAWL_API_KEY not configured' });
 
     const { url, formats = ['markdown'], onlyMainContent = true } = req.body;
@@ -6291,9 +6394,9 @@ app.post('/api/firecrawl', async (req: express.Request, res: express.Response) =
 // ── UCDP GED conflict events. Honest contract: no token → explicit 503;
 //    upstream failure → 502. Never a fake-empty 200 'graceful response'.
 async function fetchUcdpConflictEvents(): Promise<any[]> {
-  const token = process.env.UCDP_ACCESS_TOKEN;
+  const token = keyManager.get('UCDP_ACCESS_TOKEN');
   if (!token) {
-    throw new Error('UCDP_ACCESS_TOKEN is not configured — register at https://ucdp.uu.se/apidocs/ and set it in the server .env');
+    throw new Error('UCDP_ACCESS_TOKEN is not configured — please configure it in Settings -> API Vault');
   }
   const year = new Date().getFullYear();
   const resp = await fetch(`https://ucdpapi.pcr.uu.se/api/ged/${year}?pagesize=100`, {
@@ -6519,7 +6622,12 @@ app.get('/api/space-weather/donki', async (req: express.Request, res: express.Re
   try {
     const startDateParam = req.query.startDate as string | undefined;
     const endDateParam = req.query.endDate as string | undefined;
-    const donkiKey = process.env.DONKI_API_KEY || 'DEMO_KEY';
+    const donkiKey = (keyManager.get('DONKI_API_KEY') || keyManager.get('NASA_API_KEY') || process.env.DONKI_API_KEY || process.env.NASA_API_KEY || '').trim();
+    if (!donkiKey) {
+      return res.status(401).json({
+        error: 'NASA DONKI API key is not configured in the Vault. Add DONKI_API_KEY or NASA_API_KEY in the API Vault to enable live space weather notifications.',
+      });
+    }
     const now = new Date();
     const start = startDateParam || new Date(now.getTime() - 30 * 86400000).toISOString().split('T')[0];
     const end = endDateParam || now.toISOString().split('T')[0];
@@ -6580,7 +6688,7 @@ app.get('/api/gold', async (_req: express.Request, res: express.Response) => {
     if (cached) return res.json(cached);
 
     const resp = await fetch('https://www.goldapi.io/api/XAU/USD', {
-      headers: { 'x-access-token': process.env.GOLDAPI_API_KEY || '' },
+      headers: { 'x-access-token': keyManager.get('GOLDAPI_API_KEY') || '' },
     });
     if (!resp.ok) {
       // Fallback to free gold price API
@@ -8060,9 +8168,9 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
     return Array.isArray(geo?.features) ? geo.features : [];
   },
   'eu_gas_storage': async () => {
-    const apiKey = process.env.GIE_API_KEY;
+    const apiKey = keyManager.get('GIE_API_KEY');
     if (!apiKey) {
-      throw new Error('GIE_API_KEY is not configured — register at https://agsi.gie.eu/account and set it in the server .env');
+      throw new Error('GIE_API_KEY is not configured — please configure it in Settings -> API Vault');
     }
     // EU/UK members operating underground gas storage (ISO-2 codes, AGSI+ coverage).
     const countryCodes = ['AT','BE','BG','HR','CZ','DK','EE','FR','DE','GR','HU','IE','IT','LV','LT','NL','PL','PT','RO','SK','SI','ES','SE','GB'];
@@ -8116,9 +8224,9 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   'acled_conflict': async () => {
     try {
-      const key = process.env.ACLED_API_KEY || '';
-      const email = process.env.ACLED_EMAIL || '';
-      if (!key) { logger.info('ACLED_API_KEY not configured — register at acleddata.com for free access'); return []; }
+      const key = keyManager.get('ACLED_API_KEY') || '';
+      const email = keyManager.get('ACLED_EMAIL') || '';
+      if (!key) { logger.info('ACLED_API_KEY not configured in API Vault'); return []; }
       const resp = await fetch(`https://api.acleddata.com/acled/read?limit=100&format=json&key=${key}&email=${email}`, { signal: AbortSignal.timeout(15000) });
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -8207,7 +8315,7 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   'shodan_iot': async () => {
     try {
-      const apiKey = process.env.SHODAN_API_KEY;
+      const apiKey = keyManager.get('SHODAN_API_KEY');
       if (!apiKey) return [];
       const resp = await fetch(`https://api.shodan.io/shodan/host/search?key=${apiKey}&query=country:US&limit=50`, { signal: AbortSignal.timeout(15000) });
       if (!resp.ok) return [];
@@ -8217,7 +8325,7 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   'virustotal_threats': async () => {
     try {
-      const apiKey = process.env.VIRUSTOTAL_API_KEY;
+      const apiKey = keyManager.get('VIRUSTOTAL_API_KEY');
       if (!apiKey) { logger.info('VIRUSTOTAL_API_KEY not configured'); return []; }
       const resp = await fetch('https://www.virustotal.com/api/v3/files?limit=50', {
         headers: { 'x-apikey': apiKey },
@@ -8253,7 +8361,7 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   'cloudflare_radar_attacks': async () => {
     try {
-      const apiKey = process.env.CLOUDFLARE_API_KEY;
+      const apiKey = keyManager.get('CLOUDFLARE_API_KEY') || keyManager.get('CLOUDFLARE_API_TOKEN');
       if (!apiKey) return [];
       const resp = await fetch('https://api.cloudflare.com/client/v4/radar/attacks/summary?dateRange=7d', { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) });
       if (!resp.ok) return [];
@@ -9326,7 +9434,7 @@ function apiTokenGuard(req: express.Request, res: express.Response, next: expres
   if (req.originalUrl.startsWith('/api/sandbox/') && (req as any).userId) {
     return next();
   }
-  const expected = process.env.SANDBOX_API_TOKEN;
+  const expected = keyManager.get('SANDBOX_API_TOKEN');
   if (!expected) {
     logger.error('SANDBOX_API_TOKEN is not set — refusing sandbox/MCP request');
     return res.status(401).json({ error: 'Unauthorized — SANDBOX_API_TOKEN must be configured' });
@@ -9464,7 +9572,7 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
   };
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+    const apiKey = keyManager.get('GEMINI_API_KEY') || '';
     let subtasks = TaskPlanner.decompose(goal);
     if (apiKey) {
       try {
@@ -9658,7 +9766,7 @@ app.post('/api/agent/search-all', async (req: express.Request, res: express.Resp
 app.get('/api/agent/geocode', async (req: express.Request, res: express.Response) => {
   const text = (req.query.q as string) || '';
   if (!text) return res.status(400).json({ error: 'Query required' });
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const apiKey = keyManager.get('GEMINI_API_KEY') || '';
   const result = await IntentRouter.geocode(text, apiKey);
   if (result) return res.json(result);
   res.json({ found: false, error: 'Location not found' });
@@ -10342,9 +10450,7 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
   const emailTo = (
     (req.body as any).recipientEmail ||
     (req.body as any).to ||
-    process.env.GMAIL_REPORT_TO ||
     keyManager.get('GMAIL_REPORT_TO') ||
-    process.env.GMAIL_SMTP_USER ||
     keyManager.get('GMAIL_SMTP_USER') ||
     ''
   ).trim();
@@ -10427,7 +10533,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   const requestId = (req as any).correlationId || crypto.randomUUID();
   // Enterprise: API keys are resolved exclusively from the server environment (.env).
   // No per-user vault — users can no longer paste keys in the browser.
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const apiKey = keyManager.get('GEMINI_API_KEY') || '';
   // Effective Gemini key for multimodal vision calls — env only.
   const effectiveGeminiKey = apiKey;
   // Client-selected tier from the request body
@@ -12483,7 +12589,7 @@ app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.
     ? userPrompt.trim()
     : 'Analyze this image in detail. If it is a satellite image, map, chart, or geographic area, describe what you see including any notable features, patterns, colors, text, or structures.';
 
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const apiKey = keyManager.get('GEMINI_API_KEY') || '';
   if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
 
   const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
@@ -12647,17 +12753,17 @@ app.get('/api/data-layers/status', authGuard, askRateLimit, async (_req: express
       { id: 'dsn', name: 'NASA Deep Space Network', url: 'https://eyes.nasa.gov/dsn/data/dsn.xml', category: 'space' },
     ];
 
-    // Check which API keys are configured
+    // Check which API keys are configured in Vault
     const apiKeys = {
-      gemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY),
-      groq: !!process.env.GROQ_API_KEY,
-      cerebras: !!process.env.CEREBRAS_API_KEY,
-      sambanova: !!process.env.SAMBANOVA_API_KEY,
-      openrouter: !!process.env.OPENROUTER_API_KEY,
-      together: !!process.env.TOGETHER_API_KEY,
-      anthropic: !!process.env.ANTHROPIC_API_KEY,
-      firms: !!process.env.NASA_FIRMS_MAP_KEY,
-      airlabs: !!process.env.AIRLABS_API_KEY,
+      gemini: !!(keyManager.get('GEMINI_API_KEY') || keyManager.get('GOOGLE_GEMINI_API_KEY')),
+      groq: !!keyManager.get('GROQ_API_KEY'),
+      cerebras: !!keyManager.get('CEREBRAS_API_KEY'),
+      sambanova: !!keyManager.get('SAMBANOVA_API_KEY'),
+      openrouter: !!keyManager.get('OPENROUTER_API_KEY'),
+      together: !!keyManager.get('TOGETHER_API_KEY'),
+      anthropic: !!keyManager.get('ANTHROPIC_API_KEY'),
+      firms: !!keyManager.get('NASA_FIRMS_MAP_KEY'),
+      airlabs: !!keyManager.get('AIRLABS_API_KEY'),
     };
 
     // Probe each layer in parallel with short timeouts
@@ -13867,7 +13973,7 @@ app.post('/api/tools/execute', authGuard, toolExecuteRateLimit, async (req: expr
 // dynamicTools.generateTool() directly and is unaffected.
 const toolGenerateRateLimit = perUserRateLimiter(5, 3600000); // 5 generations/hr/user
 app.post('/api/tools/generate', authGuard, toolGenerateRateLimit, async (req: express.Request, res: express.Response) => {
-  const adminToken = process.env.TERRANOETIS_ADMIN_TOKEN || '';
+  const adminToken = keyManager.get('TERRANOETIS_ADMIN_TOKEN') || '';
   if (!adminToken) {
     return res.status(403).json({ error: 'Tool generation is disabled — set TERRANOETIS_ADMIN_TOKEN to enable (code-executing feature, audit S1)' });
   }
@@ -14500,7 +14606,7 @@ app.get('/api/ml/synthetic-data', (req: express.Request, res: express.Response) 
 });
 
 app.post('/api/ml/synthetic-data/generate', async (_req: express.Request, res: express.Response) => {
-  const example = await generateTrainingExample(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '');
+  const example = await generateTrainingExample(keyManager.get('GEMINI_API_KEY') || '');
   res.json({ ok: !!example, example: example ? { ...example, isSynthetic: true } : null, isSynthetic: true });
 });
 
@@ -14583,7 +14689,7 @@ app.get('/api/ml/predict/report', async (req: express.Request, res: express.Resp
     layers,
     history: [],
   };
-  const report = await predictor.generatePredictionReport(input, process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '');
+  const report = await predictor.generatePredictionReport(input, keyManager.get('GEMINI_API_KEY') || '');
   res.json({ report });
 });
 
@@ -14653,7 +14759,7 @@ app.get('/api/predict/validation-report', (_req: express.Request, res: express.R
 // (same shared-secret pattern as /api/tools/generate) since it triggers
 // outbound queries.
 app.post('/api/predict/resolve-now', authGuard, async (req: express.Request, res: express.Response) => {
-  const adminToken = process.env.TERRANOETIS_ADMIN_TOKEN || '';
+  const adminToken = keyManager.get('TERRANOETIS_ADMIN_TOKEN') || '';
   if (!adminToken || (req.headers['x-admin-token'] as string) !== adminToken) {
     return res.status(403).json({ error: 'Admin token required' });
   }
@@ -14932,8 +15038,8 @@ app.get('/api/conflict/acled', async (req: express.Request, res: express.Respons
     const startDate = req.query.start_date as string || '';
     const endDate = req.query.end_date as string || '';
     const limit = parseInt(req.query.limit as string) || 100;
-    const key = process.env.ACLED_API_KEY || '';
-    const email = process.env.ACLED_EMAIL || '';
+    const key = keyManager.get('ACLED_API_KEY') || '';
+    const email = keyManager.get('ACLED_EMAIL') || '';
     
     const params = new URLSearchParams({
       limit: String(limit),
@@ -15073,7 +15179,7 @@ app.get('/api/health/who-disease/:indicator', async (req: express.Request, res: 
 app.get('/api/cyber/shodan', async (req: express.Request, res: express.Response) => {
   try {
     const query = req.query.q as string || 'country:US';
-    const apiKey = process.env.SHODAN_API_KEY;
+    const apiKey = keyManager.get('SHODAN_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'SHODAN_API_KEY not configured' });
     const resp = await fetch(`https://api.shodan.io/shodan/host/search?key=${apiKey}&query=${encodeURIComponent(query)}&limit=50`, {
       signal: AbortSignal.timeout(15000),
@@ -15092,7 +15198,7 @@ app.get('/api/cyber/virustotal', async (req: express.Request, res: express.Respo
   try {
     const url = req.query.url as string;
     if (!url) return res.status(400).json({ error: 'url query parameter required' });
-    const apiKey = process.env.VIRUSTOTAL_API_KEY;
+    const apiKey = keyManager.get('VIRUSTOTAL_API_KEY');
     if (!apiKey) return res.status(503).json({ error: 'VIRUSTOTAL_API_KEY not configured' });
     const urlId = Buffer.from(url).toString('base64').replace(/=/g, '');
     const resp = await fetch(`https://www.virustotal.com/api/v3/urls/${urlId}`, {
@@ -15163,18 +15269,15 @@ app.get('/api/intelligence/disinformation', async (req: express.Request, res: ex
 
 // ── Correlation Cards — handled by pulseRouter at /api/pulse/correlation/cards ──
 
-// Production: serve the built frontend (dist/) from the same origin as the
-// API, so `docker compose up` yields a single-port deployment. In development
-// the Vite server on :3000 serves the client instead.
-if (IS_PROD) {
-  const distDir = path.join(__dirname, '..', 'dist');
-  if (fs.existsSync(path.join(distDir, 'index.html'))) {
-    app.use(express.static(distDir, { index: false, maxAge: '1h' }));
-    app.get(/^(?!\/api(?:\/|$)).*/, (_req: express.Request, res: express.Response) => {
-      res.sendFile(path.join(distDir, 'index.html'));
-    });
-    logger.info({ distDir }, 'serving built frontend from Express (single-origin)');
-  }
+// Serve the built frontend (dist/) whenever available from the same origin as the
+// API, so `docker compose up`, standalone, and desktop test flows yield a single-port deployment.
+const distDir = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir, { index: false, maxAge: '1h' }));
+  app.get(/^(?!\/api(?:\/|$)).*/, (_req: express.Request, res: express.Response) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  logger.info({ distDir }, 'serving built frontend from Express (single-origin)');
 }
 
 // Global 404 + error handler (must be last)
@@ -15225,7 +15328,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
     memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
 
     // Start ML pipeline background tasks
-    startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
+    startSyntheticDataGeneration(keyManager.get('GEMINI_API_KEY') || '', 3600000);
     logger.info('Deferred background systems initialized smoothly');
   }, 15000);
 });
@@ -15236,7 +15339,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
  * are restarted. The HTTP server, websocket, SSE stream, and job queue stay up.
  */
 function registerPowerEngines(): void {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const apiKey = keyManager.get('GEMINI_API_KEY') || '';
   registerPowerEngine('reflexEngine', () => reflexEngine.stop(), () => reflexEngine.start());
   registerPowerEngine('reflexActionHandler', () => reflexActionHandler.stop(), () => reflexActionHandler.start());
   registerPowerEngine('forkManager', () => forkManager.pauseAll(), () => forkManager.resumeAll());

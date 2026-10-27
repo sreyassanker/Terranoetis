@@ -23,17 +23,7 @@
 
 import { fromUrl } from 'geotiff';
 import { fetchMeasuredB11Point, fetchMeasuredB11Window, dnToBt11 } from './landsatL1Thermal';
-import { createRequire } from 'module';
-const _require = createRequire(import.meta.url);
-const proj4 = _require('proj4') as {
-  defs(name: string, def: string): void;
-  (from: string, to: string): {
-    forward(coords: number[]): number[];
-    inverse(coords: number[]): number[];
-  };
-  forward(coords: number[]): number[];
-  inverse(coords: number[]): number[];
-};
+import proj4 from 'proj4';
 
 
 const FETCH_TIMEOUT = 60000;
@@ -707,7 +697,7 @@ async function readCogBboxWindow(
 /** Bilinear sample of a band window at (lat, lon). Returns undefined outside the window. */
 function sampleBandWindow(
   bw: { win: BandWindow; geom: BandGeom },
-  toUtm: ReturnType<typeof proj4>,
+  toUtm: { forward(c: number[]): number[]; inverse(c: number[]): number[] },
   lat: number, lon: number,
   nearest = false,
 ): number | undefined {

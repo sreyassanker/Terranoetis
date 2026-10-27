@@ -14,6 +14,7 @@
  */
 
 import NodeCache from 'node-cache';
+import { keyManager } from '../keyManager';
 
 const cache = new NodeCache({ stdTTL: 7200, checkperiod: 600 });
 
@@ -97,8 +98,8 @@ function buildImergFilename(
  * Uses BASIC auth to exchange credentials for a session token.
  */
 function getEarthdataToken(): string | null {
-  const user = process.env.EARTHDATA_USERNAME;
-  const pass = process.env.EARTHDATA_PASSWORD;
+  const user = keyManager.get('EARTHDATA_USERNAME');
+  const pass = keyManager.get('EARTHDATA_PASSWORD');
   if (!user || !pass) return null;
   return Buffer.from(`${user}:${pass}`).toString('base64');
 }

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from '../observability/logger';
+import { keyManager } from '../keyManager';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 
@@ -26,7 +27,7 @@ router.get('/market/quotes', async (req: Request, res: Response) => {
     const cached = getCached<unknown[]>(cacheKey, 60 * 1000);
     if (cached) return res.json({ quotes: cached });
 
-    const finnhubKey = process.env.FINNHUB_API_KEY;
+    const finnhubKey = keyManager.get('FINNHUB_API_KEY');
     const stockSymbols = symbols.filter(s => !s.includes('-USD') && !s.includes('USDT'));
     const cryptoSymbols = symbols.filter(s => s.includes('-USD') || s.includes('USDT'));
 
@@ -90,7 +91,15 @@ router.get('/market/quotes', async (req: Request, res: Response) => {
       });
       try {
         const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(',')}&vs_currencies=usd&include_24hr_change=true`;
-        const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const cgHeaders: Record<string, string> = { Accept: 'application/json' };
+        const cgProKey = keyManager.get('COINGECKO_API_KEY');
+        const cgDemoKey = keyManager.get('COINGECKO_DEMO_API_KEY');
+        if (cgProKey) {
+          cgHeaders['x-cg-pro-api-key'] = cgProKey;
+        } else if (cgDemoKey) {
+          cgHeaders['x-cg-demo-api-key'] = cgDemoKey;
+        }
+        const resp = await fetch(url, { headers: cgHeaders, signal: AbortSignal.timeout(5000) });
         if (resp.ok) {
           const data = await resp.json() as Record<string, { usd?: number; usd_24h_change?: number }>;
           for (let i = 0; i < cryptoSymbols.length; i++) {
@@ -125,7 +134,7 @@ router.get('/market/candle', async (req: Request, res: Response) => {
     };
     const yahooRange = rangeMap[rawRange] || '1mo';
 
-    const finnhubKey = process.env.FINNHUB_API_KEY;
+    const finnhubKey = keyManager.get('FINNHUB_API_KEY');
     if (finnhubKey) {
       const now = Math.floor(Date.now() / 1000);
       const secondsMap: Record<string, number> = { '5d': 432000, '1m': 2592000, '6m': 15552000, '1y': 31536000, '5y': 157680000, '1D': 86400, '1W': 604800, '1M': 2592000, '3M': 7776000, '1Y': 31536000 };
@@ -171,7 +180,7 @@ router.get('/energy/prices', async (_req: Request, res: Response) => {
     if (cached) return res.json({ prices: cached });
 
     const results: unknown[] = [];
-    const eiaKey = process.env.EIA_API_KEY;
+    const eiaKey = keyManager.get('EIA_API_KEY');
 
     // EIA data (WTI, Brent, NatGas)
     if (eiaKey) {

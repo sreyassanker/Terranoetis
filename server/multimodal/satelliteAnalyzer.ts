@@ -2,6 +2,7 @@ import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
 import { memoryManagerV2 } from '../memoryV2/memoryManagerV2';
+import { keyManager } from '../keyManager';
 
 export interface SatelliteObservation {
   source: string;
@@ -29,10 +30,12 @@ export interface TileCache {
 export class SatelliteAnalyzer {
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private apiBase = process.env.COPERNICUS_API_BASE_URL || 'https://sh.dataspace.copernicus.eu';
+  private get apiBase(): string {
+    return keyManager.get('COPERNICUS_API_BASE_URL') || 'https://sh.dataspace.copernicus.eu';
+  }
   private collection = '/ogc/wfs/45001'; // Sentinel-2 L2A
   private get token(): string | undefined {
-    return process.env.COPERNICUS_TOKEN;
+    return keyManager.get('COPERNICUS_TOKEN') || undefined;
   }
   private get authHeaders(): Record<string, string> | undefined {
     return this.token ? { Authorization: `Bearer ${this.token}` } : undefined;

@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { kaggleClient } from '../../kaggle/kaggleClient';
 import { keyManager } from '../../keyManager';
 import { API_METADATA } from '../../apiMetadata';
@@ -6,15 +9,26 @@ import { isLocalSimType } from '../../kaggle/simRunner';
 
 describe('Kaggle In-App API Vault Integration', () => {
   const originalEnv = { ...process.env };
+  let tempTestDir: string | null = null;
+  let originalVaultDir: string;
 
   beforeEach(() => {
     delete process.env.KAGGLE_USERNAME;
     delete process.env.KAGGLE_KEY;
-    process.env.KAGGLE_CONFIG_DIR = '/tmp/nonexistent-kaggle-dir-' + Date.now();
+    tempTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-test-'));
+    originalVaultDir = (keyManager as any).vaultDir;
+    (keyManager as any).vaultDir = tempTestDir;
+    process.env.KAGGLE_CONFIG_DIR = path.join(tempTestDir, '.kaggle');
     vi.restoreAllMocks();
   });
 
   afterEach(() => {
+    (keyManager as any).vaultDir = originalVaultDir;
+    if (tempTestDir && fs.existsSync(tempTestDir)) {
+      try {
+        fs.rmSync(tempTestDir, { recursive: true, force: true });
+      } catch { /* cleanup */ }
+    }
     process.env = { ...originalEnv };
   });
 
@@ -52,16 +66,13 @@ describe('Kaggle In-App API Vault Integration', () => {
       expect(kaggleClient.hasCredentials()).toBe(true);
     });
 
-    it('resolves credentials from process.env fallback', () => {
+    it('does not fall back to process.env when Vault returns empty (Vault exclusivity)', () => {
       vi.spyOn(keyManager, 'get').mockReturnValue('');
       process.env.KAGGLE_USERNAME = 'env_user';
       process.env.KAGGLE_KEY = 'env_key';
 
       const creds = kaggleClient.getCredentials();
-      expect(creds).not.toBeNull();
-      expect(creds?.username).toBe('env_user');
-      expect(creds?.key).toBe('env_key');
-      expect(creds?.source).toBe('env');
+      expect(creds).toBeNull();
     });
   });
 
@@ -129,6 +140,9 @@ describe('Kaggle In-App API Vault Integration', () => {
     });
 
     it('synchronizes runtime kaggle.json on saveKeys', () => {
+      // Isolate persistToDisk so tests don't modify real vault on disk
+      vi.spyOn(keyManager as any, 'persistToDisk').mockImplementation(() => {});
+
       const result = keyManager.saveKeys({
         KAGGLE_USERNAME: 'sync_user',
         KAGGLE_KEY: 'sync_secret_key',
@@ -137,7 +151,14 @@ describe('Kaggle In-App API Vault Integration', () => {
       expect(result.saved).toBeGreaterThanOrEqual(1);
       expect(process.env.KAGGLE_USERNAME).toBe('sync_user');
       expect(process.env.KAGGLE_KEY).toBe('sync_secret_key');
+
+      // Verify that syncKaggleConfig wrote kaggle.json into temp dir
       expect(process.env.KAGGLE_CONFIG_DIR).toBeDefined();
+      const kaggleJsonPath = path.join(process.env.KAGGLE_CONFIG_DIR!, 'kaggle.json');
+      expect(fs.existsSync(kaggleJsonPath)).toBe(true);
+      const parsed = JSON.parse(fs.readFileSync(kaggleJsonPath, 'utf8'));
+      expect(parsed.username).toBe('sync_user');
+      expect(parsed.key).toBe('sync_secret_key');
     });
   });
 

@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import * as Cesium from 'cesium';
-import { Satellite, Globe, Calendar, Eye, Loader2, X } from 'lucide-react';
+import { Satellite, Globe, Calendar, Eye, Loader2, X, Key } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import { throttledRender } from '@/lib/throttledRender';
+import { authHeaders } from '@/context/AuthContext';
 import {
   GIBS_PRODUCTS, EXTERNAL_DATA_SOURCES, GROUP_LABELS,
   groupProducts,
@@ -66,10 +67,31 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
   const [satStatus, setSatStatus] = useState('');
   const activeSatLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const [productSearch, setProductSearch] = useState('');
-  const [sentinelHubKey, setSentinelHubKey] = useState(() => {
-    try { return localStorage.getItem('sentinel_hub_api_key') || ''; } catch { return ''; }
-  });
-  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [sentinelHubConfigured, setSentinelHubConfigured] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkVault = async () => {
+      try {
+        const resp = await fetch('/api/config/vault', { headers: { ...authHeaders() } });
+        if (resp.ok && !cancelled) {
+          const data = await resp.json() as { keys?: Record<string, { configured?: boolean }> };
+          const configured = Boolean(
+            data.keys?.SENTINEL_HUB_CLIENT_ID?.configured ||
+            data.keys?.SENTINEL_HUB_CLIENT_SECRET?.configured ||
+            data.keys?.COPERNICUS_CLIENT_SECRET?.configured,
+          );
+          setSentinelHubConfigured(configured);
+        }
+      } catch { /* ignore */ }
+    };
+    checkVault();
+    window.addEventListener('terranoetis:vault-updated', checkVault);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('terranoetis:vault-updated', checkVault);
+    };
+  }, []);
 
   /* ── Bounding box state ── */
   const [bbox, setBbox] = useState({ latMin: 24, latMax: 49, lonMin: -125, lonMax: -66 });
@@ -86,23 +108,6 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
 
   const handleSelectProduct = useCallback((value: string) => {
     setSatProduct(value);
-    if (!GIBS_PRODUCTS.some(p => p.id === value)) {
-      const src = EXTERNAL_DATA_SOURCES.find(s => s.id === value);
-      if (src?.url?.includes('{key}') && !sentinelHubKey) {
-        setShowKeyInput(true);
-      }
-    }
-  }, [sentinelHubKey]);
-
-  const handleSaveKey = useCallback((key: string) => {
-    setSentinelHubKey(key);
-    try {
-      if (key) {
-        localStorage.setItem('sentinel_hub_api_key', key);
-      } else {
-        localStorage.removeItem('sentinel_hub_api_key');
-      }
-    } catch { /* ignore */ }
   }, []);
 
   /* ── Satellite: load imagery ── */
@@ -132,12 +137,12 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
     } else {
       const src = EXTERNAL_DATA_SOURCES.find(s => s.id === satProduct);
       if (!src) { setSatLoading(false); setSatStatus('Unknown external source'); return; }
-      if (src.url.includes('{key}') && !sentinelHubKey) {
+      if (src.url.includes('{key}') && !sentinelHubConfigured) {
         setSatLoading(false);
-        setSatStatus('Sentinel Hub API key required — enter it above to access SAR data');
+        setSatStatus('Sentinel Hub credentials required — configure them in Settings -> API Vault to access SAR data');
         return;
       }
-      const resolvedUrl = src.url.replace('{key}', sentinelHubKey);
+      const resolvedUrl = src.url.replace('{key}', '');
       const cc = satCloudCover < 100 ? satCloudCover : undefined;
       try {
         const imgLayer = src.type === 'xyz'
@@ -152,7 +157,7 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
       }
     }
     setSatLoading(false);
-  }, [viewer, satStartDate, satEndDate, satProduct, resolveSource, satOpacity, satCloudCover, sentinelHubKey, bbox]);
+  }, [viewer, satStartDate, satEndDate, satProduct, resolveSource, satOpacity, satCloudCover, sentinelHubConfigured, bbox]);
 
   /* ── Satellite: update opacity ── */
   const handleOpacityChange = useCallback((val: number) => {
@@ -287,7 +292,7 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
                 if (selectedCategory !== 'all' && selectedCategory !== catLabel && selectedCategory !== group) return null;
                 const filtered = productSearch ? sources.filter(s => s.label.toLowerCase().includes(productSearch) || s.description.toLowerCase().includes(productSearch)) : sources;
                 if (filtered.length === 0) return null;
-                const needsKey = (s: typeof EXTERNAL_DATA_SOURCES[0]) => s.url.includes('{key}') && !sentinelHubKey;
+                const needsKey = (s: typeof EXTERNAL_DATA_SOURCES[0]) => s.url.includes('{key}') && !sentinelHubConfigured;
                 return (
                   <optgroup key={`ext-${group}`} label={`${catLabel} (${filtered.length})`}>
                     {filtered.map(src => (
@@ -350,25 +355,18 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
             const needsKey = Boolean(selSrc?.url?.includes('{key}'));
             if (!needsKey) return null;
             return (
-              <div className={`sat-key-box ${sentinelHubKey ? 'configured' : 'pending'}`}>
+              <div className={`sat-key-box ${sentinelHubConfigured ? 'configured' : 'pending'}`}>
                 <div className="sat-key-header">
-                  <span className={`sat-key-status ${sentinelHubKey ? 'ok' : 'warn'}`}>
-                    {sentinelHubKey ? 'API key configured' : 'API key required'}
+                  <span className={`sat-key-status ${sentinelHubConfigured ? 'ok' : 'warn'}`}>
+                    <Key size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'text-bottom' }} />
+                    {sentinelHubConfigured ? 'Sentinel Hub credentials configured (Vault)' : 'Sentinel Hub credentials required'}
                   </span>
-                  <button className="sat-key-toggle" onClick={() => setShowKeyInput(!showKeyInput)}>
-                    {showKeyInput ? 'Hide' : sentinelHubKey ? 'Change' : 'Enter'}
-                  </button>
                 </div>
-                {(showKeyInput || !sentinelHubKey) && (
-                  <div className="sat-key-input-row">
-                    <input type="password" className="sat-key-input" placeholder="Enter your Sentinel Hub API key..." value={sentinelHubKey}
-                      onChange={e => handleSaveKey(e.target.value)} />
-                    <button className="study-btn primary sm" onClick={() => setShowKeyInput(false)}>Save</button>
+                {!sentinelHubConfigured && (
+                  <div className="sat-key-hint" style={{ marginTop: 6 }}>
+                    Sentinel-1 SAR and high-resolution optical bands require Sentinel Hub credentials. Please configure them securely in <strong>Settings &rarr; API Configuration Vault</strong>.
                   </div>
                 )}
-                <div className="sat-key-hint">
-                  Get a free key at sentinel-hub.com — enables Sentinel-1 SAR, Sentinel-2 bands, and custom processing.
-                </div>
               </div>
             );
           })()}

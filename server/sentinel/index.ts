@@ -1,5 +1,6 @@
 import { logger } from '../observability/logger';
 import { getDb } from '../db/index';
+import { keyManager } from '../keyManager';
 import { streamProcessor, type RawEvent } from './streamProcessor';
 import { anomalyDetector } from './anomalyDetector';
 import { alertIntelligence } from './alertIntelligence';
@@ -73,7 +74,7 @@ const FIRMS_SOURCE = {
   name: 'nasa_firms',
   intervalMs: 180000,
   async poll(): Promise<RawEvent[]> {
-    const mapKey = process.env.NASA_FIRMS_MAP_KEY;
+    const mapKey = keyManager.get('NASA_FIRMS_MAP_KEY');
     if (!mapKey) return [];
     try {
       const resp = await fetch(
@@ -164,7 +165,7 @@ export class Sentinel {
     // Register data source pollers with stream processor
     streamProcessor.registerSource(EARTHQUAKE_SOURCE);
     streamProcessor.registerSource(EONET_SOURCE);
-    if (process.env.NASA_FIRMS_MAP_KEY) {
+    if (keyManager.get('NASA_FIRMS_MAP_KEY')) {
       streamProcessor.registerSource(FIRMS_SOURCE);
     }
     streamProcessor.registerSource(WEATHER_ALERTS_SOURCE);

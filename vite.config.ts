@@ -112,6 +112,21 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: '127.0.0.1',
+    port: 3000,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://127.0.0.1:3001',
+        ws: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -56,14 +56,7 @@ class KaggleClient {
       return { username: vaultUser, key: vaultKey, source: 'vault' };
     }
 
-    // 2. Check process.env
-    const envUser = (process.env.KAGGLE_USERNAME || '').trim();
-    const envKey = (process.env.KAGGLE_KEY || '').trim();
-    if (envUser && envKey) {
-      return { username: envUser, key: envKey, source: 'env' };
-    }
-
-    // 3. Check kaggle.json on disk
+    // 2. Check kaggle.json on disk
     const configDir = process.env.KAGGLE_CONFIG_DIR || path.join(os.homedir(), '.kaggle');
     const file = path.join(configDir, 'kaggle.json');
     if (fs.existsSync(file)) {

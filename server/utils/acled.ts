@@ -14,6 +14,7 @@
 
 import { haversineDistance } from './geo';
 import { logger } from '../observability/logger';
+import { keyManager } from '../keyManager';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -95,7 +96,7 @@ const DEFAULT_COUNTRY = '';  // Empty = all countries
 const DEFAULT_TERMS = 300;  // Max results per request (ACLED limit)
 
 function getApiKey(): string {
-  return process.env.ACLED_API_KEY || '';
+  return keyManager.get('ACLED_API_KEY') || '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -120,7 +121,7 @@ export async function fetchAcledEvents(params: {
 
   const url = new URL(ACLED_BASE_URL);
   url.searchParams.set('key', apiKey);
-  url.searchParams.set('email', process.env.ACLED_EMAIL || '');
+  url.searchParams.set('email', keyManager.get('ACLED_EMAIL') || '');
   url.searchParams.set('terms', String(Math.min(params.limit || DEFAULT_TERMS, DEFAULT_TERMS)));
 
   if (params.country) url.searchParams.set('country', params.country);

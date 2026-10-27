@@ -1,3 +1,5 @@
+import { keyManager } from '../keyManager';
+
 export interface BBox {
   latMin: number; latMax: number;
   lonMin: number; lonMax: number;
@@ -108,7 +110,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
 
   // 3. Fetch NASA FIRMS fires (global CSV, filter by bbox)
   try {
-    const mapKey = process.env.NASA_FIRMS_MAP_KEY;
+    const mapKey = keyManager.get('NASA_FIRMS_MAP_KEY');
     if (mapKey) {
       const resp = await fetch(`https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/VIIRS_SNPP_NRT/world/1`, {
         signal: AbortSignal.timeout(10000),

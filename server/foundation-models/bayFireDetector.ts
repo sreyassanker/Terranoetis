@@ -14,6 +14,7 @@
 
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
+import { keyManager } from '../keyManager';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { pubsub } from '../pubsub';
 
@@ -71,7 +72,7 @@ export interface FireCluster {
 // ═══════════════════════════════════════════════════════════════════════
 
 const FIRMS_API_BASE = 'https://firms.modaps.eosdis.nasa.gov/api/area';
-const FIRMS_MAP_KEY = process.env.FIRMS_MAP_KEY || '';
+const getFirmsMapKey = () => (keyManager.get('NASA_FIRMS_MAP_KEY') || keyManager.get('FIRMS_MAP_KEY') || process.env.NASA_FIRMS_MAP_KEY || process.env.FIRMS_MAP_KEY || '').trim();
 
 const PRIOR_FIRE_PROBABILITY = 0.02; // Base rate: 2% of thermal anomalies are real fires
 const INSTRUMENT_CONFIDENCE_WEIGHT = 0.4;
@@ -152,7 +153,7 @@ export class BayFireDetector {
       observationCount: this.observations.length,
       resultCount: this.results.length,
       clusterCount: this.clusters.length,
-      firmsKeyConfigured: Boolean(FIRMS_MAP_KEY),
+      firmsKeyConfigured: Boolean(getFirmsMapKey()),
     };
   }
 
@@ -161,14 +162,15 @@ export class BayFireDetector {
   // ═══════════════════════════════════════════════════════════════════
 
   private async fetchFirmsData(latMin: number, latMax: number, lonMin: number, lonMax: number): Promise<FireObservation[]> {
-    if (!FIRMS_MAP_KEY) {
+    const firmsKey = getFirmsMapKey();
+    if (!firmsKey) {
       logger.warn('[BayFire] No FIRMS API key configured');
       return [];
     }
 
     try {
       const bbox = `${lonMin},${latMin},${lonMax},${latMax}`;
-      const resp = await fetch(`${FIRMS_API_BASE}/${FIRMS_MAP_KEY}/VIIRS_SNPP_NRT/1/${bbox}`, {
+      const resp = await fetch(`${FIRMS_API_BASE}/${firmsKey}/VIIRS_SNPP_NRT/1/${bbox}`, {
         signal: AbortSignal.timeout(15000),
       });
 

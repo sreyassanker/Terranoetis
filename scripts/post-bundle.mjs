@@ -43,6 +43,16 @@ if (isDarwin && existsSync(APP_DIR)) {
     }
   }
 
+  // Ensure bundled server files inside .app
+  for (const f of ['server.mjs', 'package.json', 'schema.sql']) {
+    const src = resolve('dist-server', f);
+    const dest = resolve(BUNDLE_DIST_SERVER, f);
+    if (existsSync(src)) {
+      cpSync(src, dest);
+      console.log(`✅ [post-bundle] Embedded ${f} into bundle.`);
+    }
+  }
+
   // Ensure bundled node_modules inside .app
   const bundleNm = resolve(BUNDLE_DIST_SERVER, 'node_modules');
   if (existsSync(localNm)) {
@@ -139,6 +149,26 @@ if (homedir && existsSync(localModelsDir)) {
       }
     }
   } catch { /* ignore */ }
+}
+
+// ── 4. Security Verification: Ensure NO .env files are shipped in release bundles ──
+const forbiddenEnvLocations = [
+  resolve(BUNDLE_DIST_SERVER, '.env'),
+  resolve('dist-server/.env'),
+  resolve('src-tauri/target/release/bundle/macos/Terranoetis.app/Contents/Resources/_up_/dist-server/.env'),
+  resolve('src-tauri/target/release/_up_/dist-server/.env'),
+  resolve('src-tauri/target/release/resources/dist-server/.env'),
+];
+
+for (const envLoc of forbiddenEnvLocations) {
+  if (existsSync(envLoc)) {
+    try {
+      rmSync(envLoc, { force: true });
+      console.log(`🛡️ [post-bundle] Stripped forbidden sensitive file: ${envLoc}`);
+    } catch {
+      throw new Error(`SECURITY AUDIT FAILURE: Plaintext .env detected at ${envLoc}`);
+    }
+  }
 }
 
 console.log('[post-bundle] ✅ Bundle hygiene complete.\n');

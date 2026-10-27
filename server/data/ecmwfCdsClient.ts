@@ -21,6 +21,7 @@
 
 import NodeCache from 'node-cache';
 import AdmZip from 'adm-zip';
+import { keyManager } from '../keyManager';
 
 const CDS_API_BASE = 'https://cds.climate.copernicus.eu/api/retrieve/v1';
 const POLL_INTERVAL_MS = 3000;
@@ -69,7 +70,7 @@ interface CdsRequestParams {
 }
 
 function getToken(): string | null {
-  return process.env.CDS_API_TOKEN ?? null;
+  return keyManager.get('CDS_API_TOKEN') ?? null;
 }
 
 function headers(tokenOverride?: string): Record<string, string> {

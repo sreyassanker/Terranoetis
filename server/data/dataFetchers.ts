@@ -13,6 +13,8 @@
  * - GEBCO: bathymetry (derived from elevation API)
  */
 
+import { keyManager } from '../keyManager';
+
 const FETCH_TIMEOUT = 12000;
 
 async function strictFetch(url: string, timeoutMs: number = FETCH_TIMEOUT): Promise<Record<string, unknown>> {
@@ -666,7 +668,7 @@ export interface FireData {
 export async function fetchFIRMSFires(
   lat: number, lon: number, radiusKm: number = 100, date?: string,
 ): Promise<FireData> {
-  const mapKey = process.env.NASA_FIRMS_MAP_KEY;
+  const mapKey = keyManager.get('NASA_FIRMS_MAP_KEY');
   if (!mapKey) throw new Error('NASA_FIRMS_MAP_KEY not set');
 
   // FIRMS area API: /api/area/csv/{MAP_KEY}/{SOURCE}/{west,south,east,north}/{days}
@@ -2341,7 +2343,7 @@ export async function fetchEra5HighFidelity(
       rh2m: null, rh2mSource: 'none', era5AsOfDate: null,
     };
   }
-  if (process.env.CDS_API_TOKEN) {
+  if (keyManager.get('CDS_API_TOKEN')) {
     try {
       const { fetchEra5MostInput, fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
         fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState, fetchEra5Wind10m,

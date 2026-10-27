@@ -88,6 +88,7 @@ async function compile() {
   const requiredNativePkgs = [
     'better-sqlite3',
     'bindings',
+    'file-uri-to-path',
     'h5wasm',
   ];
 

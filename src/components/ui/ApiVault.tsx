@@ -78,6 +78,8 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
   const [keyStatuses, setKeyStatuses] = useState<Record<string, KeyStatusInfo>>({});
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+  const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
+  const [loadingReveal, setLoadingReveal] = useState<Record<string, boolean>>({});
   const [validations, setValidations] = useState<Record<string, ValidationResult>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -157,6 +159,42 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
   const isApiConfigured = (api: ApiConfig): boolean => {
     const fields = getKeyFields(api);
     if (fields.length === 0) return true; // public API
+
+    // Services requiring paired or multi-field credentials:
+    if (api.id === 'kaggle' || api.name === 'Kaggle') {
+      return isFieldConfigured('KAGGLE_USERNAME') && isFieldConfigured('KAGGLE_KEY');
+    }
+    if (api.id === 'sentinel_hub' || api.name === 'Sentinel Hub') {
+      return isFieldConfigured('SENTINEL_HUB_CLIENT_ID') && isFieldConfigured('SENTINEL_HUB_CLIENT_SECRET');
+    }
+    if (api.id === 'opensky' || api.name === 'OpenSky Network') {
+      return isFieldConfigured('OPENSKY_CLIENT_ID') && isFieldConfigured('OPENSKY_CLIENT_SECRET');
+    }
+    if (api.id === 'supabase' || api.name === 'Supabase') {
+      return isFieldConfigured('SUPABASE_URL') && isFieldConfigured('SUPABASE_ANON_KEY');
+    }
+    if (api.id === 'upstash_redis' || api.name === 'Upstash Redis') {
+      return isFieldConfigured('UPSTASH_REDIS_REST_URL') && isFieldConfigured('UPSTASH_REDIS_REST_TOKEN');
+    }
+    if (api.id === 'cloudflare_r2' || api.name === 'Cloudflare R2') {
+      return isFieldConfigured('CLOUDFLARE_R2_ACCESS_KEY_ID') && isFieldConfigured('CLOUDFLARE_R2_SECRET_ACCESS_KEY');
+    }
+    if (api.id === 'discord_oauth' || api.name === 'Discord OAuth') {
+      return isFieldConfigured('DISCORD_CLIENT_ID') && isFieldConfigured('DISCORD_CLIENT_SECRET');
+    }
+    if (api.id === 'slack_oauth' || api.name === 'Slack OAuth') {
+      return isFieldConfigured('SLACK_CLIENT_ID') && isFieldConfigured('SLACK_CLIENT_SECRET');
+    }
+    if (api.id === 'vapid' || api.name === 'Web Push (VAPID)') {
+      return isFieldConfigured('VAPID_PUBLIC_KEY') && isFieldConfigured('VAPID_PRIVATE_KEY');
+    }
+    if (api.id === 'gmail_smtp' || api.name === 'Gmail SMTP') {
+      return isFieldConfigured('GMAIL_SMTP_USER') && isFieldConfigured('GMAIL_SMTP_PASS');
+    }
+    // Alternative single credentials:
+    if (api.id === 'coingecko' || api.name === 'CoinGecko') {
+      return isFieldConfigured('COINGECKO_API_KEY') || isFieldConfigured('COINGECKO_DEMO_API_KEY');
+    }
     return fields.some(f => isFieldConfigured(f));
   };
 
@@ -190,8 +228,38 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
   }, [keyStatuses]);
 
   const unsavedCount = useMemo(() => {
-    return Object.entries(inputValues).filter(([_, v]) => v.trim() && !v.includes('••••')).length;
-  }, [inputValues]);
+    return Object.entries(inputValues).filter(
+      ([k, v]) => v.trim() && !v.includes('••••') && v.trim() !== revealedKeys[k]
+    ).length;
+  }, [inputValues, revealedKeys]);
+
+  const toggleFieldVisibility = async (field: string) => {
+    const willBeVisible = !visibleFields[field];
+    setVisibleFields(prev => ({ ...prev, [field]: willBeVisible }));
+
+    // If revealing, and no value in input yet, but key is configured in vault/env
+    if (willBeVisible && (!inputValues[field] || inputValues[field].includes('••••')) && keyStatuses[field]?.configured) {
+      setLoadingReveal(prev => ({ ...prev, [field]: true }));
+      try {
+        const resp = await fetch('/api/config/vault/reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ key: field }),
+        });
+        if (resp.ok) {
+          const data = await resp.json() as { value?: string };
+          if (data.value) {
+            setRevealedKeys(prev => ({ ...prev, [field]: data.value! }));
+            setInputValues(prev => ({ ...prev, [field]: data.value! }));
+          }
+        }
+      } catch (err) {
+        console.warn('[ApiVault] Failed to reveal key:', err);
+      } finally {
+        setLoadingReveal(prev => ({ ...prev, [field]: false }));
+      }
+    }
+  };
 
   // Category Configuration Count helper
   const getCategoryStats = (cat: string) => {
@@ -300,10 +368,24 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
       }));
 
       try {
+        const currentVal = inputValues[field]?.trim();
+        const testVal = (currentVal && !currentVal.includes('••••')) ? currentVal : undefined;
+        const contextKeys: Record<string, string> = {};
+        if (field === 'KAGGLE_USERNAME' || field === 'KAGGLE_KEY') {
+          const u = inputValues['KAGGLE_USERNAME']?.trim();
+          const k = inputValues['KAGGLE_KEY']?.trim();
+          if (u && !u.includes('••••')) contextKeys.KAGGLE_USERNAME = u;
+          if (k && !k.includes('••••')) contextKeys.KAGGLE_KEY = k;
+        }
+
         const resp = await fetch('/api/config/vault/validate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyName: field, keyValue: inputValues[field]?.trim() || undefined }),
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({
+            keyName: field,
+            keyValue: testVal,
+            contextKeys: Object.keys(contextKeys).length > 0 ? contextKeys : undefined,
+          }),
         });
         const data = await resp.json() as { valid?: boolean; message?: string };
         const ok = Boolean(data.valid);
@@ -342,7 +424,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
   // Save Single Key
   const handleSaveSingleKey = async (field: string) => {
     const val = inputValues[field]?.trim();
-    if (!val || val.includes('••••')) return;
+    if (!val || val.includes('••••') || val === revealedKeys[field]) return;
 
     setSavingKey(field);
     try {
@@ -545,7 +627,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
     const payloadKeys: Record<string, string> = {};
     for (const [k, v] of Object.entries(inputValues)) {
       const trimmed = v.trim();
-      if (trimmed && !trimmed.includes('••••')) {
+      if (trimmed && !trimmed.includes('••••') && trimmed !== revealedKeys[k]) {
         payloadKeys[k] = trimmed;
       }
     }
@@ -1014,7 +1096,8 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
                         const hasConfigured = status?.configured;
                         const isVisible = Boolean(visibleFields[field]);
                         const currentVal = inputValues[field] !== undefined ? inputValues[field] : '';
-                        const isDirty = currentVal.trim() !== '' && !currentVal.includes('••••');
+                        const isRevealedUnchanged = revealedKeys[field] !== undefined && currentVal === revealedKeys[field];
+                        const isDirty = currentVal.trim() !== '' && !currentVal.includes('••••') && !isRevealedUnchanged;
                         const validation = validations[field];
                         const isSavingThis = savingKey === field;
 
@@ -1111,11 +1194,18 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
 
                                 <button
                                   type="button"
-                                  onClick={() => setVisibleFields(prev => ({ ...prev, [field]: !prev[field] }))}
-                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition p-0.5"
+                                  onClick={() => toggleFieldVisibility(field)}
+                                  disabled={Boolean(loadingReveal[field])}
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 disabled:opacity-50 transition p-0.5"
                                   title={isVisible ? 'Hide key' : 'Show key in plaintext'}
                                 >
-                                  {isVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                                  {loadingReveal[field] ? (
+                                    <Loader2 size={14} className="animate-spin text-blue-400" />
+                                  ) : isVisible ? (
+                                    <EyeOff size={14} />
+                                  ) : (
+                                    <Eye size={14} />
+                                  )}
                                 </button>
                               </div>
 

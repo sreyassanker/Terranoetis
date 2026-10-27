@@ -7,6 +7,7 @@ import { logger } from './observability/logger';
 import { _JWT_SECRET as getJwtSecret } from './middleware/auth';
 import { connectVoiceProvider } from './voiceRealtime';
 import { forkManager } from './fork/manager';
+import { keyManager } from './keyManager';
 
 const HEARTBEAT_INTERVAL = 30000;
 const HEARTBEAT_TIMEOUT = 35000;
@@ -113,8 +114,8 @@ export function createWsServer(server: HttpServer): WebSocketServer {
     // Voice channel: proxy browser ↔ realtime voice provider (key stays server-side).
     // PRIMARY: OpenAI Realtime when OPENAI_API_KEY is set; FALLBACK: Gemini Live.
     if (url.pathname === '/ws/voice') {
-      const openAiKey = process.env.OPENAI_API_KEY || '';
-      const geminiKey = process.env.GOOGLE_GEMINI_API_KEY || '';
+      const openAiKey = keyManager.get('OPENAI_API_KEY') || '';
+      const geminiKey = keyManager.get('GEMINI_API_KEY') || keyManager.get('GOOGLE_GEMINI_API_KEY') || '';
       if (!openAiKey && !geminiKey) {
         logger.warn('Voice: no OPENAI_API_KEY or GOOGLE_GEMINI_API_KEY configured');
         ws.close(4003, 'Voice requires an API key');

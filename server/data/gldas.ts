@@ -12,6 +12,7 @@
  */
 
 import NodeCache from 'node-cache';
+import { keyManager } from '../keyManager';
 
 const cache = new NodeCache({ stdTTL: 86400, checkperiod: 1800 });
 
@@ -23,8 +24,8 @@ const GLDAS_LATS = 720; // -89.875 to 89.875 at 0.25°
 const GLDAS_LONS = 1440; // -179.875 to 179.875 at 0.25°
 
 function getEarthdataToken(): string | null {
-  const user = process.env.EARTHDATA_USERNAME;
-  const pass = process.env.EARTHDATA_PASSWORD;
+  const user = keyManager.get('EARTHDATA_USERNAME');
+  const pass = keyManager.get('EARTHDATA_PASSWORD');
   if (!user || !pass) return null;
   return Buffer.from(`${user}:${pass}`).toString('base64');
 }
@@ -64,7 +65,7 @@ async function getEarthdataBearer(): Promise<string | null> {
   // generated at https://urs.earthdata.nasa.gov/ — regenerate when it
   // expires (~60 days). Without it, GES DISC downloads that require a
   // bearer token (GLDAS, SOS, etc.) cannot authenticate.
-  const edlToken = process.env.EARTHDATA_EDL_TOKEN;
+  const edlToken = keyManager.get('EARTHDATA_EDL_TOKEN');
   if (edlToken) {
     // JWT exp is the 3rd base64 segment; decode to find expiry.
     try {

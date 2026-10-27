@@ -20,6 +20,7 @@ const wsEnv = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_WS_URL
 export const DESKTOP_WS_SERVER: string = (wsEnv ? wsEnv.replace(/\/+$/, '') : '') || 'ws://127.0.0.1:3001';
 
 let desktopFetchPatchInstalled = false;
+let desktopXhrPatchInstalled = false;
 let nativeFetch: typeof window.fetch | null = null;
 
 const TOKEN_KEY = 'auth_token';
@@ -43,6 +44,30 @@ function shouldAttachAuth(input: RequestInfo | URL): boolean {
 }
 
 /**
+ * Resolves any API path or relative endpoint to the proper host.
+ * Inside Tauri desktop, rewrites relative /api URLs to 127.0.0.1:3001.
+ */
+export function resolveApiUrl(pathOrUrl: string): string {
+  if (!pathOrUrl || typeof pathOrUrl !== 'string') return pathOrUrl || '';
+  if (isDesktopApp) {
+    if (
+      pathOrUrl.startsWith('/api') ||
+      pathOrUrl.startsWith('http://tauri.localhost/api') ||
+      pathOrUrl.startsWith('https://tauri.localhost/api') ||
+      pathOrUrl.startsWith('tauri://localhost/api') ||
+      pathOrUrl.startsWith('http://localhost/api')
+    ) {
+      const cleanPath = pathOrUrl.replace(
+        /^(https?:\/\/tauri\.localhost|tauri:\/\/localhost|https?:\/\/localhost)/,
+        ''
+      );
+      return `${DESKTOP_API_SERVER}${cleanPath}`;
+    }
+  }
+  return pathOrUrl;
+}
+
+/**
  * Early-install the desktop fetch patch so relative /api calls are seamlessly
  * redirected to the backend server (127.0.0.1:3001) with Authorization header attached.
  */
@@ -60,15 +85,8 @@ export function installDesktopFetchPatch(): void {
       else if (reqInput instanceof URL) rawUrl = reqInput.href;
       else if (reqInput instanceof Request) rawUrl = reqInput.url;
 
-      if (
-        rawUrl.startsWith('/api') ||
-        rawUrl.startsWith('http://tauri.localhost/api') ||
-        rawUrl.startsWith('https://tauri.localhost/api') ||
-        rawUrl.startsWith('tauri://localhost/api') ||
-        rawUrl.startsWith('http://localhost/api')
-      ) {
-        const cleanPath = rawUrl.replace(/^(https?:\/\/tauri\.localhost|tauri:\/\/localhost|https?:\/\/localhost)/, '');
-        const targetUrl = `${DESKTOP_API_SERVER}${cleanPath}`;
+      const targetUrl = resolveApiUrl(rawUrl);
+      if (targetUrl !== rawUrl) {
         if (reqInput instanceof Request) {
           reqInput = new Request(targetUrl, reqInput);
         } else {
@@ -89,6 +107,28 @@ export function installDesktopFetchPatch(): void {
   };
 
   desktopFetchPatchInstalled = true;
+}
+
+/**
+ * Patch XMLHttpRequest.open so libraries using XHR (e.g. Hls.js, Axios, Cesium imagery)
+ * seamlessly route relative /api requests to 127.0.0.1:3001 inside desktop Tauri webview.
+ */
+export function installDesktopXhrPatch(): void {
+  if (desktopXhrPatchInstalled || typeof window === 'undefined' || !window.XMLHttpRequest) return;
+  const originalOpen = window.XMLHttpRequest.prototype.open;
+
+  window.XMLHttpRequest.prototype.open = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    ...rest: any[]
+  ) {
+    const rawUrl = typeof url === 'string' ? url : url.toString();
+    const resolvedUrl = resolveApiUrl(rawUrl);
+    return (originalOpen as any).call(this, method, resolvedUrl, ...rest);
+  };
+
+  desktopXhrPatchInstalled = true;
 }
 
 /**
@@ -206,6 +246,7 @@ export function getYoutubeEmbedUrl(videoId: string): string {
 // Auto-install early upon module import in browser/webview environments
 if (typeof window !== 'undefined') {
   installDesktopFetchPatch();
+  installDesktopXhrPatch();
   installDesktopShortcuts();
   installExternalLinkHandler();
   void resolveEmbedPort();

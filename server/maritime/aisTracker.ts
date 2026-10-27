@@ -1,5 +1,6 @@
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
+import { keyManager } from '../keyManager';
 
 export interface AisVessel {
   mmsi: number;
@@ -194,7 +195,7 @@ export function getAisTracker(): AisTracker | null {
 }
 
 export function initAisTracker(): AisTracker | null {
-  const apiKey = process.env.AIS_STREAM_API_KEY;
+  const apiKey = keyManager.get('AIS_STREAM_API_KEY');
   if (!apiKey) {
     logger.warn('[AIS] AIS_STREAM_API_KEY not set — maritime tracking disabled');
     return null;

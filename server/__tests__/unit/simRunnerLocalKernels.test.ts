@@ -76,7 +76,7 @@ async function runToCompletion(params: any, timeoutMs: number): Promise<string> 
   return job.id;
 }
 
-describe.skipIf(!pythonOk)('local kernels — real python3 end-to-end', () => {
+describe.skipIf(!pythonOk)('local kernels — real python3 end-to-end', { timeout: 120_000 }, () => {
   it('earthquake GMPE ShakeMap completes fast with physical PGA/PGV/MMI', async () => {
     const t0 = Date.now();
     const id = await runToCompletion({

@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm, readFile, readdir, stat } from 'fs/promi
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Sandbox } from 'e2b';
+import { keyManager } from './keyManager';
 
 export interface ExecutionResult {
   stdout: string;
@@ -35,12 +36,13 @@ const WORKSPACE_TTL_MS = 30 * 60 * 1000;
 const MAX_WORKSPACES = 50;
 
 // E2B SDK helpers
-const isE2BConfigured = () => !!(process.env.E2B_API_KEY || process.env.e2b_devkey);
+const isE2BConfigured = () => !!(keyManager.get('E2B_API_KEY'));
 
 const E2B_HOME = '/home/user';
 
 async function e2bCreateSandbox(): Promise<Sandbox> {
-  return Sandbox.create('base', { timeoutMs: 30000 });
+  const apiKey = keyManager.get('E2B_API_KEY');
+  return Sandbox.create('base', { apiKey: apiKey || undefined, timeoutMs: 30000 });
 }
 
 async function e2bExecute(sbx: Sandbox, language: string, code: string, timeout: number): Promise<ExecutionResult> {

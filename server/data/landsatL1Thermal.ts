@@ -25,26 +25,9 @@
  * BT11 (documented in the tool's uncertainty statement).
  */
 
-import { createRequire } from 'module';
-const _require = createRequire(import.meta.url);
-const { fromUrl } = _require('geotiff') as {
-  fromUrl: (url: string, opts?: { headers?: Record<string, string> }) => Promise<{
-    getImage(i?: number): Promise<{
-      getBoundingBox(): [number, number, number, number];
-      getWidth(): number;
-      getHeight(): number;
-      readRasters(o: { window: number[]; samples: number[] }): Promise<ArrayLike<number>[]>;
-    }>;
-    getImageCount(): Promise<number>;
-  }>;
-};
-const proj4 = _require('proj4') as {
-  defs(name: string, def: string): void;
-  (from: string, to: string): {
-    forward(coords: number[]): number[];
-    inverse(coords: number[]): number[];
-  };
-};
+import { fromUrl } from 'geotiff';
+import proj4 from 'proj4';
+import { keyManager } from '../keyManager';
 
 const FETCH_TIMEOUT = 30000;
 const LL_STAC = 'https://landsatlook.usgs.gov/stac-server';
@@ -72,8 +55,8 @@ function collectCookies(jar: Map<string, string>, headers: Headers): void {
  * credentials are missing/unconfigured.
  */
 export async function ersLogin(): Promise<string | null> {
-  const user = process.env.USGS_ERS_USERNAME;
-  const pass = process.env.USGS_ERS_PASSWORD;
+  const user = keyManager.get('USGS_ERS_USERNAME');
+  const pass = keyManager.get('USGS_ERS_PASSWORD');
   if (!user || !pass) return null;
 
   const jar = new Map<string, string>();

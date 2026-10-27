@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import child_process from 'child_process';
 import { getDb } from './db/index';
 import { logger } from './observability/logger';
 import { API_METADATA } from './apiMetadata';
@@ -25,8 +26,9 @@ export const KEY_ALIASES: Record<string, string[]> = {
   VITE_CESIUM_ION_ACCESS_TOKEN: ['CESIUM_ION_ACCESS_TOKEN'],
   GOOGLE_GEMINI_API_KEY: ['GEMINI_API_KEY'],
   GEMINI_API_KEY: ['GOOGLE_GEMINI_API_KEY'],
-  NASA_FIRMS_MAP_KEY: ['NASA_FIRMS_API_KEY'],
-  NASA_FIRMS_API_KEY: ['NASA_FIRMS_MAP_KEY'],
+  NASA_FIRMS_MAP_KEY: ['NASA_FIRMS_API_KEY', 'FIRMS_MAP_KEY'],
+  NASA_FIRMS_API_KEY: ['NASA_FIRMS_MAP_KEY', 'FIRMS_MAP_KEY'],
+  FIRMS_MAP_KEY: ['NASA_FIRMS_MAP_KEY', 'NASA_FIRMS_API_KEY'],
   ALPHAVANTAGE_API_KEY: ['ALPHA_VANTAGE_API_KEY'],
   ALPHA_VANTAGE_API_KEY: ['ALPHAVANTAGE_API_KEY'],
   NEWSAPI_API_KEY: ['NEWS_API_KEY'],
@@ -42,11 +44,30 @@ export const KEY_ALIASES: Record<string, string[]> = {
   CLOUDFLARE_API_KEY: ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_RADAR_API_KEY'],
   CLOUDFLARE_API_TOKEN: ['CLOUDFLARE_API_KEY', 'CLOUDFLARE_RADAR_API_KEY'],
   CLOUDFLARE_RADAR_API_KEY: ['CLOUDFLARE_API_KEY', 'CLOUDFLARE_API_TOKEN'],
+  WINDY_API_KEY: ['WINDY_WEBCAMS_API_KEY'],
+  WINDY_WEBCAMS_API_KEY: ['WINDY_API_KEY'],
+  COPERNICUS_TOKEN: ['COPERNICUS_CLIENT_SECRET'],
+  COPERNICUS_CLIENT_SECRET: ['COPERNICUS_TOKEN'],
+  COINGECKO_API_KEY: ['COINGECKO_DEMO_API_KEY'],
+  COINGECKO_DEMO_API_KEY: ['COINGECKO_API_KEY'],
+  AVIATIONSTACK_API: ['AVIATIONSTACK_API_KEY'],
+  AVIATIONSTACK_API_KEY: ['AVIATIONSTACK_API'],
+  DONKI_API_KEY: ['NASA_API_KEY'],
+  NASA_API_KEY: ['DONKI_API_KEY'],
+  OPENSKY_CLIENT_ID: ['OPENSKY_USERNAME'],
+  OPENSKY_USERNAME: ['OPENSKY_CLIENT_ID'],
+  OPENSKY_CLIENT_SECRET: ['OPENSKY_PASSWORD'],
+  OPENSKY_PASSWORD: ['OPENSKY_CLIENT_SECRET'],
+  MAPTILER_API_KEY: ['MAPTILER_KEY'],
+  MAPTILER_KEY: ['MAPTILER_API_KEY'],
+  EARTHDATA_EDL_TOKEN: ['EARTHDATA_BEARER_TOKEN'],
+  EARTHDATA_BEARER_TOKEN: ['EARTHDATA_EDL_TOKEN'],
 };
 
-class KeyManager {
+export class KeyManager {
   private userKeys: Map<string, string> = new Map();
   private envDefaults: Map<string, string> = new Map();
+  private explicitlyDeletedKeys: Set<string> = new Set();
   private masterKey: Buffer | null = null;
   private vaultDir: string = '';
   private vaultFilePath: string = '';
@@ -74,6 +95,70 @@ class KeyManager {
     this.saltFilePath = path.join(baseDir, '.terranoetis_salt');
   }
 
+  private getMachineSeedKey(): Buffer {
+    let salt: Buffer;
+    try {
+      if (fs.existsSync(this.saltFilePath)) {
+        salt = fs.readFileSync(this.saltFilePath);
+      } else {
+        salt = crypto.randomBytes(32);
+        fs.writeFileSync(this.saltFilePath, salt, { mode: 0o600 });
+      }
+    } catch {
+      salt = crypto.randomBytes(32);
+    }
+
+    const username = os.userInfo().username || 'default_user';
+    const hostname = os.hostname() || 'localhost';
+    const platform = process.platform;
+    const machineSeed = `terranoetis-key-seed::${username}::${hostname}::${platform}`;
+
+    return crypto.scryptSync(salt, machineSeed, 32);
+  }
+
+  private getMasterKeyFromOsKeychain(): Buffer | null {
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      return null;
+    }
+    if (process.platform === 'darwin') {
+      try {
+        const out = child_process.execFileSync('/usr/bin/security', [
+          'find-generic-password',
+          '-a', 'TerranoetisVault',
+          '-s', 'TerranoetisMasterKey',
+          '-w'
+        ], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' }).trim();
+        if (out && out.length === 64) {
+          return Buffer.from(out, 'hex');
+        }
+      } catch {
+        // Not yet stored in macOS Keychain
+      }
+    }
+    return null;
+  }
+
+  private storeMasterKeyInOsKeychain(key: Buffer): boolean {
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      return false;
+    }
+    if (process.platform === 'darwin') {
+      try {
+        child_process.execFileSync('/usr/bin/security', [
+          'add-generic-password',
+          '-a', 'TerranoetisVault',
+          '-s', 'TerranoetisMasterKey',
+          '-w', key.toString('hex'),
+          '-U'
+        ], { stdio: 'ignore' });
+        return true;
+      } catch (err) {
+        logger.warn({ err }, '[KeyManager] Unable to store master key in macOS Keychain');
+      }
+    }
+    return false;
+  }
+
   private getMasterKey(): Buffer {
     if (this.masterKey) return this.masterKey;
 
@@ -85,24 +170,25 @@ class KeyManager {
       logger.warn({ err: e }, '[KeyManager] Unable to create AppData directory');
     }
 
-    let salt: Buffer;
-    try {
-      if (fs.existsSync(this.saltFilePath)) {
-        salt = fs.readFileSync(this.saltFilePath);
-      } else {
-        salt = crypto.randomBytes(32);
-        fs.writeFileSync(this.saltFilePath, salt, { mode: 0o600 });
-      }
-    } catch {
-      salt = Buffer.from('terranoetis-fallback-device-salt-seed-2026', 'utf-8');
+    // 1. Try OS Keychain (macOS Keychain)
+    const osKey = this.getMasterKeyFromOsKeychain();
+    if (osKey) {
+      this.masterKey = osKey;
+      return this.masterKey;
     }
 
-    const username = os.userInfo().username || 'default_user';
-    const hostname = os.hostname() || 'localhost';
-    const platform = process.platform;
-    const machineSeed = `terranoetis-key-seed::${username}::${hostname}::${platform}`;
+    // 2. If Keychain is supported, generate a fresh 256-bit key and save to Keychain
+    if (process.platform === 'darwin' && !process.env.NODE_ENV?.includes('test') && !process.env.VITEST) {
+      const freshKey = crypto.randomBytes(32);
+      if (this.storeMasterKeyInOsKeychain(freshKey)) {
+        this.masterKey = freshKey;
+        logger.info('[KeyManager] Initialized master key in OS Keychain');
+        return this.masterKey;
+      }
+    }
 
-    this.masterKey = crypto.scryptSync(salt, machineSeed, 32);
+    // 3. Fallback to hardware/machine-seed derived key
+    this.masterKey = this.getMachineSeedKey();
     return this.masterKey;
   }
 
@@ -122,13 +208,39 @@ class KeyManager {
     };
   }
 
-  private decrypt(payload: EncryptedPayload): string {
-    const key = this.getMasterKey();
+  private decryptWithKey(payload: EncryptedPayload, key: Buffer): string {
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(payload.iv, 'hex'));
     decipher.setAuthTag(Buffer.from(payload.authTag, 'hex'));
     let decrypted = decipher.update(payload.data, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
+  }
+
+  private decrypt(payload: EncryptedPayload): string {
+    const key = this.getMasterKey();
+    try {
+      return this.decryptWithKey(payload, key);
+    } catch (err) {
+      // If primary key failed (e.g. migration from machine-seed to Keychain), try machine seed fallback
+      const fallbackKey = this.getMachineSeedKey();
+      if (!fallbackKey.equals(key)) {
+        try {
+          const decrypted = this.decryptWithKey(payload, fallbackKey);
+          logger.info('[KeyManager] Successfully migrated vault from machine-seed key to OS Keychain');
+          // Re-encrypt with primary key and persist
+          setTimeout(() => {
+            try {
+              const loaded = JSON.parse(decrypted);
+              this.persistToDisk(loaded);
+            } catch { /* ignore */ }
+          }, 0);
+          return decrypted;
+        } catch {
+          // both failed
+        }
+      }
+      throw err;
+    }
   }
 
   /**
@@ -140,10 +252,17 @@ class KeyManager {
   init(): void {
     if (this.initialized) return;
 
-    // Snapshot existing env defaults
+    // Snapshot existing env defaults and synchronize canonical aliases
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) {
         this.envDefaults.set(k, v);
+        const aliases = KEY_ALIASES[k] || [];
+        for (const alias of aliases) {
+          if (!process.env[alias]) {
+            process.env[alias] = v;
+            this.envDefaults.set(alias, v);
+          }
+        }
       }
     }
 
@@ -281,9 +400,22 @@ class KeyManager {
    * Returns user configured key if present, otherwise process.env fallback.
    */
   get(key: string): string | undefined {
+    if (this.explicitlyDeletedKeys.has(key)) return undefined;
     const userVal = this.userKeys.get(key);
     if (userVal) return userVal;
-    return process.env[key] || this.envDefaults.get(key);
+    for (const alias of KEY_ALIASES[key] || []) {
+      if (this.explicitlyDeletedKeys.has(alias)) continue;
+      const aliasUserVal = this.userKeys.get(alias);
+      if (aliasUserVal) return aliasUserVal;
+    }
+    const envVal = process.env[key] || this.envDefaults.get(key);
+    if (envVal) return envVal;
+    for (const alias of KEY_ALIASES[key] || []) {
+      if (this.explicitlyDeletedKeys.has(alias)) continue;
+      const aliasEnv = process.env[alias] || this.envDefaults.get(alias);
+      if (aliasEnv) return aliasEnv;
+    }
+    return undefined;
   }
 
   /**
@@ -298,6 +430,14 @@ class KeyManager {
   }
 
   /**
+   * Get status overview for a single key.
+   */
+  getStatus(key: string): KeyStatus {
+    const all = this.getAllStatuses();
+    return all[key] || { configured: false, masked: '', source: 'none' };
+  }
+
+  /**
    * Get status overview for all known keys.
    */
   getAllStatuses(): Record<string, KeyStatus> {
@@ -306,6 +446,8 @@ class KeyManager {
     // Collect all potential key names
     const allKeys = new Set<string>();
     for (const k of this.userKeys.keys()) allKeys.add(k);
+    for (const k of this.explicitlyDeletedKeys) allKeys.add(k);
+    for (const k of this.envDefaults.keys()) allKeys.add(k);
     for (const [k, v] of Object.entries(process.env)) {
       if (v && /^[A-Z0-9_]+$/.test(k) && (k.includes('KEY') || k.includes('TOKEN') || k.includes('SECRET') || k.includes('CLIENT_ID'))) {
         allKeys.add(k);
@@ -319,7 +461,26 @@ class KeyManager {
     }
 
     for (const key of allKeys) {
-      const userVal = this.userKeys.get(key);
+      if (this.explicitlyDeletedKeys.has(key)) {
+        statuses[key] = {
+          configured: false,
+          masked: '',
+          source: 'none',
+        };
+        continue;
+      }
+
+      let userVal = this.userKeys.get(key);
+      if (!userVal) {
+        for (const alias of KEY_ALIASES[key] || []) {
+          if (this.explicitlyDeletedKeys.has(alias)) continue;
+          const av = this.userKeys.get(alias);
+          if (av && av.trim()) {
+            userVal = av;
+            break;
+          }
+        }
+      }
       if (userVal && userVal.trim()) {
         statuses[key] = {
           configured: true,
@@ -329,7 +490,17 @@ class KeyManager {
         continue;
       }
 
-      const envVal = process.env[key];
+      let envVal = process.env[key];
+      if (!envVal) {
+        for (const alias of KEY_ALIASES[key] || []) {
+          if (this.explicitlyDeletedKeys.has(alias)) continue;
+          const ev = process.env[alias];
+          if (ev && ev.trim()) {
+            envVal = ev;
+            break;
+          }
+        }
+      }
       if (envVal && envVal.trim()) {
         statuses[key] = {
           configured: true,
@@ -364,6 +535,10 @@ class KeyManager {
       if (!trimmed || trimmed.includes('••••')) {
         continue;
       }
+      this.explicitlyDeletedKeys.delete(k);
+      for (const a of KEY_ALIASES[k] || []) {
+        this.explicitlyDeletedKeys.delete(a);
+      }
       this.userKeys.set(k, trimmed);
       this.applyKeyToEnv(k, trimmed);
       changed.push(k);
@@ -371,11 +546,21 @@ class KeyManager {
     }
 
     for (const k of deleteKeys) {
+      this.explicitlyDeletedKeys.add(k);
+      for (const a of KEY_ALIASES[k] || []) {
+        this.explicitlyDeletedKeys.add(a);
+      }
       if (this.userKeys.has(k)) {
         this.userKeys.delete(k);
         this.removeKeyFromEnv(k);
         changed.push(k);
         deletedCount++;
+      }
+      for (const a of KEY_ALIASES[k] || []) {
+        if (this.userKeys.has(a)) {
+          this.userKeys.delete(a);
+          this.removeKeyFromEnv(a);
+        }
       }
     }
 
@@ -390,7 +575,7 @@ class KeyManager {
     // If Kaggle credentials were saved or modified, sync runtime kaggle.json
     const kaggleUser = this.userKeys.get('KAGGLE_USERNAME') || process.env.KAGGLE_USERNAME;
     const kaggleKey = this.userKeys.get('KAGGLE_KEY') || process.env.KAGGLE_KEY;
-    if (kaggleUser && kaggleKey) {
+    if (kaggleUser && kaggleKey && !this.explicitlyDeletedKeys.has('KAGGLE_USERNAME') && !this.explicitlyDeletedKeys.has('KAGGLE_KEY')) {
       this.syncKaggleConfig(kaggleUser, kaggleKey);
     }
 
@@ -408,9 +593,21 @@ class KeyManager {
   }
 
   deleteKey(key: string): boolean {
-    if (!this.userKeys.has(key)) return false;
+    const aliases = KEY_ALIASES[key] || [];
+    this.explicitlyDeletedKeys.add(key);
+    for (const a of aliases) {
+      this.explicitlyDeletedKeys.add(a);
+    }
+
+    const hadKey = this.userKeys.has(key) ||
+      aliases.some(a => this.userKeys.has(a)) ||
+      Boolean(process.env[key] || this.envDefaults.get(key) || aliases.some(a => process.env[a] || this.envDefaults.get(a)));
     this.userKeys.delete(key);
     this.removeKeyFromEnv(key);
+    for (const a of aliases) {
+      this.userKeys.delete(a);
+      this.removeKeyFromEnv(a);
+    }
 
     const toPersist: Record<string, string> = {};
     for (const [k, v] of this.userKeys.entries()) {
@@ -420,12 +617,12 @@ class KeyManager {
 
     for (const listener of this.changeListeners) {
       try {
-        listener([key]);
+        listener([key, ...aliases]);
       } catch (err) {
         logger.warn({ err }, '[KeyManager] Listener error on delete');
       }
     }
-    return true;
+    return hadKey;
   }
 
   onChange(listener: (changedKeys: string[]) => void): () => void {
@@ -663,19 +860,40 @@ class KeyManager {
       }
     }
 
-    // Windy Point Forecast
-    if (keyName === 'WINDY_API_KEY') {
+    // Windy API (Supports both Webcams v3 & Point Forecast v2)
+    if (keyName === 'WINDY_API_KEY' || keyName === 'WINDY_WEBCAMS_API_KEY') {
       try {
-        const resp = await fetch('https://api.windy.com/api/point-forecast/v2', {
+        // 1. Prioritize Windy Webcams v3 (powers Terranoetis global CCTV & live webcams)
+        const webcamResp = await fetch('https://api.windy.com/webcams/api/v3/webcams?limit=1', {
+          method: 'GET',
+          headers: {
+            'x-windy-api-key': val,
+            'Accept': 'application/json',
+            'User-Agent': 'Terranoetis/3.0',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (webcamResp.ok) {
+          const body = await webcamResp.json().catch(() => null) as { total?: number } | null;
+          const count = body?.total ? ` (${body.total.toLocaleString()} active webcams available)` : '';
+          return { valid: true, message: `Windy Webcams v3 API key verified successfully${count}` };
+        }
+
+        // 2. Fallback to Windy Point Forecast API v2
+        const forecastResp = await fetch('https://api.windy.com/api/point-forecast/v2', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lat: 40, lon: -74, model: 'gfs', parameters: ['temp'], levels: ['surface'], key: val }),
           signal: AbortSignal.timeout(8000),
         });
-        if (resp.ok) {
+        if (forecastResp.ok) {
           return { valid: true, message: 'Windy Forecast API key verified successfully' };
         }
-        return { valid: false, message: `Invalid Windy key (HTTP ${resp.status})` };
+
+        return {
+          valid: false,
+          message: `Invalid Windy key (Webcams returned HTTP ${webcamResp.status}; Forecast returned HTTP ${forecastResp.status})`,
+        };
       } catch (e) {
         return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
       }

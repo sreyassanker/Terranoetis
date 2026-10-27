@@ -10,12 +10,13 @@
  */
 
 import * as Sentry from '@sentry/node';
+import { keyManager } from '../keyManager';
 
 let enabled = false;
 
 /** Initialize Sentry from the SENTRY_DSN env var. No-op when unset. */
 export function initSentry(): void {
-  const dsn = process.env.SENTRY_DSN;
+  const dsn = keyManager.get('SENTRY_DSN');
   if (!dsn) {
     return; // not configured — graceful no-op
   }

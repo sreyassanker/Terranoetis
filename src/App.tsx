@@ -144,7 +144,7 @@ import { flushQueue } from '@/lib/offlineChat';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import { formatSci } from '@/lib/formatSci';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
-import { isDesktopApp, DESKTOP_API_SERVER, openInBrowser, getYoutubeEmbedUrl } from '@/lib/desktop';
+import { isDesktopApp, DESKTOP_API_SERVER, openInBrowser, getYoutubeEmbedUrl, resolveApiUrl } from '@/lib/desktop';
 
 /* ═════════════════════════════════════════════════════════════════
    LAZY PANELS
@@ -227,6 +227,7 @@ const CCTV_FEED_COLORS: Record<string, string> = {
   image: '#f59e0b',
   iframe: '#ec4899',
   youtube: '#ec4899',
+  windy: '#06b6d4',
 };
 const CCTV_UNKNOWN_COLOR = '#64748b';
 
@@ -237,23 +238,39 @@ function cctvFeedColor(meta: Record<string, unknown>): string {
   if (feedType === 'youtube' || source === 'youtube' || meta.youtubeVideoId || /youtube\.com\/(watch|embed)|youtu\.be/i.test(url)) {
     return CCTV_FEED_COLORS.youtube;
   }
+  if (source === 'windy.com') {
+    return CCTV_FEED_COLORS.windy;
+  }
   if (CCTV_FEED_COLORS[feedType]) return CCTV_FEED_COLORS[feedType];
-  if (/\.m3u8(\?|$)/i.test(url)) return CCTV_FEED_COLORS.m3u8;
-  if (/\.mjpeg|\.mjpg|multipart/i.test(url)) return CCTV_FEED_COLORS.mjpeg;
-  if (/player\./i.test(url)) return CCTV_FEED_COLORS.iframe;
-  if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(url)) return CCTV_FEED_COLORS.image;
+  if (feedType === 'm3u8' || feedType === 'video' || /\.m3u8(\?|$)/i.test(url) || /\.mp4(\?|$)/i.test(url)) return CCTV_FEED_COLORS.m3u8;
+  if (feedType === 'mjpeg' || /\.mjpeg|\.mjpg|multipart/i.test(url)) return CCTV_FEED_COLORS.mjpeg;
+  if (feedType === 'iframe' || /player\./i.test(url)) return CCTV_FEED_COLORS.iframe;
+  if (feedType === 'image' || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url) || meta.thumbnailUrl) return CCTV_FEED_COLORS.image;
   return CCTV_UNKNOWN_COLOR;
 }
 
-type CctvCategory = 'video' | 'image' | 'youtube' | 'unknown';
+type CctvCategory = 'video' | 'image' | 'youtube' | 'windy' | 'unknown';
 type CctvFilterType = 'all' | CctvCategory;
 
 function getCctvCategory(meta: Record<string, unknown>): CctvCategory {
   const color = cctvFeedColor(meta);
+  if (color === CCTV_FEED_COLORS.windy) return 'windy';
   if (color === CCTV_FEED_COLORS.m3u8 || color === CCTV_FEED_COLORS.mjpeg) return 'video';
   if (color === CCTV_FEED_COLORS.image) return 'image';
   if (color === CCTV_FEED_COLORS.youtube || color === CCTV_FEED_COLORS.iframe) return 'youtube';
   return 'unknown';
+}
+
+/** Windy players may only be framed over HTTPS from a Windy-owned host. */
+function isWindyEmbedUrl(raw: string): boolean {
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    return url.protocol === 'https:' && (host === 'windy.com' || host.endsWith('.windy.com'));
+  } catch {
+    return false;
+  }
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -262,6 +279,65 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 let cachedYoutubeCanvas: HTMLCanvasElement | null = null;
+let cachedSelectionReticleCanvas: HTMLCanvasElement | null = null;
+
+function getSelectionReticle(color: string = '#22d3ee'): HTMLCanvasElement {
+  if (cachedSelectionReticleCanvas) return cachedSelectionReticleCanvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const cx = 32, cy = 32;
+
+  // Soft glowing ambient halo around outer ring (radius 18 to 31; center clear for icon)
+  const grad = ctx.createRadialGradient(cx, cy, 18, cx, cy, 31);
+  grad.addColorStop(0, 'rgba(34, 211, 238, 0)');
+  grad.addColorStop(0.3, 'rgba(34, 211, 238, 0.45)');
+  grad.addColorStop(0.7, 'rgba(34, 211, 238, 0.15)');
+  grad.addColorStop(1, 'rgba(34, 211, 238, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 31, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Primary tactical ring
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.2;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 21, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Subtle dashed inner ring for high-tech HUD feel
+  ctx.save();
+  ctx.setLineDash([3, 4]);
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 17, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // 4 corner targeting ticks
+  const tickLen = 5;
+  const r = 26;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  // Top
+  ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy - r + tickLen); ctx.stroke();
+  // Bottom
+  ctx.beginPath(); ctx.moveTo(cx, cy + r); ctx.lineTo(cx, cy + r - tickLen); ctx.stroke();
+  // Left
+  ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx - r + tickLen, cy); ctx.stroke();
+  // Right
+  ctx.beginPath(); ctx.moveTo(cx + r, cy); ctx.lineTo(cx + r - tickLen, cy); ctx.stroke();
+
+  cachedSelectionReticleCanvas = canvas;
+  return canvas;
+}
 
 function extractYoutubeId(url?: string): string | undefined {
   if (!url) return undefined;
@@ -319,7 +395,16 @@ const STATIC_LAYER_IDS = new Set<string>([
 const LEGACY_VAULT_KEYS = 'terranoetis.apiKeys.v1';
 const LEGACY_VAULT_STATE = 'terranoetis.apiVault.v1';
 const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
-const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
+const CESIUM_TOKEN_STORAGE_KEY = 'terranoetis.cesiumToken.v1';
+
+function getCachedCesiumToken(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const t = localStorage.getItem(CESIUM_TOKEN_STORAGE_KEY)?.trim();
+    if (t) return t;
+  } catch { /* ignore */ }
+  return undefined;
+}
 
 const DEFAULT_API_VAULT: ApiVaultState = {
   keys: {},
@@ -632,6 +717,7 @@ function purgeLegacyVaultStorage(): void {
   try {
     localStorage.removeItem(LEGACY_VAULT_KEYS);
     localStorage.removeItem(LEGACY_VAULT_STATE);
+    localStorage.removeItem('sentinel_hub_api_key');
     const raw = localStorage.getItem(SESSION_VAULT_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<ApiVaultState>;
@@ -664,7 +750,7 @@ function resolveAiProvider(vault: ApiVaultState): AiProvider {
 function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
   const t = (vault.keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
   if (t && !t.includes('••••')) return t;
-  return CESIUM_ION_ENV_TOKEN || undefined;
+  return undefined;
 }
 
 function normalizeLocationQuery(value: string): string {
@@ -807,62 +893,190 @@ function calculatePopulationImpact(lat: number, lon: number) {
 const CctvVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     setError(false);
+    setLoading(true);
 
     let hls: any = null;
     let cancelled = false;
-    const isHls = src.includes('.m3u8') || src.includes('m3u8');
+    let cleanupListeners: (() => void) | null = null;
 
-    if (isHls) {
+    const directUrl = resolveApiUrl(src);
+    const proxiedUrl = resolveApiUrl(
+      src.startsWith('/api/') || src.includes('/api/cctv/stream-proxy')
+        ? src
+        : `/api/cctv/stream-proxy?url=${encodeURIComponent(src)}`
+    );
+
+    // Muted and playsInline are strictly required for autoplay in WebKit / Safari
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
+
+    const onPlaying = () => {
+      if (!cancelled) setLoading(false);
+    };
+
+    const tryNativeHls = (urlToPlay: string, onFallback: () => void) => {
+      video.src = urlToPlay;
+      const onError = () => {
+        if (cancelled) return;
+        video.removeEventListener('error', onError);
+        onFallback();
+      };
+      video.addEventListener('error', onError, { once: true });
+      video.addEventListener('loadeddata', onPlaying);
+      video.addEventListener('playing', onPlaying);
+
+      cleanupListeners = () => {
+        video.removeEventListener('error', onError);
+        video.removeEventListener('loadeddata', onPlaying);
+        video.removeEventListener('playing', onPlaying);
+      };
+
+      video.load();
+      video.play().catch(err => {
+        console.warn('[CctvVideoPlayer] native autoplay:', err);
+      });
+    };
+
+    const tryHlsJs = (initialUrl: string) => {
       import('hls.js').then(({ default: Hls }) => {
-        if (cancelled) {
-          if (hls) hls.destroy();
+        if (cancelled || !videoRef.current) return;
+        const v = videoRef.current;
+        v.muted = true;
+
+        if (!Hls.isSupported()) {
+          setLoading(false);
+          setError(true);
           return;
         }
-        if (!videoRef.current) return;
-        if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-          videoRef.current.src = src;
-        } else if (Hls.isSupported()) {
-          hls = new Hls({
-            maxMaxBufferLength: 5,
-            enableWorker: true,
-            lowLatencyMode: true,
-          });
-          hls.loadSource(src);
-          hls.attachMedia(videoRef.current);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            videoRef.current?.play().catch(() => {});
-          });
-          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
-            if (data.fatal) {
-              console.warn('HLS fatal error:', data);
-              setError(true);
+
+        hls = new Hls({
+          enableWorker: false, // Prevents WebKit WKWebView worker/blob security exceptions
+          lowLatencyMode: true,
+          backBufferLength: 10,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 40,
+          manifestLoadingMaxRetry: 3,
+          levelLoadingMaxRetry: 3,
+        });
+
+        let triedProxy = initialUrl === proxiedUrl;
+        let retryCount = 0;
+
+        hls.loadSource(initialUrl);
+        hls.attachMedia(v);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (!cancelled) {
+            v.play().catch(err => {
+              console.warn('[CctvVideoPlayer] HLS autoplay:', err);
+            });
+          }
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          if (!cancelled) setLoading(false);
+        });
+
+        hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+          if (cancelled) return;
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                if (!triedProxy && initialUrl !== proxiedUrl) {
+                  triedProxy = true;
+                  console.warn('[CctvVideoPlayer] direct stream failed, retrying via stream proxy...');
+                  hls.loadSource(proxiedUrl);
+                  hls.startLoad();
+                } else if (retryCount < 2) {
+                  retryCount++;
+                  console.warn(`[CctvVideoPlayer] network retry ${retryCount}/2...`);
+                  hls.startLoad();
+                } else {
+                  hls.destroy();
+                  setLoading(false);
+                  setError(true);
+                }
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                try {
+                  hls.swapAudioCodec();
+                } catch { /* ignore */ }
+                break;
+              default:
+                hls.destroy();
+                setLoading(false);
+                setError(true);
+                break;
             }
-          });
-        } else {
-          setError(true);
-        }
+          }
+        });
       }).catch(err => {
         if (cancelled) return;
         console.error('Failed to load hls.js', err);
+        setLoading(false);
         setError(true);
       });
+    };
+
+    const isHls = src.includes('.m3u8') || src.includes('m3u8');
+
+    if (isHls) {
+      // On Apple WebKit (Safari, macOS desktop app), native HLS decoder is
+      // hardware-accelerated, handles video-only streams flawlessly, and avoids MSE restrictions.
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        tryNativeHls(directUrl, () => {
+          console.warn('[CctvVideoPlayer] native direct HLS failed, trying proxied...');
+          tryNativeHls(proxiedUrl, () => {
+            console.warn('[CctvVideoPlayer] native proxied HLS failed, falling back to hls.js...');
+            tryHlsJs(directUrl);
+          });
+        });
+      } else {
+        tryHlsJs(directUrl);
+      }
     } else {
-      video.src = src;
+      // Direct video file (mp4, mjpeg)
+      video.src = directUrl;
+      const onErr = () => {
+        if (cancelled) return;
+        if (video.src !== proxiedUrl) {
+          video.src = proxiedUrl;
+          video.load();
+          video.play().catch(() => {});
+        } else {
+          setLoading(false);
+          setError(true);
+        }
+      };
+      video.addEventListener('error', onErr, { once: true });
+      video.addEventListener('loadeddata', onPlaying);
+      video.addEventListener('playing', onPlaying);
+      cleanupListeners = () => {
+        video.removeEventListener('error', onErr);
+        video.removeEventListener('loadeddata', onPlaying);
+        video.removeEventListener('playing', onPlaying);
+      };
       video.load();
       video.play().catch(() => {});
     }
 
     return () => {
       cancelled = true;
+      cleanupListeners?.();
       if (hls) {
         hls.destroy();
       }
       if (video) {
+        video.pause();
         video.removeAttribute('src');
         video.load();
       }
@@ -871,21 +1085,52 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
 
   if (error) {
     return (
-      <div className="cctv-preview-empty">
-        Failed to load video stream
+      <div className="cctv-preview-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, height: 165 }}>
+        <span>Video stream currently offline</span>
+        <button
+          type="button"
+          onClick={() => { setError(false); setLoading(true); }}
+          style={{
+            background: 'rgba(34, 197, 94, 0.2)',
+            border: '1px solid #22c55e',
+            color: '#86efac',
+            borderRadius: 4,
+            padding: '3px 8px',
+            fontSize: 10,
+            cursor: 'pointer'
+          }}
+        >
+          Retry stream
+        </button>
       </div>
     );
   }
 
   return (
-    <video
-      ref={videoRef}
-      controls
-      playsInline
-      muted
-      autoPlay
-      style={{ width: '100%', height: '165px', objectFit: 'cover', background: '#000', display: 'block' }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '165px', background: '#000', overflow: 'hidden' }}>
+      <video
+        ref={videoRef}
+        controls
+        playsInline
+        muted
+        autoPlay
+        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', display: 'block' }}
+      />
+      {loading && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(2px)',
+          color: '#94a3b8', fontSize: '11px', pointerEvents: 'none'
+        }}>
+          <span style={{
+            display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+            background: '#22c55e', animation: 'pulse 1.5s ease-in-out infinite'
+          }} />
+          <span>Connecting live video...</span>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -1478,7 +1723,10 @@ export default function App() {
   const unifiedTimerRef = useRef(createUnifiedTimer()); // P0 perf: single rAF loop replaces 97+ setInterval calls
   const [layerOpacity, setLayerOpacity] = useState<Record<string, number>>({});
   const [activeImagery, setActiveImagery] = useState('satellite');
+  const activeImageryRef = useRef(activeImagery);
+  useEffect(() => { activeImageryRef.current = activeImagery; }, [activeImagery]);
   const [infoEntity, setInfoEntity] = useState<Cesium.Entity | null>(null);
+  const infoEntityRef = useRef<Cesium.Entity | null>(null);
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
   const [showSmokeLegend, setShowSmokeLegend] = useState(false);
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
@@ -2067,7 +2315,8 @@ export default function App() {
   /* Auto-scroll chat to bottom on new messages */
   useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [customCesiumToken, setCustomCesiumToken] = useState<string | undefined>(undefined);
+  const [customCesiumToken, setCustomCesiumToken] = useState<string | undefined>(() => getCachedCesiumToken());
+  const appliedCesiumTokenRef = useRef<string>(getCachedCesiumToken() || '');
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => customCesiumToken || resolveCesiumIonToken(apiVault), [customCesiumToken, apiVault]);
 
@@ -2151,9 +2400,9 @@ export default function App() {
     // centre pixel value + dot on the globe is misleading (the field varies).
     if (!spatialViz.includes(vizType ?? '')) {
       if (toolResultEntityRef.current) {
-        try { viewer.entities.remove(toolResultEntityRef.current); } catch {}
+        try { viewer.entities.remove(toolResultEntityRef.current); } catch { /* ignore */ }
       }
-      try { viewer.entities.removeById('analytical-tool-result-pin'); } catch {}
+      try { viewer.entities.removeById('analytical-tool-result-pin'); } catch { /* ignore */ }
       const resEnt = viewer.entities.add({
         id: 'analytical-tool-result-pin',
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -2379,25 +2628,32 @@ export default function App() {
   const flatKeysRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
-    if (!isLoggedIn) return;
     purgeLegacyVaultStorage();
 
     // Dynamically retrieve configured Cesium token from server vault
-    fetch('/api/config/cesium-token')
+    fetch('/api/config/cesium-token', { headers: { ...authHeaders() } })
       .then(r => r.json())
       .then((data: { token?: string }) => {
         if (data?.token) {
           const t = data.token.trim();
           if (t) {
-            setCustomCesiumToken(t);
-            Cesium.Ion.defaultAccessToken = t;
-            if (viewerRef.current) {
-              applyTerrainProvider(viewerRef.current, t);
+            try { localStorage.setItem(CESIUM_TOKEN_STORAGE_KEY, t); } catch { /* ignore */ }
+            if (t !== appliedCesiumTokenRef.current) {
+              appliedCesiumTokenRef.current = t;
+              setCustomCesiumToken(t);
+              Cesium.Ion.defaultAccessToken = t;
+              if (viewerRef.current) {
+                void applyTerrainProvider(viewerRef.current, t);
+                replaceBaseImagery(viewerRef.current, activeImageryRef.current || 'satellite');
+                throttledRender(viewerRef.current);
+              }
             }
           }
         }
       })
       .catch(() => {});
+
+    if (!isLoggedIn) return;
 
     // Sync vault statuses
     fetch('/api/config/vault', { headers: { ...authHeaders() } })
@@ -2448,6 +2704,8 @@ export default function App() {
             showNotification('Cesium World Terrain activated with new access token', 'success');
           }
         });
+        replaceBaseImagery(viewerRef.current, activeImageryRef.current || 'satellite');
+        throttledRender(viewerRef.current);
       }
     }
 
@@ -2497,14 +2755,17 @@ export default function App() {
     window.Cesium = Cesium;
     // @ts-expect-error CESIUM_BASE_URL is a global config
     window.CESIUM_BASE_URL = window.CESIUM_BASE_URL || (isDesktopApp ? './cesium/' : '/cesium/');
-    if (cesiumIonToken) {
-      Cesium.Ion.defaultAccessToken = cesiumIonToken;
+    const tokenToUse = cesiumIonToken || getCachedCesiumToken() || '';
+    Cesium.Ion.defaultAccessToken = tokenToUse;
+    if (tokenToUse) {
+      appliedCesiumTokenRef.current = tokenToUse;
     }
 
     setLoadingProgress(10);
     setLoadingStatus('Loading Cesium engine...');
 
     const v = new Cesium.Viewer(cesiumElRef.current, {
+      baseLayer: false,
       terrainProvider: new Cesium.EllipsoidTerrainProvider(),
       scene3DOnly: true,
       contextOptions: {
@@ -2557,7 +2818,7 @@ export default function App() {
     // Cinematic camera engine — orbit/pan/tilt/rotate/route dolly.
     cinematicCameraRef.current = new CinematicCamera(v);
     oracleChainRef.current = new OracleChainRenderer(v);
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || (window as any).__TERRANOETIS_TEST_MODE__) {
       window.__terranoetisDebug = {
         ...(window.__terranoetisDebug ?? {}),
         viewer: v,
@@ -2608,9 +2869,12 @@ export default function App() {
       }
     });
     try {
-      // Remove Cesium default imagery and add Esri satellite as the single base layer
-      v.scene.imageryLayers.remove(v.scene.imageryLayers.get(0));
-      addBaseImagery(v, 'satellite', false);
+      // Remove any default imagery if present and add the configured base imagery
+      const defaultLayer = v.scene.imageryLayers.get(0);
+      if (defaultLayer) {
+        v.scene.imageryLayers.remove(defaultLayer);
+      }
+      addBaseImagery(v, activeImageryRef.current || 'satellite', false);
     } catch (err) {
       console.warn('Custom basemap failed, keeping default imagery:', err);
     }
@@ -2934,6 +3198,9 @@ export default function App() {
       const picked = v.scene.pick(click.position);
       if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
         const ent = picked.id as Cesium.Entity;
+        if (ent === cctvPulseEntityRef.current) {
+          return;
+        }
         // Space Archaeology features have dedicated interactive dossier & fly-to handling; ignore here to prevent unwanted generic 150km tracking zoom
         if (typeof ent.id === 'string' && ent.id.startsWith('arch_entity_')) {
           return;
@@ -3102,11 +3369,16 @@ export default function App() {
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
+    if (cesiumIonToken === appliedCesiumTokenRef.current) return;
+    appliedCesiumTokenRef.current = cesiumIonToken || '';
     let cancelled = false;
 
     void (async () => {
       const enabled = await applyTerrainProvider(v, cesiumIonToken);
       if (!cancelled) {
+        if (cesiumIonToken) {
+          replaceBaseImagery(v, activeImageryRef.current || 'satellite');
+        }
         throttledRender(v);
         if (enabled) {
           setLoadingStatus('Cesium 3D terrain enabled');
@@ -3279,33 +3551,46 @@ export default function App() {
       return;
     }
     const props = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-    if (props?.layer !== 'india_cctv') {
+    if (props?.layer !== 'india_cctv' && props?.layer !== 'live_media') {
       setCctvPreviewTick(0);
       return;
     }
 
     const v = viewerRef.current;
+    let animRafId: number | null = null;
+    let cancelled = false;
+
     if (v) {
       const meta = cctvMetaRef.current.get(infoEntity.id);
-      const lat = (meta?.lat as number) ?? (props.lat as number);
-      const lon = (meta?.lon as number) ?? (props.lon as number);
+      const lat = (meta?.lat as number) ?? (props?.lat as number);
+      const lon = (meta?.lon as number) ?? (props?.lon as number);
       if (lat == null || lon == null) { setCctvPreviewTick(0); return; }
-      const pulse = makeSafeAnimatedRadiusPair(
-        () => 15000 + Math.sin(Date.now() / 250) * 4000,
-        1.05,
-      );
+
       cctvPulseEntityRef.current = v.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(lon, lat, 15),
-        ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => pulse.major(), false) as unknown as number,
-          semiMinorAxis: new Cesium.CallbackProperty(() => pulse.minor(), false) as unknown as number,
-          material: Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.15),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.85),
-          outlineWidth: 2,
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+        billboard: {
+          image: getSelectionReticle('#22d3ee'),
+          width: 58,
+          height: 58,
+          scale: new Cesium.CallbackProperty(() => 1.0 + Math.sin(Date.now() / 250) * 0.12, false) as unknown as number,
+          color: new Cesium.CallbackProperty(() => {
+            const alpha = 0.75 + Math.sin(Date.now() / 250) * 0.25;
+            return Cesium.Color.WHITE.withAlpha(alpha);
+          }, false) as unknown as Cesium.Color,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -15),
+          disableDepthTestDistance: 250000,
+          pixelOffset: new Cesium.Cartesian2(0, -18),
         },
       });
+
+      const pulseLoop = () => {
+        if (cancelled || !cctvPulseEntityRef.current || v.isDestroyed()) return;
+        throttledRender(v);
+        animRafId = requestAnimationFrame(pulseLoop);
+      };
+      pulseLoop();
     }
 
     const timer = setInterval(() => {
@@ -3313,10 +3598,13 @@ export default function App() {
     }, 10000);
 
     return () => {
+      cancelled = true;
+      if (animRafId != null) cancelAnimationFrame(animRafId);
       clearInterval(timer);
       if (cctvPulseEntityRef.current && viewerRef.current) {
         viewerRef.current.entities.remove(cctvPulseEntityRef.current);
         cctvPulseEntityRef.current = null;
+        throttledRender(viewerRef.current);
       }
     };
   }, [infoEntity]);
@@ -3501,11 +3789,13 @@ export default function App() {
       name: item.title,
       billboard: {
         image: createYoutubeIcon(),
-        width: 32, height: 32,
+        width: 36, height: 36,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        disableDepthTestDistance: 10000,
-        pixelOffset: new Cesium.Cartesian2(0, -2),
+        eyeOffset: new Cesium.Cartesian3(0, 0, -10),
+        disableDepthTestDistance: 250000,
+        scaleByDistance: new Cesium.NearFarScalar(2.0e2, 1.0, 8.0e6, 0.4),
+        pixelOffset: Cesium.Cartesian2.ZERO,
       },
       label: {
         text: item.title,
@@ -4023,7 +4313,7 @@ export default function App() {
     }
     const height = options?.height ?? 20000;
     const marker = v.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       name: options?.label ?? 'Selected Location',
       billboard: {
         image: createPinIcon(options?.color ?? '#60a5fa', 24),
@@ -4044,7 +4334,7 @@ export default function App() {
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -20),
         pixelOffset: new Cesium.Cartesian2(0, -6),
       } : undefined,
       properties: {
@@ -4258,9 +4548,10 @@ export default function App() {
     cctvFilterRef.current = filter;
     const ents = entityStoreRef.current['india_cctv'] || [];
     const metaMap = cctvMetaRef.current;
+    const selectedId = infoEntityRef.current?.id;
     ents.forEach(ent => {
       if (!ent) return;
-      if (filter === 'all') {
+      if (filter === 'all' || (selectedId && ent.id === selectedId)) {
         ent.show = true;
       } else {
         const meta = metaMap.get(ent.id);
@@ -4272,7 +4563,7 @@ export default function App() {
   }, []);
 
   const cctvCounts = useMemo(() => {
-    const counts = { all: 0, video: 0, image: 0, youtube: 0, unknown: 0 };
+    const counts = { all: 0, video: 0, image: 0, youtube: 0, windy: 0, unknown: 0 };
     for (const meta of cctvMetaRef.current.values()) {
       counts.all++;
       const cat = getCctvCategory(meta);
@@ -4556,10 +4847,13 @@ export default function App() {
   const showInfoPanel = useCallback((entity: Cesium.Entity) => {
     const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
     if (!props || Object.keys(props).length === 0) {
+      infoEntityRef.current = null;
       setInfoEntity(null);
       entityTrackerRef.current?.untrack();
       return;
     }
+    entity.show = true;
+    infoEntityRef.current = entity;
     setInfoEntity(entity);
     focusPanel('info');
 
@@ -4605,7 +4899,7 @@ export default function App() {
 
   useEffect(() => {
     if (!viewerRef.current) return;
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || (window as any).__TERRANOETIS_TEST_MODE__) {
       window.__terranoetisDebug = {
         ...(window.__terranoetisDebug ?? {}),
         viewer: viewerRef.current,
@@ -4620,6 +4914,11 @@ export default function App() {
         },
         showInfoEntity: (layerId: string, index: number = 0) => {
           const ent = entityStoreRef.current[layerId]?.[index];
+          if (!ent) return false;
+          showInfoPanel(ent);
+          return true;
+        },
+        showEntity: (ent: Cesium.Entity) => {
           if (!ent) return false;
           showInfoPanel(ent);
           return true;
@@ -5797,7 +6096,7 @@ export default function App() {
             heliLastGroundAltRef.current = Math.max(0, sh);
             return heliLastGroundAltRef.current;
           }
-        } catch {}
+        } catch { /* ignore */ }
       }
       const h = v.scene.globe.getHeight(carto);
       if (typeof h === 'number' && Number.isFinite(h) && h >= -500 && h <= 8848) {
@@ -7863,17 +8162,17 @@ export default function App() {
     const cached = cachedCctvCanvases.get(color);
     if (cached) return cached;
     const canvas = document.createElement('canvas');
-    canvas.width = 36;
-    canvas.height = 36;
+    canvas.width = 44;
+    canvas.height = 44;
     const ctx = canvas.getContext('2d')!;
-    const cx = 18, cy = 18;
-    const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, 16);
+    const cx = 22, cy = 22;
+    const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 20);
     const glowRgb = hexToRgb(color) ?? { r: 103, g: 232, b: 249 };
-    glow.addColorStop(0, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.7)`);
-    glow.addColorStop(0.5, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.2)`);
+    glow.addColorStop(0, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.75)`);
+    glow.addColorStop(0.5, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.25)`);
     glow.addColorStop(1, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0)`);
     ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, 36, 36);
+    ctx.fillRect(0, 0, 44, 44);
     ctx.save();
     ctx.translate(cx, cy);
 
@@ -7883,9 +8182,9 @@ export default function App() {
 
     ctx.fillStyle = color;
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
@@ -7893,35 +8192,35 @@ export default function App() {
     if (isYoutube) {
       // White play arrow inside YouTube badge
       ctx.beginPath();
-      ctx.moveTo(-2, -3.5);
-      ctx.lineTo(-2, 3.5);
-      ctx.lineTo(3.5, 0);
+      ctx.moveTo(-2.8, -4.5);
+      ctx.lineTo(-2.8, 4.5);
+      ctx.lineTo(4.5, 0);
       ctx.closePath();
       ctx.fill();
     } else if (isVideo) {
-      // White video camera glyph inside Live Video badge
+      // Crisp white video camera glyph inside Live Video badge
       ctx.beginPath();
-      ctx.rect(-3.5, -2.5, 4.2, 5);
+      ctx.rect(-4.5, -3.2, 5.2, 6.4);
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(1.2, -1.2);
-      ctx.lineTo(3.8, -2.8);
-      ctx.lineTo(3.8, 2.8);
-      ctx.lineTo(1.2, 1.2);
+      ctx.moveTo(1.5, -1.5);
+      ctx.lineTo(4.8, -3.5);
+      ctx.lineTo(4.8, 3.5);
+      ctx.lineTo(1.5, 1.5);
       ctx.closePath();
       ctx.fill();
     } else if (isImage) {
       // White photo camera glyph inside Snapshot Image badge
-      ctx.fillRect(-1.5, -3.6, 3, 1.2);
-      ctx.fillRect(-3.6, -2.4, 7.2, 5.2);
+      ctx.fillRect(-2, -4.5, 4, 1.5);
+      ctx.fillRect(-4.5, -3, 9, 6.5);
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(0, 0.2, 1.4, 0, Math.PI * 2);
+      ctx.arc(0, 0.2, 1.8, 0, Math.PI * 2);
       ctx.fill();
     } else {
       // Sensor eye dot inside Unknown badge
       ctx.beginPath();
-      ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -7944,17 +8243,22 @@ export default function App() {
       const allCameras = (data.cameras ?? [])
         .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon));
 
-      // Always guarantee 100% of YouTube 24/7 live webcams are preserved and rendered.
-      // Sample other high-volume snapshot cameras evenly so the globe stays smooth.
-      const MAX_CCTV = 2500;
-      const totalAvailable = allCameras.length;
-      const ytCameras = allCameras.filter(c => c.feedType === 'youtube' || c.source === 'youtube' || Boolean(c.youtubeVideoId));
-      const otherCameras = allCameras.filter(c => c.feedType !== 'youtube' && c.source !== 'youtube' && !c.youtubeVideoId);
-      const remainingQuota = Math.max(0, MAX_CCTV - ytCameras.length);
-      const sampledOthers = otherCameras.length > remainingQuota
-        ? otherCameras.filter((_, i) => i % Math.ceil(otherCameras.length / remainingQuota) === 0).slice(0, remainingQuota)
-        : otherCameras;
-      const cameras = [...ytCameras, ...sampledOthers];
+      // Render only verified working live feeds (video streams, snapshot images, YouTube, Windy)
+      const cameras = allCameras.filter((cam) => {
+        const feedType = String(cam.feedType ?? '').toLowerCase();
+        const source = String(cam.source ?? '').toLowerCase();
+        const ytId = String(cam.youtubeVideoId ?? '');
+        const streamUrl = String(cam.streamUrl ?? '');
+        const previewUrl = String(cam.previewUrl ?? cam.thumbnailUrl ?? '');
+        const playerEmbedUrl = String(cam.playerEmbedUrl ?? '');
+        if (feedType === 'youtube' || source === 'youtube' || Boolean(ytId)) return true;
+        if (playerEmbedUrl && isWindyEmbedUrl(playerEmbedUrl)) return true;
+        if (feedType === 'm3u8' || /\.m3u8(\?|$)/i.test(streamUrl) || /\.mp4(\?|$)/i.test(streamUrl)) return true;
+        if (feedType === 'video' || feedType === 'mjpeg') return true;
+        if (feedType === 'image' || previewUrl) return true;
+        return false;
+      });
+      const totalAvailable = cameras.length;
 
       const total = cameras.length;
       const ents: Cesium.Entity[] = [];
@@ -7976,10 +8280,13 @@ export default function App() {
             previewUrl: camera.previewUrl ?? camera.thumbnailUrl ?? camera.streamUrl ?? camera.pageUrl,
             streamUrl: camera.streamUrl ?? camera.pageUrl,
             thumbnailUrl: camera.thumbnailUrl ?? camera.previewUrl,
+            playerEmbedUrl: camera.playerEmbedUrl,
             source: camera.source ?? 'opencctv.org',
             category: camera.category ?? 'public webcam',
+            subcategory: camera.subcategory,
             city: camera.city,
             region: camera.region,
+            country: camera.country,
             location: camera.location,
             updatedAt: camera.updatedAt ?? Date.now(),
             description: sanitizeHtml(String(camera.description ?? '')),
@@ -7993,12 +8300,14 @@ export default function App() {
             name: camera.name as string,
             billboard: {
               image: createCctvIcon(cctvFeedColor(meta)),
-              width: 32,
-              height: 32,
+              width: 36,
+              height: 36,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              verticalOrigin: Cesium.VerticalOrigin.CENTER,
-              disableDepthTestDistance: 150000,
-              pixelOffset: new Cesium.Cartesian2(0, 0),
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              eyeOffset: new Cesium.Cartesian3(0, 0, -10),
+              disableDepthTestDistance: 250000,
+              scaleByDistance: new Cesium.NearFarScalar(2.0e2, 1.0, 8.0e6, 0.4),
+              pixelOffset: Cesium.Cartesian2.ZERO,
             },
             properties: { layer: 'india_cctv' },
           }));
@@ -8084,6 +8393,13 @@ export default function App() {
       doCycle();
     }
   }, [isLayerEnabled, toggleLayer, showInfoPanel]);
+
+  useEffect(() => {
+    if ((import.meta.env.DEV || (window as any).__TERRANOETIS_TEST_MODE__) && window.__terranoetisDebug) {
+      window.__terranoetisDebug.toggleLayer = toggleLayer;
+      window.__terranoetisDebug.loadIndiaCctv = () => viewerRef.current && loadIndiaCctv(viewerRef.current);
+    }
+  }, [toggleLayer]);
 
   // Simple frontend geo extraction from text (city/country lookup)
   function geoFromText(text: string): { lat: number; lon: number } {
@@ -8194,14 +8510,18 @@ export default function App() {
     const ents = items.map(item => {
       return viewer.entities.add({
         id: item.id,
-      position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat, 2),
+        position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat, 0),
         name: item.title,
         billboard: {
           image: createYoutubeIcon(),
-          width: 32,
-          height: 32,
+          width: 36,
+          height: 36,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          pixelOffset: new Cesium.Cartesian2(0, -2),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -10),
+          disableDepthTestDistance: 250000,
+          scaleByDistance: new Cesium.NearFarScalar(2.0e2, 1.0, 8.0e6, 0.4),
+          pixelOffset: Cesium.Cartesian2.ZERO,
         },
         label: {
           text: item.title,
@@ -11753,15 +12073,61 @@ case 'openPanel':
                   return <YoutubePlayer key={`yt-${ytId || streamUrl}`} videoId={ytId} src={streamUrl || pageUrl} />;
                 }
 
+                const playerEmbedUrl = String(p.playerEmbedUrl ?? '');
+                if (isWindyEmbedUrl(playerEmbedUrl)) {
+                  return (
+                    <iframe
+                      src={playerEmbedUrl}
+                      title={String(p.title || p.name || 'Windy live webcam')}
+                      style={{ width: '100%', height: '165px', border: 0, background: '#000', display: 'block' }}
+                      allow="autoplay; fullscreen"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      loading="lazy"
+                    />
+                  );
+                }
+
+                // Direct MP4 video stream (e.g. TfL JamCams)
+                if ((feedType === 'video' || streamUrl.endsWith('.mp4')) && streamUrl.startsWith('http') && !cctvPreviewFailed) {
+                  return (
+                    <video
+                      key={streamUrl}
+                      src={resolveApiUrl(streamUrl)}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      style={{ width: '100%', height: '165px', objectFit: 'cover', background: '#000', display: 'block' }}
+                      onError={() => setCctvPreviewFailed(true)}
+                    />
+                  );
+                }
+
                 const isHls = feedType === 'm3u8' || streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
                 if (isHls && streamUrl && !cctvPreviewFailed) {
                   // Key on stream + a manual-refresh nonce only — NOT the 10s
                   // auto-tick, which would remount hls.js and restart the video.
                   return <CctvVideoPlayer key={`${streamUrl}-${videoNonce}`} src={streamUrl} />;
                 }
-                const imgUrl = thumbUrl && !cctvPreviewFailed ? `${thumbUrl}${thumbUrl.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
+                const imgUrl = thumbUrl && !cctvPreviewFailed ? resolveApiUrl(`${thumbUrl}${thumbUrl.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}`) : '';
                 return imgUrl ? (
-                  <img key={imgUrl} src={imgUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" style={{width:'100%',height:'165px',objectFit:'cover',display:'block',background:'#000'}} onError={() => setCctvPreviewFailed(true)} />
+                  <div style={{ position: 'relative', width: '100%', height: '165px', background: '#000', overflow: 'hidden' }}>
+                    <img key={imgUrl} src={imgUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" style={{width:'100%',height:'100%',objectFit:'cover',display:'block',background:'#000'}} onError={() => setCctvPreviewFailed(true)} />
+                    {Boolean(p.updatedAt) && (
+                      <div style={{
+                        position: 'absolute', bottom: 6, right: 6,
+                        background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)',
+                        color: '#38bdf8', fontSize: '10px', fontWeight: 600,
+                        padding: '2px 6px', borderRadius: '4px',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        display: 'flex', alignItems: 'center', gap: 4
+                      }}>
+                        <span>⏱</span>
+                        <span>{new Date(Number(p.updatedAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    )}
+                  </div>
                 ) : <div className="cctv-preview-empty">Live preview unavailable</div>;
               })()}
             </div>
@@ -11774,6 +12140,11 @@ case 'openPanel':
                   <>
                     <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ef4444', boxShadow: '0 0 6px #ef4444' }} />
                     <span>24/7 Global Live Feed</span>
+                  </>
+                ) : p.source === 'windy.com' ? (
+                  <>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#06b6d4', boxShadow: '0 0 6px #06b6d4' }} />
+                    <span>Windy live webcam</span>
                   </>
                 ) : (
                   <span>Public Feed</span>
@@ -11792,7 +12163,7 @@ case 'openPanel':
                   }
                 }}
               >
-                {p.feedType === 'youtube' || p.youtubeVideoId ? 'Watch on YouTube ↗' : 'Open live'}
+                {p.feedType === 'youtube' || p.youtubeVideoId ? 'Watch on YouTube ↗' : p.source === 'windy.com' ? 'View on Windy ↗' : 'Open live'}
               </a>
             </div>
           )}
@@ -12132,7 +12503,9 @@ case 'openPanel':
               const isActive = type === 'photoreal' ? photoreal : (activeImagery === type && !photoreal);
               return (
                 <button key={type} className={`img-chip ${isActive ? 'active' : ''}`}
-                  onClick={() => setImagery(type)}>
+                  onClick={() => setImagery(type)}
+                  title={type === 'photoreal' ? 'Photorealistic 3D Tiles' : type === 'satellite' ? 'Satellite Imagery' : type === 'earth' ? 'Street Map' : 'Hybrid 3D Terrain'}
+                  aria-label={type === 'photoreal' ? 'Photorealistic 3D Tiles' : type === 'satellite' ? 'Satellite Imagery' : type === 'earth' ? 'Street Map' : 'Hybrid 3D Terrain'}>
                   {type === 'earth' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Street</> : type === 'satellite' ? <><Satellite size={12} style={{display:'inline',marginRight:3}} /> Sat</> : type === 'photoreal' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Photo</> : <><Mountain size={12} style={{display:'inline',marginRight:3}} /> Hybrid</>}
                 </button>
               );
@@ -12232,7 +12605,13 @@ case 'openPanel':
       </div>
 
       {/* Info Panel */}
-      <div className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`} style={{ zIndex: getPanelZIndex('info', 110) }}>
+      <div
+        className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`}
+        style={{
+          zIndex: getPanelZIndex('info', 110),
+          maxHeight: isLayerEnabled('india_cctv') ? 'calc(100vh - 310px)' : 'calc(100vh - 92px)',
+        }}
+      >
         {formatInfoPanel()}
       </div>
 
@@ -13208,6 +13587,27 @@ case 'openPanel':
             <span style={{ flex: 1 }}>Embedded player (YouTube)</span>
             {cctvCounts.youtube > 0 && <span className="cctv-count-badge">{cctvCounts.youtube}</span>}
           </div>
+
+          {cctvCounts.windy > 0 && (
+            <div
+              className={`legend-row legend-row-interactive row-windy ${cctvFilter === 'windy' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'windy' ? 'dimmed' : ''}`}
+              onClick={() => {
+                const next = cctvFilter === 'windy' ? 'all' : 'windy';
+                setCctvFilter(next);
+                applyCctvFilter(next);
+                showNotification(next === 'all' ? 'Showing all camera feeds' : 'Isolating Windy.com webcams only', 'info');
+              }}
+              title={cctvFilter === 'windy' ? 'Click to show all feeds' : 'Click to isolate Windy.com webcams only'}
+            >
+              <div className="cctv-symbol-badge" style={{ background: '#06b6d4', boxShadow: '0 0 10px rgba(6, 182, 212, 0.6)' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                  <path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8zm0 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                </svg>
+              </div>
+              <span style={{ flex: 1 }}>Windy.com webcams</span>
+              <span className="cctv-count-badge">{cctvCounts.windy}</span>
+            </div>
+          )}
 
           <div
             className={`legend-row legend-row-interactive row-unknown ${cctvFilter === 'unknown' ? 'active' : ''} ${cctvFilter !== 'all' && cctvFilter !== 'unknown' ? 'dimmed' : ''}`}
