@@ -94,7 +94,6 @@ __pycache__/
 # Test & browser artifacts
 playwright-report/
 test-results/
-screenshots/
 
 # Kilo agent-manager local state
 .kilo/
