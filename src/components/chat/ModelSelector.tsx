@@ -124,22 +124,30 @@ export function ModelSelector() {
     ? null
     : (models.find(m => m.id === selectedModel || m.model === selectedModel) ?? null);
 
+  const formatCleanModelName = (raw: string): string => {
+    if (!raw) return '';
+    return raw
+      .replace(/\.gguf$/i, '')
+      .replace(/[-_](?:instruct|it|chat|text-model|q[0-9]+_[a-z0-9_]+|bf16|f16|f32)/gi, '')
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
   const getPillLabel = () => {
     if (!selected || selected.id === 'auto') return 'Auto Routing';
-    if (selected.provider === 'groq') {
-      if (selected.model.includes('qwen')) return 'Groq · Qwen 3.8';
-      if (selected.model.includes('120b')) return 'Groq · GPT-OSS 120B';
-      if (selected.model.includes('20b')) return 'Groq · GPT-OSS 20B';
-      return 'Groq Ultra-Fast';
+    if (selected.local || selected.provider === 'local-gguf') {
+      const labelClean = selected.label?.replace(/^Local\s*(?:Offline)?\s*—\s*/i, '').trim();
+      if (labelClean && labelClean.toLowerCase() !== 'local' && labelClean.toLowerCase() !== 'local offline') {
+        return `Local · ${labelClean}`;
+      }
+      const raw = selected.model && selected.model !== 'local' ? selected.model : (selected.id?.replace(/^local-gguf\//, '') || '');
+      const clean = formatCleanModelName(raw);
+      return `Local · ${clean || 'Offline'}`;
     }
-    if (selected.provider === 'openai') {
-      if (selected.model.includes('mini')) return 'OpenAI · GPT-4o Mini';
-      return 'OpenAI · GPT-4o';
-    }
-    if (selected.provider === 'local-gguf' || selected.local) {
-      return 'Local · LFM 2.6B';
-    }
-    return selected.label;
+    const prov = selected.provider ? selected.provider.charAt(0).toUpperCase() + selected.provider.slice(1) : 'AI';
+    const cleanModel = formatCleanModelName(selected.model || selected.id || selected.label);
+    return `${prov} · ${cleanModel}`;
   };
 
   const getBadgeForModel = (m: AvailableModel) => {
@@ -202,6 +210,12 @@ export function ModelSelector() {
             </button>
           </div>
 
+          {loadError && (
+            <div style={{ padding: '4px 10px', fontSize: 10, color: '#f59e0b' }}>
+              {loadError}
+            </div>
+          )}
+
           <div className="model-selector-options-list">
             {models.map((m, idx) => {
               const active = selectedModel === m.id || selectedModel === m.model || (m.id === 'auto' && selectedModel === 'auto');
@@ -218,7 +232,7 @@ export function ModelSelector() {
                   onMouseEnter={() => setActiveIndex(idx)}
                 >
                   <span className="model-option-indicator">
-                    {active ? <Check size={13} className="text-terracotta" /> : null}
+                    {active ? <Check size={13} style={{ color: '#0284c7' }} /> : null}
                   </span>
                   <div className="model-option-info">
                     <span className="model-option-title">{m.label}</span>

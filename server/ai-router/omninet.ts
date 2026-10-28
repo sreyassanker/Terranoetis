@@ -485,7 +485,10 @@ export class Omninet {
         ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}),
       }),
     });
-    if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => '');
+      throw new Error(`${config.name} HTTP ${resp.status}: ${errBody}`);
+    }
     const data = await resp.json() as Record<string, unknown>;
     const msg = (data.choices as Array<Record<string, unknown>>)?.[0]?.message as Record<string, unknown> | undefined;
     // Local GGUF models may put their output in reasoning_content (not content).
@@ -899,9 +902,8 @@ export class Omninet {
               signal: options?.signal || AbortSignal.timeout(60000),
               body: JSON.stringify({
                 model,
-                messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 6000 : config.name === 'groq' ? 12000 : 32000) }],
-                // Free-tier OTPM caps reject 4096-token asks on qwen/compound.
-                max_tokens: config.name === 'groq' ? Math.min(options?.maxTokens ?? 2048, 950) : (options?.maxTokens ?? 2048),
+                messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 6000 : config.name === 'groq' ? 16000 : 32000) }],
+                max_tokens: model.includes('gpt-oss') ? Math.max(options?.maxTokens ?? 2048, 3500) : (options?.maxTokens ?? 2048),
                 temperature: options?.temperature ?? 0.3,
                 // Reasoning models (gpt-oss etc.) silently spend the whole token
                 // budget on invisible reasoning, yielding empty answers. Cap it.
@@ -990,7 +992,6 @@ export class Omninet {
           if (!reader) throw new Error('No response body');
           const decoder = new TextDecoder();
           let buffer = '';
-          let yieldedChars = 0;
           const geminiCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
           while (true) {
             const { done, value } = await reader.read();
@@ -1007,7 +1008,7 @@ export class Omninet {
                   for (const part of parts || []) {
                     if (part?.functionCall?.name) {
                       geminiCalls.push({ name: part.functionCall.name, args: part.functionCall.args || {} });
-                    } else if (part?.text && !part.thought) { reportUsed(); yield part.text; yieldedChars += part.text.length; yieldedAny += part.text.length; }
+                    } else if (part?.text && !part.thought) { reportUsed(); yield part.text; yieldedAny += part.text.length; }
                   }
                 } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
               }

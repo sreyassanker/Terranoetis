@@ -202,12 +202,14 @@ async function omninetStructured<T>(prompt: string, _apiKey?: string): Promise<T
  * time phrases and hazard/data nouns (incl. plurals) are stripped so
  * Nominatim is never queried with data nouns. Returns '' when nothing usable.
  */
-function cleanPlaceFromMessage(text: string): string {
+export function cleanPlaceFromMessage(text: string): string {
   const cleaned = text
     .replace(/[,.?!]+/g, ' ')
-    .replace(/\b(?:what|whats|where|when|which|who|why|how|is|are|was|were|did|does|do|any|there|the|a|an|please|me|my|show|display|open|find|track|tell|about|of|for|to|on|at|near|around|in|happened|happening|happens|currently|right|now|fly|go|zoom|navigate|jump|move|travel|head|focus|center|recenter|take)\b/gi, ' ')
+    .replace(/\b(?:what|whats|where|when|which|who|why|how|is|are|was|were|did|does|do|any|there|the|a|an|please|me|my|show|display|open|find|track|tell|about|of|for|to|on|at|near|around|in|happened|happening|happens|currently|right|now|fly|go|zoom|navigate|jump|move|travel|head|focus|center|recenter|take|name|names|all|flying|through|across|above|over|into|along|list)\b/gi, ' ')
     .replace(/\b(?:today|tonight|yesterday|tomorrow|this week|last week|this month|past day|past week|last 24 hours|24 hours|24h|recently|latest|current|recent)\b/gi, ' ')
-    .replace(/\b(?:earthquakes?|quakes?|seismic activity|seismicity|volcanoes?|volcanic|eruptions?|wildfires?|fires?|floods?|flooding|storms?|hurricanes?|cyclones?|typhoons?|tsunamis?|tsunami|droughts?|landslides?|lightning|air quality|pollution|flights?|aircraft|planes?|ships?|vessels?|maritime|satellites?|space debris|space weather|debris|deforestation|magnitudes?|aftershocks?|data|risk|risks|impact|impacts)\b/gi, ' ')
+    .replace(/\b(?:earthquakes?|quakes?|seismic activity|seismicity|volcanoes?|volcanic|eruptions?|wildfires?|fires?|floods?|flooding|storms?|hurricanes?|cyclones?|typhoons?|tsunamis?|tsunami|droughts?|landslides?|lightning|air quality|pollution|flights?|aircraft|planes?|ships?|vessels?|maritime|satellites?|space debris|space weather|debris|deforestation|magnitudes?|aftershocks?|data|risk|risks|impact|impacts|cctv|webcams?|cameras?|traffic\s*cams?|live\s*media|video\s*feeds?)\b/gi, ' ')
+    // conversational greetings & non-place tokens
+    .replace(/\b(?:hi|hello|hey|heya|howdy|sup|greetings|morning|afternoon|evening|good\s+morning|good\s+afternoon|good\s+evening|bye|goodbye|thanks|thank\s+you|welcome|ok|okay|yes|yeah|yep|nope|no)\b/gi, ' ')
     // scientific indicator/model names must not pollute the place query
     .replace(/\b(?:land surface temperature|lst|ndvi|evi|ndwi|evapotranspiration|gdd|growing degree|pdsi|drought index|aqi|pga|ground motion|ground.?shaking intensity|sea surface temperature|chlorophyll|gpp|carbon flux|soil moisture|wave energy|albedo|emissivity)\b/gi, ' ')
     .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
@@ -365,6 +367,10 @@ const CITY_ALIASES: Record<string, string> = {
   'bkk': 'bangkok', 'sg': 'singapore', 'dubai': 'dubai',
   'mumbai': 'mumbai', 'bombay': 'mumbai', 'calcutta': 'kolkata',
   'madras': 'chennai', 'prague': 'prague', 'vienna': 'vienna',
+  trivandrum: 'thiruvananthapuram',
+  cochin: 'kochi',
+  calicut: 'kozhikode',
+  bengaluru: 'bangalore',
 };
 
 function escapeRegExp(value: string): string {
@@ -430,7 +436,8 @@ export class IntentRouter {
     if (navPhrase) {
       return { type: 'fly_to', confidence: 0.95, location };
     }
-    if (location && (lower.includes('fly') || lower.includes('go to') || lower.includes('zoom to') ||
+    const isAnalyticalQuery = /\b(assess|assessment|correlate|correlation|seismic|earthquake|volcano|alert|disaster|hazard|tsunami|risk|analysis|analyze|calculate|math|latex|formula|chart|graph|diagram|mermaid|table|report|workbench|overview|summary|flight|flights|plane|planes|aircraft|flying|aviation|air\s*traffic|adsb|vessel|vessels|ship|ships)\b/i.test(lower) || lower.length > 80 || /[,;]|\band\b|\bthen\b|\balso\b/i.test(lower);
+    if (!isAnalyticalQuery && location && (/\bfly\b/i.test(lower) || lower.includes('go to') || lower.includes('zoom to') ||
                       lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
       return { type: 'fly_to', confidence: 0.95, location };
     }
@@ -626,6 +633,9 @@ export class IntentRouter {
       if (lower.includes('building') || lower.includes('3d building') || lower.includes('osm building')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['dt_buildings'] };
       }
+      if (lower.includes('cctv') || lower.includes('camera') || lower.includes('webcam')) {
+        return { type: 'toggle_layer', confidence: 0.95, layerIds: ['live_cctv'], location };
+      }
       // God-eye extras: opacity, screenshot, entity tracking — parsed by extractCommands.
     }
     // Data-phrased layer questions ("what earthquakes happened near japan",
@@ -661,6 +671,7 @@ export class IntentRouter {
         [/crypto prices?|bitcoin price|ethereum price/, ['crypto_prices']],
         [/prediction markets?|geopolitical odds/, ['prediction_markets']],
         [/submarine cable|undersea cable|internet cable/, ['submarine_cables']],
+        [/\bcctv|webcams?|cameras?|traffic\s*cams?/, ['live_cctv']],
       ];
       for (const [re, ids] of layerMap) {
         if (re.test(lower)) {
@@ -863,13 +874,19 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
     } while (cleaned !== prev);
     if (cleaned.length < 2) return null;
+    // Avoid geocoding conversational greetings or non-place tokens
+    if (/^(hi|hello|hey|heya|howdy|sup|greetings|bye|thanks|ok|okay|yes|no)$/i.test(cleaned)) {
+      return null;
+    }
+    const alias = CITY_ALIASES[cleaned.toLowerCase()];
+    if (alias) cleaned = alias;
 
     const cacheKey = cleaned.toLowerCase();
     const cached = geocodeCache.get<{ latMin: number; latMax: number; lonMin: number; lonMax: number }>(cacheKey + '_bbox');
     if (cached) return cached;
 
     // If the point geocode hasn't run yet, run it so its bbox gets cached.
-    if (!geocodeCache.get(cacheKey)) {
+    if (!geocodeCache.get(cacheKey + '_bbox')) {
       await this.geocode(text, _apiKey);
     }
     return geocodeCache.get<{ latMin: number; latMax: number; lonMin: number; lonMax: number }>(cacheKey + '_bbox') || null;
@@ -887,7 +904,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
    * request several candidates and prefer a real polygon — otherwise cities
    * like Thiruvananthapuram silently fall back to a rectangle. Cached for 24h.
    */
-  static async geocodePolygon(text: string, _apiKey: string): Promise<Array<Array<[number, number]>> | null> {
+  static async geocodePolygon(text: string, _apiKey: string, coordsHint?: { lat: number; lon: number }): Promise<Array<Array<[number, number]>> | null> {
     let cleaned = cleanPlaceFromMessage(text);
     const LEADING_NOISE_POLY = /\b(?:compare|comparison|agricultural|agriculture|drought|using|soil|moisture|information|analysis|analyze|climate|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|annual|monthly|daily|hourly|global|local|regional|between|within|across|over|under|above|below)\b/gi;
     let prev: string;
@@ -896,6 +913,12 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       cleaned = cleaned.replace(LEADING_NOISE_POLY, ' ').replace(/\s{2,}/g, ' ').trim();
     } while (cleaned !== prev);
     if (cleaned.length < 2) return null;
+    // Avoid geocoding conversational greetings or non-place tokens
+    if (/^(hi|hello|hey|heya|howdy|sup|greetings|bye|thanks|ok|okay|yes|no)$/i.test(cleaned)) {
+      return null;
+    }
+    const alias = CITY_ALIASES[cleaned.toLowerCase()];
+    if (alias) cleaned = alias;
 
     const cacheKey = 'poly_' + cleaned.toLowerCase();
     const cachedPoly = geocodeCache.get<Array<Array<[number, number]>>>(cacheKey + '_poly');
@@ -904,44 +927,88 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     type NominatimHit = {
       osm_type?: string; osm_id?: number; class?: string; type?: string;
       geojson?: { type?: string; coordinates?: unknown };
+      lat?: string; lon?: string; display_name?: string;
     };
     const isPoly = (h?: NominatimHit) =>
       !!h?.geojson && (h.geojson.type === 'Polygon' || h.geojson.type === 'MultiPolygon');
 
     // Request several candidates so an administrative boundary that is not the
     // #1 result is still found.
-    const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=8&polygon_geojson=1&q=${encodeURIComponent(cleaned)}`;
+    const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=10&polygon_geojson=1&q=${encodeURIComponent(cleaned)}`;
     const searchResp = await fetch(searchUrl, {
       headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0 (geospatial intelligence platform)', 'Accept': 'application/json' },
       signal: AbortSignal.timeout(8000),
     });
-    if (!searchResp.ok) return null;
-    const searchData = await searchResp.json() as NominatimHit[];
-    if (!searchData.length) return null;
+    let searchData: NominatimHit[] = [];
+    if (searchResp.ok) {
+      searchData = await searchResp.json() as NominatimHit[];
+    }
 
-    // Prefer an administrative boundary polygon; else any polygon feature
-    // (park, lake, campus, reserve…); else fall through to the lookup API.
-    const boundaryHit = searchData.find(h => h.class === 'boundary' && isPoly(h));
-    const polyHit = boundaryHit || searchData.find(h => isPoly(h));
-    if (polyHit?.geojson) return this.cachePolygon(cacheKey, polyHit.geojson);
+    if (searchData.length > 0) {
+      // Prefer an administrative boundary polygon; else any polygon feature
+      // (park, lake, campus, reserve…); else fall through to the lookup API.
+      const boundaryHit = searchData.find(h => h.class === 'boundary' && isPoly(h));
+      const polyHit = boundaryHit || searchData.find(h => isPoly(h));
+      if (polyHit?.geojson) return this.cachePolygon(cacheKey, polyHit.geojson);
 
-    // No polygon in the search results — try the lookup API on the top hit's
-    // osm id (sometimes returns boundary geometry the search omitted).
-    const hit = searchData[0];
-    if (hit?.osm_type && hit?.osm_id) {
-      const lookupUrl = `https://nominatim.openstreetmap.org/lookup?osm_ids=${hit.osm_type[0].toUpperCase()}${hit.osm_id}&format=json&polygon_geojson=1`;
-      const lresp = await fetch(lookupUrl, {
-        headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (lresp.ok) {
-        const ldata = await lresp.json() as NominatimHit[];
-        const lgeo = ldata[0]?.geojson;
-        if (lgeo && (lgeo.type === 'Polygon' || lgeo.type === 'MultiPolygon')) {
-          return this.cachePolygon(cacheKey, lgeo);
-        }
+      // No polygon in the search results — try the lookup API on the top hit's
+      // osm id (sometimes returns boundary geometry the search omitted).
+      const hit = searchData[0];
+      if (hit?.osm_type && hit?.osm_id) {
+        const lookupUrl = `https://nominatim.openstreetmap.org/lookup?osm_ids=${hit.osm_type[0].toUpperCase()}${hit.osm_id}&format=json&polygon_geojson=1`;
+        try {
+          const lresp = await fetch(lookupUrl, {
+            headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (lresp.ok) {
+            const ldata = await lresp.json() as NominatimHit[];
+            const lgeo = ldata[0]?.geojson;
+            if (lgeo && (lgeo.type === 'Polygon' || lgeo.type === 'MultiPolygon')) {
+              return this.cachePolygon(cacheKey, lgeo);
+            }
+          }
+        } catch { /* best-effort */ }
       }
     }
+
+    // Coordinate-based administrative polygon resolution fallback:
+    // If text search returned no polygon (e.g. spelling variation returned road lineStrings or points),
+    // reverse geocode the coordinates to discover the official administrative city/district name.
+    const targetCoords = coordsHint || (searchData[0]?.lat && searchData[0]?.lon
+      ? { lat: parseFloat(searchData[0].lat), lon: parseFloat(searchData[0].lon) }
+      : null);
+
+    if (targetCoords && isFinite(targetCoords.lat) && isFinite(targetCoords.lon)) {
+      try {
+        const revUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${targetCoords.lat}&lon=${targetCoords.lon}`;
+        const revResp = await fetch(revUrl, {
+          headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (revResp.ok) {
+          const revData = await revResp.json() as { address?: Record<string, string> };
+          const addr = revData.address || {};
+          const adminName = addr.city || addr.county || addr.state_district || addr.town || addr.municipality;
+          if (adminName && adminName.toLowerCase() !== cleaned.toLowerCase()) {
+            const qualified = `${adminName}, ${addr.state || ''}, ${addr.country || ''}`.replace(/,\s*,/g, ',').trim();
+            const adminSearchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=5&polygon_geojson=1&q=${encodeURIComponent(qualified)}`;
+            const adminResp = await fetch(adminSearchUrl, {
+              headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (adminResp.ok) {
+              const adminData = await adminResp.json() as NominatimHit[];
+              const adminBoundary = adminData.find(h => h.class === 'boundary' && isPoly(h)) || adminData.find(h => isPoly(h));
+              if (adminBoundary?.geojson) {
+                return this.cachePolygon(cacheKey, adminBoundary.geojson);
+              }
+            }
+          }
+        }
+      } catch { /* best-effort reverse fallback */ }
+    }
+
     // Genuinely no polygon anywhere → caller draws the bbox rectangle fallback.
     return null;
   }
@@ -979,6 +1046,12 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       cleaned = cleaned.replace(LEADING_NOISE_OSM, ' ').replace(/\s{2,}/g, ' ').trim();
     } while (cleaned !== prev);
     if (cleaned.length < 2) return null;
+    // Avoid geocoding conversational greetings or non-place tokens
+    if (/^(hi|hello|hey|heya|howdy|sup|greetings|bye|thanks|ok|okay|yes|no)$/i.test(cleaned)) {
+      return null;
+    }
+    const alias = CITY_ALIASES[cleaned.toLowerCase()];
+    if (alias) cleaned = alias;
     // Avoid geocoding pure command text that isn't a place.
     if (/\b(earthquakes?|volcanoes?|flights?|aircraft|ships?|wildfires?|storms?|weather|space weather|deforestation|satellite imagery)\b/i.test(cleaned) && !/\b(?:in|near|at|around)\s+\w{2,}/i.test(text)) {
       return null;
@@ -1590,7 +1663,17 @@ export class CommandParser {
   static parse(text: string): GlobeCommand[] {
     const commands: GlobeCommand[] = [];
     const cmdMatch = text.match(/## COMMANDS\n([\s\S]*?)(?:\n##|$)/);
-    if (!cmdMatch) return commands;
+    if (!cmdMatch) {
+      // Loose fallback: models sometimes emit individual ```json blocks with {"action": ...}
+      const looseBlocks = [...text.matchAll(/\{\s*"action"\s*:\s*"([a-zA-Z0-9_]+)"[\s\S]*?\}/g)];
+      for (const m of looseBlocks) {
+        try {
+          const parsed = JSON.parse(m[0]) as GlobeCommand;
+          this.pushIfValid(commands, parsed);
+        } catch { /* ignore malformed loose blocks */ }
+      }
+      return commands;
+    }
     let body = cmdMatch[1].trim();
     // Models often wrap the whole command array in one ```json fence — unwrap it
     const fence = body.match(/```(?:json)?\s*\n?([\s\S]*?)```/);

@@ -21,6 +21,8 @@ describe('deterministic fast paths', () => {
     expect(route('show space debris')).toMatchObject({ type: 'toggle_layer', layerIds: ['space_debris'] });
     expect(route('show night lights')).toMatchObject({ type: 'toggle_layer', layerIds: ['night_lights'] });
     expect(route('show land cover')).toMatchObject({ type: 'toggle_layer', layerIds: ['land_cover'] });
+    expect(route('show cctv')).toMatchObject({ type: 'toggle_layer', layerIds: ['live_cctv'] });
+    expect(route('show live webcams')).toMatchObject({ type: 'toggle_layer', layerIds: ['live_cctv'] });
   });
 
   it('fly_to commands', () => {

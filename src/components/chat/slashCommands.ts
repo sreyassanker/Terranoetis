@@ -1,0 +1,146 @@
+import {
+  Compass,
+  ShieldAlert,
+  Layers,
+  Flame,
+  Radio,
+  Camera,
+  Satellite,
+  Ruler,
+  GitBranch,
+  Download,
+  GitMerge,
+  Trash2,
+  HelpCircle,
+  type LucideIcon,
+} from 'lucide-react';
+
+export interface SlashCommand {
+  id: string;
+  command: string;
+  label: string;
+  description: string;
+  template: string;
+  icon: LucideIcon;
+  category: 'Navigation' | 'Analysis' | 'Simulation' | 'Data' | 'Tools';
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    id: 'fly',
+    command: '/fly',
+    label: 'fly',
+    description: 'Fly 3D globe camera to any city, coordinate, or landmark.',
+    template: '/fly ',
+    icon: Compass,
+    category: 'Navigation',
+  },
+  {
+    id: 'assess',
+    command: '/assess',
+    label: 'assess',
+    description: 'Execute multi-hazard risk assessment and damage analysis for an area.',
+    template: '/assess ',
+    icon: ShieldAlert,
+    category: 'Analysis',
+  },
+  {
+    id: 'layers',
+    command: '/layers',
+    label: 'layers',
+    description: 'Search, inspect, and toggle active scientific & telemetry layers.',
+    template: '/layers ',
+    icon: Layers,
+    category: 'Data',
+  },
+  {
+    id: 'simulate',
+    command: '/simulate',
+    label: 'simulate',
+    description: 'Run physics simulation kernel (wildfire spread, earthquake GMPE, hurricane track).',
+    template: '/simulate ',
+    icon: Flame,
+    category: 'Simulation',
+  },
+  {
+    id: 'intel',
+    command: '/intel',
+    label: 'intel',
+    description: 'Pull live planetary disaster alerts, OSINT feeds, and emergency streams.',
+    template: '/intel ',
+    icon: Radio,
+    category: 'Data',
+  },
+  {
+    id: 'diagram',
+    command: '/diagram',
+    label: 'diagram',
+    description: 'Generate an interactive Mermaid diagram, flowchart, or architecture.',
+    template: '/diagram ',
+    icon: GitMerge,
+    category: 'Analysis',
+  },
+  {
+    id: 'cctv',
+    command: '/cctv',
+    label: 'cctv',
+    description: 'Search and stream verified worldwide webcams and traffic CCTV cameras.',
+    template: '/cctv ',
+    icon: Camera,
+    category: 'Data',
+  },
+  {
+    id: 'satellite',
+    command: '/satellite',
+    label: 'satellite',
+    description: 'Track orbital satellites, ISS passes, and space debris in real time.',
+    template: '/satellite ',
+    icon: Satellite,
+    category: 'Data',
+  },
+  {
+    id: 'measure',
+    command: '/measure',
+    label: 'measure',
+    description: 'Activate 3D geodesic distance and elevation measurement tool.',
+    template: '/measure',
+    icon: Ruler,
+    category: 'Tools',
+  },
+  {
+    id: 'fork',
+    command: '/fork',
+    label: 'fork',
+    description: 'Create or inspect counterfactual parallel reality dome simulation.',
+    template: '/fork ',
+    icon: GitBranch,
+    category: 'Simulation',
+  },
+  {
+    id: 'export',
+    command: '/export',
+    label: 'export',
+    description: 'Export current intelligence briefing as PDF, Markdown, or GeoJSON.',
+    template: '/export',
+    icon: Download,
+    category: 'Tools',
+  },
+  {
+    id: 'clear',
+    command: '/clear',
+    label: 'clear',
+    description: 'Reset conversation history and clear active globe annotations.',
+    template: '/clear',
+    icon: Trash2,
+    category: 'Tools',
+  },
+  {
+    id: 'help',
+    command: '/help',
+    label: 'help',
+    description: 'Display all available Earth Copilot commands and spatial capabilities.',
+    template: '/help',
+    icon: HelpCircle,
+    category: 'Tools',
+  },
+];

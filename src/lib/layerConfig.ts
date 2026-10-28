@@ -656,7 +656,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'YouTube crisis videos',
   },
   {
-    id: 'india_cctv', label: 'Public Cameras', symbol: '❖',
+    id: 'live_cctv', label: 'Public Cameras', symbol: '❖',
     color: '#fb7185', motionType: 'pulse', group: 'media',
     type: 'point', description: 'Worldwide public webcams / CCTV (health-checked opencctv + windy list) — live camera feeds near a location',
     dataSource: 'https://opencctv.org/',

@@ -45,6 +45,14 @@ const SYNONYMS: Record<string, string> = {
   indicator_code: 'indicator', series: 'series_id', seriesid: 'series_id',
 };
 
+// Cross-mapping groups for spatial bounding box parameters (e.g. minLat vs latMin)
+const BBOX_GROUPS = [
+  new Set(['minlat', 'latmin', 'minlatitude', 'latitudemin', 'south', 's']),
+  new Set(['maxlat', 'latmax', 'maxlatitude', 'latitudemax', 'north', 'n']),
+  new Set(['minlon', 'lonmin', 'minlongitude', 'longitudemin', 'minlng', 'lngmin', 'west', 'w']),
+  new Set(['maxlon', 'lonmax', 'maxlongitude', 'longitudemax', 'maxlng', 'lngmax', 'east', 'e']),
+];
+
 const NUMERIC_PARAM = /(lat|lon|lng|mag|radius|km|distance|hours|days|limit|count|depth|temp|speed|zoom|year|month|value|amount|price|prob|percent|elev|bearing|azimuth|population|n$|num)/i;
 
 /** A comparable key: lowercase with underscores removed (so min_mag == minMag == MINMAG). */
@@ -55,6 +63,16 @@ function declaredIndex(params: Record<string, string>): Map<string, string> {
   const idx = new Map<string, string>();
   for (const key of Object.keys(params)) idx.set(normKey(key), key);
   return idx;
+}
+
+function findBboxDeclaredMatch(rawKey: string, declaredParams: Record<string, string>): string | undefined {
+  const nk = normKey(rawKey);
+  const group = BBOX_GROUPS.find(g => g.has(nk));
+  if (!group) return undefined;
+  for (const decKey of Object.keys(declaredParams)) {
+    if (group.has(normKey(decKey))) return decKey;
+  }
+  return undefined;
 }
 
 function isNumericish(v: unknown): boolean {
@@ -75,6 +93,10 @@ export function normalizeToolCall(tool: ToolLike, rawArgs: Record<string, unknow
     if (!canonical && SYNONYMS[key.toLowerCase()]) {
       const syn = SYNONYMS[key.toLowerCase()];
       canonical = declared[syn] ? syn : index.get(normKey(syn));
+    }
+    // 2b. bounding box cross-mapping (e.g. latMin <-> minLat) against declared params
+    if (!canonical && hasDeclared) {
+      canonical = findBboxDeclaredMatch(key, declared);
     }
 
     if (!canonical) {

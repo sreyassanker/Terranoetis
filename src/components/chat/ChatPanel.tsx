@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot, History, Plus, RotateCcw, Trash2, Send, Square, Paperclip,
   Image as ImageIcon, FileSpreadsheet, Volume2, Link, FileDown,
@@ -18,6 +18,8 @@ import { ModelSelector } from './ModelSelector';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useChatPanelState, useStreamingRenderer } from '@/hooks/useChatSelectors';
 import type { VirtualizedMessageListHandle } from './VirtualizedMessageList';
+import { SlashCommandMenu } from './SlashCommandMenu';
+import { SLASH_COMMANDS, type SlashCommand } from './slashCommands';
 
 // Resize bounds (kept in sync with store/chatStore.ts loadPanelState).
 const MIN_PANEL_W = 320;
@@ -106,6 +108,37 @@ export function ChatPanel({
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
 
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+
+  const isSlashActive = Boolean(
+    aiInput.startsWith('/') &&
+    !aiInput.includes(' ') &&
+    !slashDismissed
+  );
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!aiInput.startsWith('/')) return [];
+    const q = aiInput.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter(cmd =>
+      cmd.label.toLowerCase().includes(q) ||
+      cmd.description.toLowerCase().includes(q)
+    );
+  }, [aiInput]);
+
+  const safeSlashIndex = slashSelectedIndex < filteredSlashCommands.length ? slashSelectedIndex : 0;
+
+  const handleSelectSlashCommand = (cmd: SlashCommand) => {
+    setAiInput(cmd.template);
+    setSlashDismissed(false);
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(cmd.template.length, cmd.template.length);
+      }
+    }, 10);
+  };
+
   const hasMessages = aiMessages.length > 0;
   const canUndo = agentActionCount > 0;
 
@@ -122,9 +155,11 @@ export function ChatPanel({
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current); }, []);
 
+  const isConfirmingDelete = Boolean(hasMessages && confirmDelete);
+
   const handleDeleteClick = () => {
     if (!hasMessages) return;
-    if (confirmDelete) {
+    if (isConfirmingDelete) {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
       setConfirmDelete(false);
       void deleteCurrentChat();
@@ -135,11 +170,10 @@ export function ChatPanel({
   };
 
   useEffect(() => {
-    if (!hasMessages && confirmDelete) {
-      setConfirmDelete(false);
+    return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-    }
-  }, [hasMessages, confirmDelete]);
+    };
+  }, []);
 
   // Close attach menu when clicking outside
   useEffect(() => {
@@ -304,10 +338,10 @@ export function ChatPanel({
       <Panel
         title="Earth Copilot"
         icon={<Bot size={15} strokeWidth={1.6} />}
-        accentColor="#c25e3e"
-        iconColor="#c25e3e"
-        titleColor="#2d2724"
-        headerBackground="#f4efe6"
+        accentColor="#0284c7"
+        iconColor="#0284c7"
+        titleColor="#0f172a"
+        headerBackground="#f8fafc"
         onClose={() => setShowAI(false)}
         headerActions={
           <div className="chat-header-actions" role="toolbar" aria-label="AI Copilot actions">
@@ -366,7 +400,7 @@ export function ChatPanel({
 
             {/* Group 3: Destructive Deletion */}
             <div className="chat-header-group" role="group" aria-label="Delete conversation">
-              {confirmDelete ? (
+              {isConfirmingDelete ? (
                 <span className="chat-header-confirm" role="group" aria-label="Confirm delete conversation">
                   <button
                     type="button"
@@ -422,12 +456,12 @@ export function ChatPanel({
         style={{
           height: chatCollapsed ? 46 : (chatPanelHeight ?? 'calc(100vh - 150px)'),
           maxHeight: chatCollapsed ? 46 : (chatPanelHeight ?? 'calc(100vh - 150px)'),
-          background: '#faf8f5',
+          background: '#ffffff',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid #e7e2d7',
-          boxShadow: '0 16px 40px rgba(40, 30, 20, 0.12), 0 0 1px rgba(0, 0, 0, 0.08)',
-          color: '#1c1917',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 16px 40px rgba(15, 23, 42, 0.10), 0 0 1px rgba(0, 0, 0, 0.06)',
+          color: '#0f172a',
           borderRadius: '14px',
         }}
       >
@@ -612,7 +646,7 @@ export function ChatPanel({
             {aiMessages.length === 0 && (
               <div className="chat-welcome" role="note">
                 <div className="chat-welcome-head">
-                  <Sparkles size={14} className="text-terracotta" />
+                  <Sparkles size={14} style={{ color: '#0284c7' }} />
                   <span>Earth Intelligence Copilot</span>
                 </div>
                 <div className="chat-welcome-sub">
@@ -637,7 +671,16 @@ export function ChatPanel({
             )}
 
             {/* Modern Claude / Antigravity Style Integrated Composer */}
-            <div className="chat-composer-card">
+            <div className="chat-composer-card" style={{ position: 'relative' }}>
+              {isSlashActive && filteredSlashCommands.length > 0 && (
+                <SlashCommandMenu
+                  query={aiInput}
+                  selectedIndex={safeSlashIndex}
+                  onSelect={handleSelectSlashCommand}
+                  onClose={() => setSlashDismissed(true)}
+                />
+              )}
+
               {chatImages.length > 0 && (
                 <div className="chat-image-previews" aria-label="Pending image uploads">
                   {chatImages.map(img => (
@@ -659,10 +702,18 @@ export function ChatPanel({
               <textarea
                 ref={inputRef}
                 className="chat-composer-input"
-                placeholder={editingMessageId != null ? 'Edit your message — press Enter to apply and regenerate…' : 'Ask about any place, layer, or upload data…'}
+                placeholder={editingMessageId != null ? 'Edit your message — press Enter to apply and regenerate…' : 'Ask anything, explore layers, or type / for commands…'}
                 value={aiInput}
                 rows={1}
-                onChange={e => setAiInput(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setAiInput(val);
+                  if (slashDismissed && !val.startsWith('/')) {
+                    setSlashDismissed(false);
+                  } else if (val.startsWith('/') && slashDismissed && val.length === 1) {
+                    setSlashDismissed(false);
+                  }
+                }}
                 onInput={e => {
                   const el = e.currentTarget;
                   el.style.height = 'auto';
@@ -670,6 +721,31 @@ export function ChatPanel({
                 }}
                 onKeyDown={e => {
                   if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  if (isSlashActive && filteredSlashCommands.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSlashSelectedIndex(prev => (prev + 1) % filteredSlashCommands.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSlashSelectedIndex(prev => (prev - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
+                      return;
+                    }
+                    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                      e.preventDefault();
+                      const chosen = filteredSlashCommands[safeSlashIndex] || filteredSlashCommands[0];
+                      if (chosen) {
+                        handleSelectSlashCommand(chosen);
+                        return;
+                      }
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setSlashDismissed(true);
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAI(); }
                 }}
                 aria-label="Chat message input"

@@ -84,6 +84,30 @@ export function useChat(
     const state = store.getState();
     const userMsg = typeof overrideMessage === 'string' ? overrideMessage : state.aiInput.trim();
     if (!userMsg) return;
+
+    // Direct client-side slash commands
+    if (userMsg.trim() === '/clear') {
+      store.getState().setAiMessages([]);
+      store.getState().setAgentSteps([]);
+      store.getState().setAiInput('');
+      executeAgentCommands([{ action: 'clearEntities' }]);
+      import('sonner').then(({ toast }) => toast.success('Conversation and globe entities cleared'));
+      return;
+    }
+
+    if (userMsg.trim() === '/help') {
+      store.getState().setAiInput('');
+      const userMsgId = nextAiMsgIdRef.current++;
+      const replyId = nextAiMsgIdRef.current++;
+      store.getState().addMessage({ id: userMsgId, role: 'user', content: '/help' });
+      store.getState().addMessage({
+        id: replyId,
+        role: 'assistant',
+        content: `### 🌐 Earth Copilot Command Reference\n\n| Command | Action | Example |\n| :--- | :--- | :--- |\n| \`/fly <place>\` | Fly 3D globe camera to any city, coordinate, or landmark | \`/fly Tokyo\` |\n| \`/assess <region>\` | Multi-hazard risk assessment and vulnerability analysis | \`/assess California\` |\n| \`/layers <query>\` | Search and toggle 100+ telemetry data layers | \`/layers wildfire\` |\n| \`/simulate <type>\` | Run physics simulation kernel (wildfire, earthquake, hurricane) | \`/simulate hurricane\` |\n| \`/intel <topic>\` | Ingest live disaster feeds, OSINT, and emergency streams | \`/intel earthquake\` |\n| \`/diagram <flow>\` | Generate interactive Mermaid diagrams and flowcharts | \`/diagram wildfire response\` |\n| \`/cctv <place>\` | Stream verified worldwide live webcams & CCTV feeds | \`/cctv New York\` |\n| \`/satellite <name>\`| Track satellites, ISS passes, and space debris | \`/satellite ISS\` |\n| \`/measure\` | Geodesic 3D distance and elevation measurement | \`/measure\` |\n| \`/fork <name>\` | Counterfactual parallel reality simulation dome | \`/fork flood_defense\` |\n| \`/clear\` | Reset conversation memory and clear globe entities | \`/clear\` |\n\n*Type \`/\` in the chat input at any time to open the interactive autocomplete menu.*`,
+      });
+      return;
+    }
+
     // Double-send guard: only one stream at a time (the Stop button owns abort).
     // A genuine rerun (slider re-run via sendAIRef) may bypass with force.
     if (state.aiTyping && !opts?.force) return;
@@ -205,7 +229,8 @@ export function useChat(
       return;
     }
 
-    const loc = await extractLocation(userMsg);
+    const cleanedText = userMsg.replace(/^\/[a-z]+\s+/i, '');
+    const loc = await extractLocation(cleanedText || userMsg);
 
     // Multi-command message? (comma/and-separated: "show earthquakes, flights,
     // and ships"). When the user asks for MULTIPLE things, skip the client-side
@@ -248,23 +273,6 @@ export function useChat(
         } catch (e) {
           addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` });
         }
-      }
-
-      // Flight queries
-      const lower = userMsg.toLowerCase();
-      const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb');
-      if (wantsFlights && loc) {
-        const layerId = 'flight_tracks';
-        if (isLayerEnabled(layerId)) {
-          const v = viewerRef.current;
-          if (v) void loadFlightTracks(v);
-        } else {
-          toggleLayer(layerId);
-        }
-        focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
-        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` });
-        setAiTyping(false);
-        return;
       }
     }
 
@@ -364,11 +372,38 @@ export function useChat(
         ? (store.getState().chatTabs.find(t => t.id === streamTabId)?.messages ?? store.getState().aiMessages)
         : store.getState().aiMessages
       ).slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
+
+      let effectivePrompt = userMsg;
+      if (userMsg.startsWith('/fly ')) {
+        effectivePrompt = `Fly to ${userMsg.slice(5).trim()}`;
+      } else if (userMsg.startsWith('/assess ')) {
+        effectivePrompt = `Run a comprehensive hazard and risk assessment for ${userMsg.slice(8).trim()}`;
+      } else if (userMsg.startsWith('/layers ')) {
+        effectivePrompt = `Toggle and inspect data layers matching: ${userMsg.slice(8).trim()}`;
+      } else if (userMsg.startsWith('/simulate ')) {
+        effectivePrompt = `Run physics simulation for ${userMsg.slice(10).trim()} on the 3D globe`;
+      } else if (userMsg.startsWith('/intel ')) {
+        effectivePrompt = `Show the latest live intelligence and disaster alerts for ${userMsg.slice(7).trim()}`;
+      } else if (userMsg.startsWith('/diagram ')) {
+        effectivePrompt = `Generate a detailed professional Mermaid diagram illustrating: ${userMsg.slice(9).trim()}. Provide the code in a \`\`\`mermaid code block followed by an explanatory analysis table.`;
+      } else if (userMsg.startsWith('/cctv ')) {
+        effectivePrompt = `Show verified live CCTV cameras and webcams near ${userMsg.slice(6).trim()}`;
+        executeAgentCommands([{ action: 'toggleLayer', layerId: 'live_cctv', enabled: true }]);
+      } else if (userMsg.startsWith('/satellite ')) {
+        effectivePrompt = `Track orbital satellite and space telemetry for ${userMsg.slice(11).trim()}`;
+      } else if (userMsg.startsWith('/fork ')) {
+        effectivePrompt = `Create a counterfactual parallel reality fork named ${userMsg.slice(6).trim()}`;
+      } else if (userMsg.trim() === '/measure') {
+        effectivePrompt = `Activate the 3D geodesic measurement tool`;
+      } else if (userMsg.trim() === '/export') {
+        effectivePrompt = `Export the current intelligence analysis summary`;
+      }
+
       const resp = await fetch('/api/agent/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
-          message: userMsg,
+          message: effectivePrompt,
           sessionId,
           tier: selectedTier,
           ...(selectedModel && selectedModel !== 'auto' ? { model: selectedModel } : {}),
@@ -629,7 +664,7 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
           modelTier: lastModelTier,
           modelUsed: lastModelUsed || undefined,
           artifacts: artifacts.length > 0 ? artifacts : undefined,
-          resumable: true,
+          resumable: abortController.signal.aborted ? true : undefined,
           recipe: lastRecipe || undefined,
           replayed: lastReplayed,
           patternId: lastPatternId,
@@ -662,11 +697,13 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
           addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' });
         }
       } else {
+        const errDetail = e instanceof Error ? e.message : String(e);
         const fallback = await generateLocalResponse(userMsg, null);
+        const notice = `${fallback}\n\n*Diagnostics: ${errDetail}*`;
         if (streamingMsgId !== null) {
-          patchStreamingMsg(m => ({ content: `${m.content}\n\n${fallback}\n\n*(Agent unavailable: ${e})*` }));
+          patchStreamingMsg(m => ({ content: `${m.content ? `${m.content}\n\n` : ''}${notice}` }));
         } else {
-          addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` });
+          addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: notice });
         }
       }
     }
@@ -676,9 +713,9 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
     abortControllerRef.current = null;
     if (options.abortControllerRef) options.abortControllerRef.current = null;
     if (streamTabId) store.getState().registerTabAbort(streamTabId, null);
-  }, [extractLocation, focusLocation, toggleLayer, isLayerEnabled, sendToPipeline,
+  }, [extractLocation, sendToPipeline,
     sendMonitorCommand, sendScheduleCommand, executeAgentCommands, generateLocalResponse,
-    cleanupThinkingSteps, loadFlightTracks, viewerRef, options, store, seedMsgIdCounter]);
+    cleanupThinkingSteps, viewerRef, options, store, seedMsgIdCounter]);
 
   const stopGeneration = useCallback(() => {
     const activeTabId = store.getState().activeTabId;

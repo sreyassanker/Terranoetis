@@ -30,6 +30,7 @@ import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
   setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities, getStudyAreaOuterRings,
+  isPointInStudyArea,
 } from '@/rendering/studyArea';
 import { addBaseImagery, applyTerrainProvider, replaceBaseImagery } from '@/viewer/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/viewer/camera.controller';
@@ -2818,7 +2819,7 @@ export default function App() {
       const ts = getOsmBuildingsTileset();
       return ts ? [{ tileset: ts, layerId: 'dt_buildings' }] : [];
     });
-    forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'india_cctv']);
+    forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'live_cctv', 'india_cctv']);
     ghostProtocolRef.current = new GhostProtocol(v);
     entropyHaloRef.current = new EntropyHalo(v);
     sensorStylesRef.current = new SensorStyles(v);
@@ -3223,6 +3224,7 @@ export default function App() {
         const trackTypes: Record<string, TrackEntityType> = {
           flight_tracks: 'aircraft',
           earthquakes: 'earthquake',
+          live_cctv: 'cctv',
           india_cctv: 'cctv',
           live_media: 'cctv',
           ais_vessels: 'ship',
@@ -3563,7 +3565,7 @@ export default function App() {
       return;
     }
     const props = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-    if (props?.layer !== 'india_cctv' && props?.layer !== 'live_media') {
+    if (props?.layer !== 'live_cctv' && props?.layer !== 'india_cctv' && props?.layer !== 'live_media') {
       setCctvPreviewTick(0);
       return;
     }
@@ -4127,7 +4129,7 @@ export default function App() {
     if (isLayerEnabled('aurora_oval')) await loadAuroraOval(viewer);
     if (isLayerEnabled('space_weather')) await loadSpaceWeather(viewer);
     if (isLayerEnabled('disaster_alerts')) await loadNwsAlerts(viewer);
-    if (isLayerEnabled('india_cctv')) await loadIndiaCctv(viewer);
+    if (isLayerEnabled('live_cctv')) await loadLiveCctv(viewer);
     if (isLayerEnabled('live_media')) await loadLiveMedia(viewer);
     if (isLayerEnabled('nasa_dsn')) {
       try {
@@ -4205,6 +4207,7 @@ export default function App() {
       'focus',
       'weather_cards',
       'pin',
+      'live_cctv',
       'india_cctv',
       'smoke_dispersion',
       'disaster_near_me',
@@ -4531,16 +4534,18 @@ export default function App() {
   }
 
   const isLayerEnabled = useCallback((layerId: string) => {
-    return layersRef.current.find(l => l.id === layerId)?.on ?? false;
+    const canonical = layerId === 'india_cctv' ? 'live_cctv' : layerId;
+    return layersRef.current.find(l => l.id === canonical)?.on ?? false;
   }, []);
 
   function setLayerEntitiesVisible(layerId: string, visible: boolean) {
+    const canonical = layerId === 'india_cctv' ? 'live_cctv' : layerId;
     // Primitive-backed layers draw from a collection, so a `show` flag written to
     // their detached entity carriers drives nothing on its own.
-    getPrimitiveLayer(layerId)?.setShown(visible);
-    const ents = entityStoreRef.current[layerId];
+    getPrimitiveLayer(canonical)?.setShown(visible);
+    const ents = entityStoreRef.current[canonical] || entityStoreRef.current[layerId];
     if (!ents) return;
-    const isCctv = layerId === 'india_cctv';
+    const isCctv = canonical === 'live_cctv';
     const filter = cctvFilterRef.current;
     const metaMap = cctvMetaRef.current;
     ents.forEach(ent => {
@@ -4558,7 +4563,7 @@ export default function App() {
 
   const applyCctvFilter = useCallback((filter: CctvFilterType) => {
     cctvFilterRef.current = filter;
-    const ents = entityStoreRef.current['india_cctv'] || [];
+    const ents = entityStoreRef.current['live_cctv'] || entityStoreRef.current['india_cctv'] || [];
     const metaMap = cctvMetaRef.current;
     const selectedId = infoEntityRef.current?.id;
     ents.forEach(ent => {
@@ -4582,7 +4587,7 @@ export default function App() {
       counts[cat]++;
     }
     return counts;
-  }, [cctvLoadedCount, cctvPreviewTick, isLayerEnabled('india_cctv')]);
+  }, [cctvLoadedCount, cctvPreviewTick, isLayerEnabled('live_cctv')]);
 
   function clearEntityProperties(ent: Cesium.Entity): void {
     if (!ent) return;
@@ -7484,7 +7489,8 @@ export default function App() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleLayer = useCallback((layerId: string) => {
+  const toggleLayer = useCallback((rawLayerId: string) => {
+    const layerId = rawLayerId === 'india_cctv' ? 'live_cctv' : rawLayerId;
     const now = Date.now();
     const last = toggleDebounceRef.current[layerId] || 0;
     if (now - last < 300) return;
@@ -7688,8 +7694,8 @@ export default function App() {
     } else if (layerId === 'disaster_alerts') {
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
       return;
-    } else if (layerId === 'india_cctv') {
-      if (!showExisting('india_cctv')) void loadIndiaCctv(v);
+    } else if (layerId === 'live_cctv' || layerId === 'india_cctv') {
+      if (!showExisting('live_cctv') && !showExisting('india_cctv')) void loadLiveCctv(v);
       return;
     } else if (layerId === 'tomtom_traffic') {
       startTomTomTraffic(v);
@@ -7700,10 +7706,10 @@ export default function App() {
       return;
     } else if (layerId === 'cctv_viewshed') {
       // Upgrade of the existing CCTV layer: draw estimated coverage cones over
-      // the already-loaded public webcams. Requires india_cctv to be loaded.
+      // the already-loaded public webcams. Requires live_cctv to be loaded.
       const cams = cctvMetaRef.current;
-      if (!cams.size && !entityStoreRef.current['india_cctv']?.length) {
-        void loadIndiaCctv(v).then(() => {
+      if (!cams.size && !entityStoreRef.current['live_cctv']?.length && !entityStoreRef.current['india_cctv']?.length) {
+        void loadLiveCctv(v).then(() => {
           if (isLayerEnabled('cctv_viewshed')) renderCctvViewshed(v);
         });
       } else {
@@ -8002,9 +8008,9 @@ export default function App() {
     if (layerId === 'intel_feed') {
       setShowIntelFeed(false);
     }
-    if (layerId === 'india_cctv') {
+    if (layerId === 'live_cctv' || layerId === 'india_cctv') {
       const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-      if (p?.layer === 'india_cctv') {
+      if (p?.layer === 'live_cctv' || p?.layer === 'india_cctv') {
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
       }
@@ -8242,16 +8248,16 @@ export default function App() {
     return canvas;
   }
 
-  async function loadIndiaCctv(viewer: Cesium.Viewer) {
-    const existing = entityStoreRef.current['india_cctv'];
+  async function loadLiveCctv(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['live_cctv'] || entityStoreRef.current['india_cctv'];
     if (existing?.length) {
-      setLayerEntitiesVisible('india_cctv', true);
+      setLayerEntitiesVisible('live_cctv', true);
       return;
     }
 
     try {
       const data = await apiGet<{ cameras?: Array<Record<string, unknown>> }>('/cctv/worldwide');
-      if (!isLayerEnabled('india_cctv')) return;
+      if (!isLayerEnabled('live_cctv')) return;
       const allCameras = (data.cameras ?? [])
         .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon));
 
@@ -8321,12 +8327,13 @@ export default function App() {
               scaleByDistance: new Cesium.NearFarScalar(2.0e2, 1.0, 8.0e6, 0.4),
               pixelOffset: Cesium.Cartesian2.ZERO,
             },
-            properties: { layer: 'india_cctv' },
+            properties: { layer: 'live_cctv' },
           }));
         }
         if (idx < total) {
           requestAnimationFrame(addChunk);
         } else {
+          entityStoreRef.current['live_cctv'] = ents;
           entityStoreRef.current['india_cctv'] = ents;
           setCctvLoadedCount(ents.length);
           if (cctvFilterRef.current !== 'all') {
@@ -8355,15 +8362,17 @@ export default function App() {
     }
   }
 
+  const loadIndiaCctv = loadLiveCctv;
+
   const currentYtCamIndexRef = useRef(0);
   const cycleYoutubeCamera = useCallback((forward = true) => {
     const v = viewerRef.current;
     if (!v) return;
-    if (!isLayerEnabled('india_cctv')) {
-      toggleLayer('india_cctv');
+    if (!isLayerEnabled('live_cctv')) {
+      toggleLayer('live_cctv');
     }
     const doCycle = () => {
-      const ents = entityStoreRef.current['india_cctv'] || [];
+      const ents = entityStoreRef.current['live_cctv'] || entityStoreRef.current['india_cctv'] || [];
       const ytEnts = ents.filter(e => {
         const meta = cctvMetaRef.current.get(e.id);
         return meta && (meta.feedType === 'youtube' || meta.source === 'youtube' || Boolean(meta.youtubeVideoId));
@@ -8396,9 +8405,9 @@ export default function App() {
       }
     };
 
-    const ents = entityStoreRef.current['india_cctv'] || [];
+    const ents = entityStoreRef.current['live_cctv'] || entityStoreRef.current['india_cctv'] || [];
     if (!ents.length) {
-      void loadIndiaCctv(v).then(() => {
+      void loadLiveCctv(v).then(() => {
         setTimeout(doCycle, 500);
       });
     } else {
@@ -8409,7 +8418,8 @@ export default function App() {
   useEffect(() => {
     if ((import.meta.env.DEV || (window as any).__TERRANOETIS_TEST_MODE__) && window.__terranoetisDebug) {
       window.__terranoetisDebug.toggleLayer = toggleLayer;
-      window.__terranoetisDebug.loadIndiaCctv = () => viewerRef.current && loadIndiaCctv(viewerRef.current);
+      window.__terranoetisDebug.loadIndiaCctv = () => viewerRef.current && loadLiveCctv(viewerRef.current);
+      (window.__terranoetisDebug as any).loadLiveCctv = () => viewerRef.current && loadLiveCctv(viewerRef.current);
     }
   }, [toggleLayer]);
 
@@ -8458,7 +8468,7 @@ export default function App() {
       cctvViewshedRef.current = new CctvViewshed(viewer);
       cctvViewshedRef.current.start();
     }
-    const ents = entityStoreRef.current['india_cctv'] ?? [];
+    const ents = entityStoreRef.current['live_cctv'] ?? entityStoreRef.current['india_cctv'] ?? [];
     const cams: ViewshedCamera[] = [];
     for (const e of ents) {
       const pos = e.position?.getValue(Cesium.JulianDate.now());
@@ -9971,29 +9981,33 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     const name = `${(label || 'Chat area').trim()} (chat)`;
     for (const a of studyAreasRef.current.filter(x => x.source === 'chat')) removeStudyAreaFromGlobe(v, a);
     studyAreasRef.current = studyAreasRef.current.filter(x => x.source !== 'chat');
-    const outer = polygonRings && polygonRings.length > 0
-      ? polygonRings.reduce((m, r) => (r.length > m.length ? r : m), [])
+    const validRings = (polygonRings || []).filter(r => Array.isArray(r) && r.length >= 3);
+    const outer = validRings.length > 0
+      ? validRings.reduce((m, r) => (r.length > m.length ? r : m), validRings[0])
       : null;
     let area: StudyAreaItem;
-    if (outer && outer.length >= 4) {
+    if (outer && outer.length >= 3) {
       const positions = outer.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
-      const ring = [...outer, outer[0]];
+      const features: GeoJSON.Feature[] = validRings.map(r => {
+        const closed = (r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) ? r : [...r, r[0]];
+        return {
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [closed] } as GeoJSON.Polygon,
+          properties: { name, type: 'polygon' },
+        };
+      });
       const geojson: GeoJSON.FeatureCollection = {
         type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [ring] } as GeoJSON.Polygon,
-          properties: { name, type: 'polygon' },
-        }],
+        features,
       };
       area = {
         id: `study_area_${Date.now()}`, name, type: 'polygon',
         visible: true, active: false,
         entity: v.entities.add({
-          polygon: { hierarchy: positions, material: new Cesium.Color(0.2, 0.8, 0.3, 0.08) },
+          polygon: { hierarchy: positions, material: new Cesium.Color(0.05, 0.6, 0.95, 0.08) },
           name,
         }),
-        positions, geojson, color: '#22c55e', width: 3, source: 'chat',
+        positions, geojson, color: '#38bdf8', width: 2, source: 'chat',
       };
     } else {
       const rect = Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax);
@@ -10007,10 +10021,10 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         id: `study_area_${Date.now()}`, name, type: 'rectangle',
         visible: true, active: false,
         entity: v.entities.add({
-          rectangle: { coordinates: rect, material: new Cesium.Color(0.2, 0.8, 0.3, 0.08) },
+          rectangle: { coordinates: rect, material: new Cesium.Color(0.05, 0.6, 0.95, 0.08) },
           name,
         }),
-        positions, color: '#22c55e', width: 3, source: 'chat',
+        positions, color: '#38bdf8', width: 2, source: 'chat',
       };
     }
     studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
@@ -10019,6 +10033,9 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     setStudyAreas(studyAreasRef.current);
     setActiveStudyAreaId(area.id);
     useChatStore.getState().setStudyAreaBbox(bbox, 'chat');
+    setTimeout(() => {
+      filterDataEntitiesByStudyArea(v, studyAreasRef.current, true, area.id);
+    }, 100);
     throttledRender(v);
   }, []);
 
@@ -10282,6 +10299,12 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
             const entities: Cesium.Entity[] = [];
             const addPoint = (lon: number, lat: number, props?: Record<string, unknown>) => {
               if (!isFinite(lon) || !isFinite(lat)) return;
+              if (activeStudyAreaId) {
+                const activeArea = studyAreasRef.current.find(a => a.id === activeStudyAreaId && a.active);
+                if (activeArea && !isPointInStudyArea(lon, lat, activeArea)) {
+                  return;
+                }
+              }
               entities.push(v.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(lon, lat),
                 billboard: { image: createPinIcon(color, 20), width: 20, height: 20, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
@@ -10335,6 +10358,11 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
             }
             action.entities = entities;
             action.description = `${label} (${entities.length} features)`;
+            if (activeStudyAreaId) {
+              setTimeout(() => {
+                filterDataEntitiesByStudyArea(v, studyAreasRef.current, true, activeStudyAreaId);
+              }, 100);
+            }
             break;
           }
           case 'addChart': {
@@ -10978,11 +11006,11 @@ case 'openPanel':
     setPlanningFor(null);
   }, [setAiMessages, setAiTyping, setPlanningFor]);
 
-  async function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): Promise<string> {
+  async function generateLocalResponse(message: string, _location: { lat: number; lon: number } | null): Promise<string> {
     try {
       const resp = await fetch('/api/agent/local-ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ message: message.slice(0, 2000) }),
         signal: AbortSignal.timeout(10000),
       });
@@ -10990,17 +11018,8 @@ case 'openPanel':
         const data = await resp.json();
         if (data?.response) return data.response;
       }
-    } catch { /* fall through to keyword matcher */ }
-    const lower = message.toLowerCase();
-    if (lower.includes('earthquake')) return '**Seismic Activity**\n\nRecent earthquakes are displayed on the globe. Use the sidebar to toggle earthquake data layers. The color intensity indicates magnitude - red circles show M5+ events.';
-    if (lower.includes('weather')) return '**Weather Information**\n\nClick on any location to see current weather conditions. Temperature, humidity, wind speed, and conditions are displayed in real-time cards.';
-    if (lower.includes('storm') || lower.includes('hurricane')) return '**Storm Tracking**\n\nActive storms are shown with forecast cones indicating predicted paths. Click on any storm to see 24/48/72-hour forecasts and wind speed data.';
-    if (lower.includes('fire') || lower.includes('wildfire')) return '**Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires.';
-    if (lower.includes('population')) return '**Population Impact**\n\n50 major cities shown with population-based impact zones. Useful for assessing disaster risk to urban areas.';
-    if (lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) return '**Live Aircraft**\n\nAircraft tracking is available via the sidebar (Aviation category). Enable "ADSB.lol" or "Flight Tracks" to see live planes on the globe. Try saying "show flights near me" with location enabled.';
-    if (lower.includes('help')) return '**Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
-    if (location) return `**Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
-    return `**Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
+    } catch { /* fall through to offline notice */ }
+    return `> ⚠️ **Earth Intelligence Backend Offline**\n\nThe intelligence server is currently unreachable. Live sensor feeds, aviation radar, and analytical tools require an active backend connection.\n\nPlease verify that the backend is running on port 3001 and retry your question.`;
   }
 
   /* ═════════════════════════════════════════════════════════════════
@@ -11157,6 +11176,7 @@ case 'openPanel':
       'focus',
       'weather_cards',
       'pin',
+      'live_cctv',
       'india_cctv',
       'smoke_dispersion',
       'disaster_near_me',
@@ -11822,10 +11842,10 @@ case 'openPanel':
     const v = viewerRef.current;
     if (!v) return;
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
-    if (activeStudyAreaId && layers.some(l => l.on)) {
+    if (activeStudyAreaId) {
       clipTimeoutRef.current = setTimeout(() => {
         filterDataEntitiesByStudyArea(v, studyAreasRef.current, true, activeStudyAreaId);
-      }, 500);
+      }, 300);
     } else {
       restoreHiddenEntities(v);
       layers.filter(l => !l.on).forEach(l => {
@@ -11930,10 +11950,11 @@ case 'openPanel':
     try {
       const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
       if (!p || Object.keys(p).length === 0) return null;
-      const cctvMeta = p.layer === 'india_cctv' ? cctvMetaRef.current.get(infoEntity.id) : null;
-      if (p.layer === 'india_cctv' && cctvMeta) {
+      const isCctvLayer = p.layer === 'live_cctv' || p.layer === 'india_cctv';
+      const cctvMeta = isCctvLayer ? cctvMetaRef.current.get(infoEntity.id) : null;
+      if (isCctvLayer && cctvMeta) {
         Object.assign(p, cctvMeta);
-      } else if (p.layer === 'india_cctv' && !cctvMeta) {
+      } else if (isCctvLayer && !cctvMeta) {
         if (import.meta.env.DEV) console.warn('[InfoPanel] cctvMeta not found for', infoEntity.id, 'map size:', cctvMetaRef.current.size);
       }
 
@@ -11981,7 +12002,7 @@ case 'openPanel':
     } else if (layer === 'live_media') {
       rows.push({ key: 'Source', val: String(p.source ?? 'YouTube') });
       rows.push({ key: 'Location', val: `${Number(p.lat).toFixed(4)}, ${Number(p.lon).toFixed(4)}` });
-    } else if (layer === 'india_cctv') {
+    } else if (layer === 'live_cctv' || layer === 'india_cctv') {
       const location = String(p.location ?? p.city ?? p.region ?? 'Worldwide');
       const updatedAt = Number(p.updatedAt ?? Date.now());
       rows.push({ key: 'Location', val: location });
@@ -12072,7 +12093,7 @@ case 'openPanel':
             </div>
           )}
 
-          {layer === 'india_cctv' && (
+          {(layer === 'live_cctv' || layer === 'india_cctv') && (
             <div className="cctv-preview">
               {(() => {
                 const thumbUrl = String(p.thumbnailUrl ?? p.previewUrl ?? '');
@@ -12145,7 +12166,7 @@ case 'openPanel':
             </div>
           )}
 
-          {layer === 'india_cctv' && (
+          {(layer === 'live_cctv' || layer === 'india_cctv') && (
             <div className="sparkline-wrap" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0', padding: '8px 12px' }}>
               <div className="sparkline-title" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
                 {p.feedType === 'youtube' || p.youtubeVideoId ? (
@@ -12472,9 +12493,9 @@ case 'openPanel':
           <TopbarMenu
             id="view" title="View & Capture" icon={<Eye size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={isLayerEnabled('india_cctv') || isAutoRotating}
+            active={isLayerEnabled('live_cctv') || isAutoRotating}
             items={[
-              { label: 'Worldwide Public Cameras', icon: <Cctv size={15} />, active: isLayerEnabled('india_cctv'), onClick: () => toggleLayer('india_cctv') },
+              { label: 'Worldwide Public Cameras', icon: <Cctv size={15} />, active: isLayerEnabled('live_cctv'), onClick: () => toggleLayer('live_cctv') },
               { label: 'ISS Tracker', icon: <Satellite size={15} />, onClick: () => toggleISS() },
               { label: 'Auto Rotate', icon: <RefreshCw size={15} />, active: isAutoRotating, onClick: () => toggleAutoRotate() },
               { label: 'Snapshot', icon: <Camera size={15} />, onClick: () => takeSnapshot() },
@@ -12621,7 +12642,7 @@ case 'openPanel':
         className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`}
         style={{
           zIndex: getPanelZIndex('info', 110),
-          maxHeight: isLayerEnabled('india_cctv') ? 'calc(100vh - 310px)' : 'calc(100vh - 92px)',
+          maxHeight: isLayerEnabled('live_cctv') ? 'calc(100vh - 310px)' : 'calc(100vh - 92px)',
         }}
       >
         {formatInfoPanel()}
@@ -13565,7 +13586,7 @@ case 'openPanel':
       )}
 
       {/* CCTV Feed Legend & Tactical Filter */}
-      {isLayerEnabled('india_cctv') && (
+      {isLayerEnabled('live_cctv') && (
         <div
           className="legend-panel show glass-panel cctv-legend-interactive"
           style={{

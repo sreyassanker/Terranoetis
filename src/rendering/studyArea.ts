@@ -132,12 +132,27 @@ function extractCoords(geometry: GeoJSON.Geometry | null): Array<[number, number
   return [];
 }
 
-/* ── Helper: extract outer ring from GeoJSON geometry ── */
+/* ── Helper: extract outer rings from GeoJSON geometry (supports Polygon & MultiPolygon) ── */
+export function getAllOuterRings(geometry: GeoJSON.Geometry | null): Array<Array<[number, number]>> {
+  if (!geometry) return [];
+  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates) && geometry.coordinates.length > 0) {
+    return [geometry.coordinates[0] as Array<[number, number]>];
+  }
+  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+    const rings: Array<Array<[number, number]>> = [];
+    for (const poly of geometry.coordinates) {
+      if (Array.isArray(poly) && poly.length > 0 && Array.isArray(poly[0])) {
+        rings.push(poly[0] as Array<[number, number]>);
+      }
+    }
+    return rings;
+  }
+  return [];
+}
+
 function getOuterRing(geometry: GeoJSON.Geometry | null): Array<[number, number]> | null {
-  if (!geometry) return null;
-  if (geometry.type === 'Polygon') return geometry.coordinates[0] as Array<[number, number]>;
-  if (geometry.type === 'MultiPolygon') return geometry.coordinates[0][0] as Array<[number, number]>;
-  return null;
+  const rings = getAllOuterRings(geometry);
+  return rings.length > 0 ? rings[0] : null;
 }
 
 /* ── Turf.js data entity filtering (hide entities outside study area) ── */
@@ -161,15 +176,21 @@ function expandRectCoords(coords: Array<[number, number]>): Array<[number, numbe
   return [[west, north], [east, north], [east, south], [west, south], [west, north]];
 }
 
-function buildTurfPolygons(items: StudyAreaItem[]): ReturnType<typeof polygon>[] {
-  const result: ReturnType<typeof polygon>[] = [];
+export function buildTurfPolygons(items: StudyAreaItem[]): Array<ReturnType<typeof polygon>> {
+  const result: Array<ReturnType<typeof polygon>> = [];
   for (const item of items) {
     if (!item.visible) continue;
     if (item.geojson) {
       for (const f of item.geojson.features) {
-        const ring = getOuterRing(f.geometry);
-        if (ring && ring.length >= 3) {
-          result.push(polygon([ring]));
+        if (!f.geometry) continue;
+        const rings = getAllOuterRings(f.geometry);
+        for (const ring of rings) {
+          if (ring && ring.length >= 3) {
+            const closed = (ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1])
+              ? ring
+              : [...ring, ring[0]];
+            result.push(polygon([closed]));
+          }
         }
       }
     } else if (item.positions && item.positions.length >= 2) {
@@ -186,14 +207,28 @@ function buildTurfPolygons(items: StudyAreaItem[]): ReturnType<typeof polygon>[]
   return result;
 }
 
+/* ── Check if a single point [lon, lat] is inside a study area item ── */
+export function isPointInStudyArea(lon: number, lat: number, item: StudyAreaItem): boolean {
+  if (!item) return true;
+  const turfPolys = buildTurfPolygons([item]);
+  if (turfPolys.length === 0) return true;
+  const pt = point([lon, lat]);
+  for (const poly of turfPolys) {
+    if (booleanPointInPolygon(pt, poly)) return true;
+  }
+  return false;
+}
+
 /* ── Study-area outer rings in [lon, lat] (for point-in-polygon / sweep filtering) ── */
 export function getStudyAreaOuterRings(item: StudyAreaItem): Array<Array<[number, number]>> {
   const rings: Array<Array<[number, number]>> = [];
   if (!item.visible) return rings;
   if (item.geojson) {
     for (const f of item.geojson.features) {
-      const ring = getOuterRing(f.geometry);
-      if (ring && ring.length >= 3) rings.push(ring);
+      const fRings = getAllOuterRings(f.geometry);
+      for (const ring of fRings) {
+        if (ring && ring.length >= 3) rings.push(ring);
+      }
     }
   } else if (item.positions && item.positions.length >= 2) {
     let coords = positionsToDegCoords(item.positions);
@@ -235,6 +270,7 @@ export function filterDataEntitiesByStudyArea(
 
   for (const entity of allEntities) {
     if (!entity.position) continue;
+    if (entity.id && (entity.id.startsWith('study_area_') || (entity as any).studyAreaId)) continue;
     const posVal = entity.position.getValue(Cesium.JulianDate.now());
     if (!posVal) continue;
     const carto = Cesium.Cartographic.fromCartesian(posVal);
@@ -249,6 +285,9 @@ export function filterDataEntitiesByStudyArea(
     if (!inside && entity.id) {
       hiddenEntityIds.add(entity.id);
       entity.show = false;
+    } else if (inside && entity.id && hiddenEntityIds.has(entity.id)) {
+      hiddenEntityIds.delete(entity.id);
+      entity.show = true;
     }
   }
   throttledRender(viewer);
@@ -390,8 +429,21 @@ function buildOutlinePrimitive(
     }
   }
 
+  /* Study area GeoJSON features (e.g. multi-polygon admin boundaries from chat/import) */
+  if (item.geojson) {
+    for (const f of item.geojson.features) {
+      if (!f.geometry) continue;
+      const rings = getAllOuterRings(f.geometry);
+      for (const r of rings) {
+        if (r.length >= 3) {
+          addRing(r.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat)));
+        }
+      }
+    }
+  }
+
   /* Drawn shapes */
-  if (item.entity) {
+  if (item.entity && !item.geojson) {
     const drawnHier = item.entity.polygon?.hierarchy?.getValue(Cesium.JulianDate.now());
     if (drawnHier) {
       addHierarchy(drawnHier);

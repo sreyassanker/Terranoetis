@@ -83,9 +83,10 @@ export class StreamingMarkdownRenderer {
  */
 export function extractArtifacts(markdown: string): { cleanedContent: string; artifacts: ArtifactData[] } {
   const artifacts: ArtifactData[] = [];
-  let cleaned = markdown;
+  // Clean any stray artifact placeholders that may have been generated
+  const cleaned = markdown.replace(/\[ARTIFACT:(?:table|chart):\d+\]/g, '').trim();
 
-  // Extract markdown tables
+  // Extract markdown tables for structured metadata without destroying markdown rendering
   const tableRegex = /(?:^|\n)(\|[^\n]+\|\n\|[\s:|-]+\|\n(?:\|[^\n]+\|\n?)+)/g;
   let tableMatch: RegExpExecArray | null;
   while ((tableMatch = tableRegex.exec(markdown)) !== null) {
@@ -117,7 +118,7 @@ export function extractArtifacts(markdown: string): { cleanedContent: string; ar
       columns: headerCells,
       rows: dataRows,
     });
-    cleaned = cleaned.replace(tableMatch[0], `\n[ARTIFACT:table:${artifacts.length - 1}]\n`);
+    // Keep markdown table in-place so RichMarkdown renders it in natural context with full formatting
   }
 
   // Extract chart directives: ```chart\n{json}\n``` or ## CHART directives
@@ -136,7 +137,7 @@ export function extractArtifacts(markdown: string): { cleanedContent: string; ar
           lat: spec.lat,
           lon: spec.lon,
         });
-        cleaned = cleaned.replace(chartMatch[0], `\n[ARTIFACT:chart:${artifacts.length - 1}]\n`);
+        // Keep chart in-place so RichMarkdown renders it in natural context
       }
     } catch { /* skip malformed */ }
   }

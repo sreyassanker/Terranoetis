@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, execSync, type ChildProcess } from 'child_process';
 import { logger } from './observability/logger';
 
 export interface DeviceSpecs {
@@ -378,7 +378,7 @@ class LocalAiManager {
     if (ramTotalGb <= 8.5) {
       recommendedMaxGb = 2.0;
       deviceTier = 'compact';
-      recommendation = `${isAppleSilicon ? 'Apple Silicon' : 'Device'} with ${ramTotalGb} GB RAM. We recommend models under 2.0 GB (e.g. Qwen 2.5 1.5B or LFM 2.6B) for instantaneous 50+ tok/s response without system memory pressure.`;
+      recommendation = `${isAppleSilicon ? 'Apple Silicon' : 'Device'} with ${ramTotalGb} GB RAM. We recommend models under 2.0 GB for instantaneous 50+ tok/s response without system memory pressure.`;
     } else if (ramTotalGb <= 16.5) {
       recommendedMaxGb = 4.5;
       deviceTier = 'standard';
@@ -421,7 +421,7 @@ class LocalAiManager {
       try {
         const files = fs.readdirSync(d);
         for (const file of files) {
-          if (!file.endsWith('.gguf') || file.endsWith('.partial')) continue;
+          if (!file.endsWith('.gguf') || file.endsWith('.partial') || file.startsWith('mmproj-')) continue;
           if (seenFiles.has(file)) continue;
 
           seenFiles.add(file);
@@ -719,9 +719,28 @@ class LocalAiManager {
       const args = [
         '--model', target.path,
         '--port', String(port),
-        '-c', '2048',
+        '-c', '4096',
         '-ngl', '99',
       ];
+
+      // Auto-detect multimodal projector (mmproj) for vision models
+      const targetDir = path.dirname(target.path);
+      const directMmproj = path.join(targetDir, `mmproj-${target.filename}`);
+      let mmprojFound: string | null = null;
+      if (fs.existsSync(directMmproj)) {
+        mmprojFound = directMmproj;
+      } else {
+        try {
+          const dirFiles = fs.readdirSync(targetDir);
+          const mmCandidate = dirFiles.find(f => f.startsWith('mmproj-') && f.endsWith('.gguf'));
+          if (mmCandidate) mmprojFound = path.join(targetDir, mmCandidate);
+        } catch { /* ignore */ }
+      }
+
+      if (mmprojFound) {
+        args.push('--mmproj', mmprojFound, '--mmproj-offload');
+        logger.info({ mmproj: mmprojFound }, '[LocalAiManager] Attached vision projector to llama-server');
+      }
 
       const child = spawn(bin || 'llama-server', args, {
         stdio: ['ignore', out, out],
@@ -760,6 +779,11 @@ class LocalAiManager {
       } catch { /* ignore */ }
       this.activeProcess = null;
     }
+    try {
+      if (process.platform !== 'win32') {
+        execSync('pkill -f llama-server || true', { stdio: 'ignore' });
+      }
+    } catch { /* ignore */ }
   }
 
   public deleteModel(filename: string): { ok: boolean; message: string } {
@@ -818,6 +842,15 @@ class LocalAiManager {
           fs.unlinkSync(partialPath);
         }
       } catch { /* ignore */ }
+
+      // Also delete companion mmproj file if it exists
+      const mmprojPath = path.join(d, `mmproj-${safeName}`);
+      try {
+        if (fs.existsSync(mmprojPath)) {
+          fs.unlinkSync(mmprojPath);
+          deletedCount++;
+        }
+      } catch { /* ignore */ }
     }
 
     if (deletedCount > 0) {
@@ -828,6 +861,33 @@ class LocalAiManager {
     return { ok: false, message: 'Model file not found on disk' };
   }
 
+  public cleanOrphanedPartials(): { deleted: string[]; freedBytes: number } {
+    const dirs = this.getModelsDirs();
+    const deleted: string[] = [];
+    let freedBytes = 0;
+    for (const d of dirs) {
+      if (!fs.existsSync(d)) continue;
+      try {
+        const files = fs.readdirSync(d);
+        for (const file of files) {
+          if (file.endsWith('.partial')) {
+            if (this.downloadState.running && this.downloadState.fileName && file.startsWith(this.downloadState.fileName)) {
+              continue;
+            }
+            const fullPath = path.join(d, file);
+            try {
+              const stats = fs.statSync(fullPath);
+              freedBytes += stats.size;
+              fs.unlinkSync(fullPath);
+              deleted.push(file);
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    return { deleted, freedBytes };
+  }
+
   public async ensureServerRunning(): Promise<boolean> {
     if (this.isProcessRunning()) {
       return true;
@@ -836,7 +896,7 @@ class LocalAiManager {
     if (!target) {
       const installed = this.listInstalledModels();
       if (installed.length === 0) return false;
-      const preferred = installed.find(m => m.filename.includes('LFM')) || installed[0];
+      const preferred = installed[0];
       target = preferred.filename;
     }
     const result = this.setActiveModel(target);
@@ -846,8 +906,8 @@ class LocalAiManager {
   public init(): void {
     const installed = this.listInstalledModels();
     if (installed.length > 0) {
-      // Pick preferred default model for standby without spawning background process
-      const preferred = installed.find(m => m.filename.includes('LFM')) || installed[0];
+      // Pick active installed model for standby without spawning background process
+      const preferred = installed[0];
       this.activeModelName = preferred.filename;
       this.activeModelPath = preferred.path;
       logger.info({ model: preferred.filename }, '[LocalAiManager] Discovered local GGUF model; standby mode (lazy load on use)');

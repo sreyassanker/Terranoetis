@@ -10,12 +10,12 @@
  *  - TraceExpander (#15)
  */
 import React, { useState, useMemo } from 'react';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import type { PlanCard as PlanCardType, SubAgentActivity, ArtifactData, ToolEvent } from '@/lib/chatStore';
 import { approveTool, fetchTrace } from '@/lib/advancedChat';
 import {
   Play, CheckCircle, XCircle, Loader, ChevronDown, ChevronRight,
-  Shield, Brain, Copy, Eye, Cpu, ShieldCheck, ShieldAlert, Link2, CheckCircle2, Lock,
+  Shield, Brain, Copy, Eye, Cpu, ShieldCheck, ShieldAlert, Link2,
 } from 'lucide-react';
 import { authHeaders } from '@/context/AuthContext';
 
@@ -147,27 +147,46 @@ export function InlineTableView({ artifact }: { artifact: ArtifactData }) {
   const cols = artifact.columns || [];
   const rows = artifact.rows || [];
   return (
-    <div style={{ margin: '6px 0', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
-      {artifact.title && <div style={{ padding: '4px 8px', fontSize: 10, fontWeight: 600, background: 'rgba(96,165,250,0.06)', color: 'var(--text)' }}>{artifact.title}</div>}
-      <div style={{ maxHeight: 240, overflow: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+    <div className="chat-artifact-table-wrap" style={{ margin: '8px 0', borderRadius: 8, overflow: 'hidden' }}>
+      {artifact.title && (
+        <div className="chat-artifact-header" style={{ padding: '6px 10px', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>{artifact.title}</span>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>{rows.length} rows</span>
+        </div>
+      )}
+      <div style={{ maxHeight: 280, overflowX: 'auto', overflowY: 'auto' }}>
+        <table className="chat-artifact-table" style={{ width: '100%', minWidth: 'max-content', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
-            <tr>{cols.map(c => <th key={c} style={{ padding: '4px 6px', textAlign: 'left', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-dim)', position: 'sticky', top: 0 }}>{c}</th>)}</tr>
+            <tr>
+              {cols.map(c => (
+                <th key={c} style={{ padding: '6px 10px', textAlign: 'left', position: 'sticky', top: 0, whiteSpace: 'nowrap', fontWeight: 600 }}>
+                  {c.replace(/\*\*/g, '')}
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {rows.slice(0, 100).map((r, i) => (
-              <tr key={i}>{cols.map(c => <td key={c} style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)', color: 'var(--text)' }}>{String(r[c] ?? '')}</td>)}</tr>
+              <tr key={i} className="chat-artifact-row">
+                {cols.map(c => {
+                  const val = String(r[c] ?? '').replace(/\*\*/g, '');
+                  return (
+                    <td key={c} style={{ padding: '5px 10px', whiteSpace: 'normal', minWidth: 90 }}>
+                      {val}
+                    </td>
+                  );
+                })}
+              </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 8px', fontSize: 10, color: 'var(--text-dim)' }}>
-        <span>{rows.length} rows</span>
+      <div className="chat-artifact-footer" style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 10px', fontSize: 10 }}>
         <button
           onClick={() => { const csv = [cols.join(','), ...rows.map(r => cols.map(c => r[c]).join(','))].join('\n'); navigator.clipboard.writeText(csv); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-          style={{ background: 'none', border: 'none', color: copied ? '#34d399' : 'var(--text-dim)', cursor: 'pointer', fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+          style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'inherit', opacity: copied ? 1 : 0.7, cursor: 'pointer', fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
         >
-          <Copy size={9} /> {copied ? 'Copied' : 'CSV'}
+          <Copy size={10} /> {copied ? 'Copied CSV' : 'Export CSV'}
         </button>
       </div>
     </div>
@@ -176,7 +195,7 @@ export function InlineTableView({ artifact }: { artifact: ArtifactData }) {
 
 // ─── #13: Inline Chart (Recharts) ──────────────────────────────────────────
 
-const CHART_COLORS = ['#60a5fa', '#34d399', '#a78bfa', '#f59e0b', '#ef4444', '#22d3ee', '#ec4899', '#84cc16'];
+const CHART_COLORS = ['#38bdf8', '#34d399', '#818cf8', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
 
 export function InlineChartView({ artifact }: { artifact: ArtifactData }) {
   const labels = artifact.labels || [];
@@ -185,36 +204,39 @@ export function InlineChartView({ artifact }: { artifact: ArtifactData }) {
   const type = artifact.chartType || 'bar';
   if (data.length === 0) return null;
   return (
-    <div style={{ margin: '6px 0', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'rgba(15,23,42,0.4)' }}>
-      {artifact.title && <div style={{ padding: '4px 8px', fontSize: 10, fontWeight: 600, color: 'var(--text)' }}>{artifact.title}</div>}
-      <ResponsiveContainer width="100%" height={160}>
-        {type === 'line' ? (
-          <LineChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
-            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
-            <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
-            <Line type="monotone" dataKey="value" stroke="#60a5fa" strokeWidth={2} dot={{ r: 2 }} />
-          </LineChart>
-        ) : type === 'pie' ? (
-          <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} label={{ fontSize: 10 }}>
-              {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-            </Pie>
-            <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
-          </PieChart>
-        ) : (
-          <BarChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
-            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
-            <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
-            <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-              {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-            </Bar>
-          </BarChart>
-        )}
-      </ResponsiveContainer>
+    <div className="chat-artifact-chart-wrap" style={{ margin: '8px 0', borderRadius: 8, overflow: 'hidden' }}>
+      {artifact.title && <div className="chat-artifact-header" style={{ padding: '6px 10px', fontSize: 11, fontWeight: 600 }}>{artifact.title}</div>}
+      <div style={{ padding: '10px 8px 4px' }}>
+        <ResponsiveContainer width="100%" height={type === 'pie' ? 190 : 170}>
+          {type === 'line' ? (
+            <LineChart data={data} margin={{ top: 8, right: 12, bottom: 8, left: -16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
+              <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
+              <Tooltip contentStyle={{ borderRadius: 6, fontSize: 11 }} />
+              <Line type="monotone" dataKey="value" stroke="#0284c7" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          ) : type === 'pie' ? (
+            <PieChart>
+              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="45%" outerRadius={50} innerRadius={22} paddingAngle={3}>
+                {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} stroke="rgba(255,255,255,0.2)" strokeWidth={1.5} />)}
+              </Pie>
+              <Tooltip contentStyle={{ borderRadius: 6, fontSize: 11, background: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }} />
+              <Legend wrapperStyle={{ fontSize: 10, paddingTop: 6 }} iconSize={8} iconType="circle" />
+            </PieChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 8, right: 12, bottom: 8, left: -16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
+              <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
+              <Tooltip contentStyle={{ borderRadius: 6, fontSize: 11 }} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+              </Bar>
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

@@ -243,7 +243,7 @@ export function ChatMessageRow({
             <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={(result, answer) => { updateToolEvent(msg.id, ev.name, { status: 'success', result }); if (answer) updateMessage(msg.id, { content: `${msg.content}\n\n${answer}` }); }} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
           ))}
 
-          {msg.artifacts && msg.artifacts.map((art, i) => (
+          {msg.artifacts && msg.artifacts.filter(art => art.kind !== 'table' && art.kind !== 'chart').map((art, i) => (
             <ArtifactView key={`art_${i}`} artifact={art} onRerun={(param, val) => rerunWithParam?.(msg, param, val)} />
           ))}
 
