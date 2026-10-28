@@ -29,7 +29,7 @@ Please include:
 - **No secrets in source control.**.env is gitignored. `.env.example` contains only variable names (empty values).
 - **Rate limiting** applied at multiple tiers: login (5/15min), data endpoints (300/min), agent/ask (30/min), sandbox (5/min), simulate (10/min).
 - **Graceful degradation** — when an upstream API fails, the platform returns an honest `NaN` with a clear warning. No data is fabricated.
-- **Circuit breakers** on all 7 LLM providers (5 failures → open → half-open after 30s → failover to healthy provider).
+- **Circuit breakers** on all 10 LLM providers in Omninet (5 failures → open → half-open after 30s → failover to healthy provider).
 - **Signed URLs** for COG reads use Microsoft Planetary Computer SAS tokens (no auth context shared).
 - **Audit logging** for all chat and scenario operations.
 

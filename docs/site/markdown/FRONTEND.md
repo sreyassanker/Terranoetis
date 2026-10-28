@@ -2,7 +2,7 @@
 
 The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. “GPU” below refers to WebGL rendering primitives and shaders only — the simulation kernels the overlays visualize are NumPy/CPU code ([verified modes table](../capabilities/hazard-simulations.html#modes)).
 
-> Verified site view: [3D globe visualization](../capabilities/globe-visualization.html). The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
+> Verified site view: [3D globe visualization](../capabilities/globe-visualization.html). The UI shell (topbar, sidebar, modals, panels) is implemented inline in `src/App.tsx` (14,451 lines); feature surfaces are split across lazy-loaded panels and modular component trees.
 
 ---
 
@@ -12,7 +12,7 @@ The Terranoetis client is a **React 19 + TypeScript** single-page application bu
 - [Routing](#routing)
 - [Component Architecture](#component-architecture)
 - [Rendering Engine](#rendering-engine)
-- [Simulation overlays](#simulation-overlays)
+- [Simulation Overlays](#simulation-overlays)
 - [Hooks](#hooks)
 - [State & Data](#state--data)
 
@@ -26,8 +26,8 @@ The Terranoetis client is a **React 19 + TypeScript** single-page application bu
 | Build | Vite 7 |
 | 3D rendering | CesiumJS 1.140 (WebGL, Cesium World Terrain) |
 | Styling | Tailwind CSS 3, class-variance-authority, dark theme via CSS variables (no light mode) |
-| Routing | React Router 7 |
-| State | React context (AuthContext) + custom hooks + Zustand chat store |
+| Routing | React Router 7 (`BrowserRouter` on web, `HashRouter` in Tauri desktop) |
+| State | React context (AuthContext) + custom hooks + Zustand chat and user preference stores |
 | Charts | Recharts |
 | Fonts | Inter + JetBrains Mono |
 
@@ -39,11 +39,9 @@ Defined in `src/main.tsx`:
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (11 lazy-loaded panels) |
-| `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
-| `/v2/canvas` | CanvasPage | Spatial canvas |
-| `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
-| `/v2/tours` | ToursPage | Cinematic tours |
+| `/` | `App` | Unified Cesium globe application with 11 lazy-loaded panels, command palette, and modal dialogs |
+
+In desktop builds (`isDesktopApp`), React Router automatically switches to `HashRouter` for filesystem origin compatibility (`tauri://localhost`). Administrative tools, scenario creation, spatial querying, and tool execution are operated as in-viewport panels and dialogs within `App.tsx`.
 
 ---
 
@@ -53,160 +51,181 @@ Defined in `src/main.tsx`:
 
 | Component | Lines | Description |
 |---|---|---|
-| CommandPalette | 320 | Cmd+K palette: search layers/locations/actions, toggle/fly-to/open intel |
-| PerformanceMonitor | 149 | Real-time FPS/entities/primitives/memory/JS heap, Ctrl+Shift+P |
-| FlightTravelView | 507 | Flight deck HUD: compass, alt/heading tapes, horizon, pitch ladder |
-| IssTravelView | 172 | ISS orbital HUD: nadir/horizon compass, pitch tape |
-| IssLivePanel | 67 | ISS camera iframe + position stats (lat/lon/alt) |
-| MarketIntelPanel | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
-| ToolDialog | 1043 | Analysis tool execution: study area, params, grid, execution, results, export |
-| AnalyticsWorkbench | 353 | 150-tool browser: tree/flat search over equations, domains, live-source counts |
-| MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates |
-| LaunchReplayPanel | 233 | Scrubbable rocket ascent replay (Launch Library 2) |
-| RadioTunerPanel | 206 | Analog tuner over 500 geolocated radio stations, stream playback |
-| FirstRunCard | 113 | First-load "stage a mission" card |
-| CameraControls | 332 | Zoom slider + log-scale height + fly-to-target |
-| ForkPanel | 68 | Parallel realities: pause/resume/terminate, divergence score |
-| LoginModal | 96 | Auth token check, manual login, listens for `auth:required` |
+| `ArchaeologyDiscoveryPanel.tsx` | 2776 | Multi-spectral and elevation anomaly discovery, peer-reviewed benchmark locations |
+| `CinematicDirector.tsx` | 1669 | Camera path animation and waypoint fly-throughs for disaster scenarios |
+| `PluginManager.tsx` | 1468 | Plugin installer, runtime toggle, and manifest inspection |
+| `LocalAiHub.tsx` | 1428 | Local GGUF model manager: download progress, resume support, `llama-server` lifecycle |
+| `ApiVault.tsx` | 1383 | Secure API key vault and external provider credentials configuration |
+| `MultiHazardPanel.tsx` | 1279 | Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates |
+| `MarketIntelPanel.tsx` | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
+| `ToolDialog.tsx` | 1199 | Analysis tool execution: study area, params, grid, execution, results, export |
+| `ScenarioEditor.tsx` | 1176 | Parameter forms for 7 disaster types with pinned geographic origins |
+| `HelicopterHud.tsx` | 1142 | Rotorcraft cockpit HUD: attitude, airspeed, collective tape, rotor RPM, torque |
+| `MetricsDashboard.tsx` | 1050 | Administrative runtime telemetry, heap inspection, and Prometheus metrics |
+| `EvolutionHub.tsx` | 986 | Self-evolution dashboard: prompt tuning, drift evaluation, and bandit routing |
+| `ChatPanel.tsx` | 912 | Primary chat interface container with SSE streaming and tool event rendering |
+| `LoginModal.tsx` | 706 | Auth token check, manual login, listens for `auth:required` |
+| `MemoryExplorer.tsx` | 586 | SVG knowledge graph visualizer with circular layout |
+| `AdvancedChatViews.tsx` | 571 | PlanCard, SubAgentActivity, InlineTable, ToolApproval, ModelTierSelector, TraceExpander |
+| `LandCoverMapperPanel.tsx` | 527 | Land cover classification mapper and Copernicus Sentinel integration |
+| `FlightTravelView.tsx` | 507 | Flight deck HUD: compass, altitude/heading tapes, artificial horizon, pitch ladder |
+| `CommandPalette.tsx` | 505 | Cmd+K palette: search layers, locations, actions, toggle overlays, open intel |
+| `StudyAreaPanel.tsx` | 469 | Study area boundary definition: GeoJSON upload, polygon sketching, clipping |
+| `SatelliteImageryPanel.tsx` | 435 | Satellite imagery selector: GIBS, Sentinel-2, Landsat, thermal overlays |
+| `AnalyticsWorkbench.tsx` | 419 | 150-tool analytical engine browser: hierarchical search, live context indicators |
+| `ScenarioGallery.tsx` | 371 | Filterable scenario library with thumbnail cards and launch triggers |
+| `LiveProcessPanel.tsx` | 364 | Live agent cognitive pipeline state and execution steps |
+| `CameraControls.tsx` | 338 | Zoom slider, log-scale height control, and camera reorientation |
+| `LaunchReplayPanel.tsx` | 233 | Scrubbable rocket ascent replay via Launch Library 2 telemetry |
+| `RadioTunerPanel.tsx` | 209 | Analog tuner over geolocated global radio streams |
+| `IssTravelView.tsx` | 172 | ISS orbital perspective HUD: nadir/horizon compass, orbital velocity tape |
+| `PerformanceMonitor.tsx` | 152 | Real-time FPS, entity count, primitive tally, memory, and JS heap (Ctrl+Shift+P) |
+| `FirstRunCard.tsx` | 121 | Initial mission setup card for newly initialized sessions |
+| `ForkPanel.tsx` | 304 | Parallel realities manager: pause, resume, branch, divergence score |
+| `IssLivePanel.tsx` | 138 | Live ISS camera feed iframe and orbital position coordinates |
 
 ### Cockpit (`src/components/cockpit/`)
 
-| Component | Lines | Description |
-|---|---|---|
-| MemoryExplorer | 244 | SVG knowledge graph (circular layout) |
-| MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface |
+- `MultiHazardPanel.tsx` (1,279 lines) — Multi-hazard causal risk chain, IDW risk surface
+- `MemoryExplorer.tsx` (586 lines) — SVG knowledge graph visualizer
 
-### Chat (`src/components/chat/`, 11 components)
+### Chat (`src/components/chat/`)
 
-`ChatPanel.tsx`, `ChatPanelContent.tsx`, `ChatMessageRow.tsx`, `ChatTabs.tsx`, `ChatHistoryPanel.tsx`, `AdvancedChatViews.tsx` (PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander), `LiveProcessPanel.tsx`, `RichMarkdown.tsx`, `VirtualizedMessageList.tsx`, `ModelSelector.tsx` (LLM provider picker), `StudyAreaPrompt.tsx` (auto-detect / draw / adjust boundary)
+11 modular components:
+- `ChatPanel.tsx`, `ChatPanelContent.tsx`, `ChatMessageRow.tsx`, `ChatTabs.tsx`, `ChatHistoryPanel.tsx`
+- `AdvancedChatViews.tsx` (PlanCard, SubAgentActivity, ToolApproval, ModelTierSelector, TraceExpander)
+- `LiveProcessPanel.tsx`, `RichMarkdown.tsx`, `VirtualizedMessageList.tsx`, `ModelSelector.tsx`, `StudyAreaPrompt.tsx`
 
-### Collaboration (`src/components/collaboration/`)
+### Collaboration & Explainability
 
-- `PresenceComponents.tsx` — PresenceIndicator (avatar stack + viewer/typing count), RemoteCursor
-
-### Explainability (`src/components/explainability/`)
-
-- `HumanOverrideBanner.tsx` (238L) — pending override approval/rejection
+- `src/components/collaboration/PresenceComponents.tsx` — Avatar stack, typing indicator, remote cursors
+- `src/components/explainability/HumanOverrideBanner.tsx` — Human-in-the-loop override review and approvals
 
 ### Trackers (`src/components/trackers/`)
 
-| Component | Description |
-|---|---|
-| AviationTrackerPanel | Live OpenSky flights, search/filter |
-| SatelliteTrackerPanel | TLE catalog (CelesTrak/UCS/Starlink), track button |
-
-### Scenarios (`src/components/scenarios/`)
-
-| Component | Description |
-|---|---|
-| `CinematicDirector.tsx` | Camera path animation for disaster fly-throughs |
-| `EarthquakeVisualizer.tsx` | MMI polygons, P/S/Rayleigh/Love wavefront rings |
-| `HurricaneVisualizer.tsx`, `WildfireVisualizer.tsx`, `LandslideVisualizer.tsx`, `VolcanicVisualizer.tsx`, `FloodWaterSurface.tsx` | Per-hazard scenario visualizers |
-| `ScenarioEditor.tsx` | Parameter forms for 7 disaster types, with globe-pinned origin points (vent / epicentre / hurricane landfall) |
-| `ScenarioGallery.tsx` | Sortable/filterable grid, search |
-| `SpatialSketching.tsx`, `ScenarioThumbnail.tsx` | Supporting visualizers |
-
-Scenario types and colors:
-
-| Key | Label | Color |
-|---|---|---|
-| `earthquake_swarm` | Earthquake | `#ef4444` |
-| `hurricane_landfall` | Hurricane | `#f59e0b` |
-| `wildfire_spread` | Wildfire | `#ff6b35` |
-| `volcanic_eruption` | Volcanic | `#d946ef` |
-| `flood_inundation` | Flood | `#3b82f6` |
-| `tsunami_wave` | Tsunami | `#06b6d4` |
-| `landslide` | Landslide | `#78350f` |
+- `AviationTrackerPanel.tsx` — Live OpenSky flights, callsign search, altitude filtering
+- `SatelliteTrackerPanel.tsx` — TLE catalog (CelesTrak, UCS, Starlink), real-time propagation
 
 ---
 
 ## Rendering Engine
 
-`src/rendering/` contains **41 rendering modules** that transform live data into Cesium entities, surfaces, and effects.
+`src/rendering/` contains **55 rendering modules** (54 TypeScript modules and 1 type declaration) that transform live feeds and computational outputs into Cesium entities, primitives, and shaders.
 
-### Data & Entity Modules
-
-| File | Purpose |
-|---|---|
-| `ais.ts` | Maritime AIS vessel positions/tracks |
-| `aviation.ts` | Flight tracking |
-| `flights.ts` | Flight route arcs |
-| `earthquakes.ts` | Earthquake markers |
-| `satelliteDataSources.ts` | TLE orbit propagation & rendering |
-| `satelliteImagery.ts` | GIBS/XYZ/WMS imagery layers |
-| `satnogs.ts` | SatNOGS transmitter/frequency records |
-| `osmBuildings.ts` | OSM 3D building extrusion |
-| `ucsSatelliteDb.ts` | UCS satellite database |
-| `tectonic.ts` | Tectonic plate data |
-| `weather.ts` | Weather data |
-| `trajectoryPredictor.ts` | Trajectory prediction |
-| `tomtomTraffic.ts` | Per-segment street-level traffic flow (TomTom Flow Segment API) |
-| `cctvViewshed.ts` | Webcam coverage cones |
-| `launchReplay.ts` | Rocket ascent reconstruction |
-| `aircraftHangar.ts` | Flight glyphs → 3D glTF models (LOD) |
-| `osrmRoute.ts` | Street-following route + camera fly-through |
-| `radioWave.ts` | Radio tuner globe wave animation |
-
-### Spatial & Analysis Modules
+### 1. Aerospace & Rotorcraft Simulation (11 modules)
 
 | File | Purpose |
 |---|---|
-| `surfaceRenderer.ts` | IDW interpolation surface rendering |
-| `gisFusion.ts` | GIS data fusion for risk surfaces |
-| `studyArea.ts` | GeoJSON upload/draw/export/fly-to |
-| `idwInterpolation.ts` | IDW interpolation algorithm |
-| `domainLayers.ts` | Domain-specific layer management |
-| `physicsSurrogates.ts` | Liquefaction, dispersion, wildfire, flood surrogates |
-| `layerRenderer.ts` | Generic layer rendering abstraction |
-| `toolResultParser.ts` | Tool result parsing |
-| `formatStepResult.ts` | Step result formatting |
+| `helicopterSim.ts` | 6-DOF rotorcraft flight dynamics, collective/cyclic/pedals, ground effect, autorotation |
+| `apacheModel.ts` | AH-64 Apache glTF geometry generation, rotor articulation, weapon pylons, gear |
+| `heliCameraRig.ts` | Camera modes: chase close, chase wide, cockpit POV, top-down, external orbit |
+| `heliCockpitScreens.ts` | Glass cockpit MFD screen management and attitude direction indicator |
+| `heliControls.ts` | Flight controls keyboard/gamepad binding, trim axes, collective hold |
+| `heliHeadModel.ts` | Pilot head model and responsive look-at interpolation |
+| `heliInstrPaint.ts` | Canvas 2D instrument cluster rendering: altimeter, airspeed, torque, VVI |
+| `heliAudio.ts` | Web Audio API turbine whine, rotor blade slap, and audio stall warnings |
+| `cockpitAnchors.ts` | 3D cockpit space to 2D screen coordinate projection anchors |
+| `gltfBuilder.ts` | Procedural glTF 2.0 binary asset compilation for dynamic 3D models |
+| `m4.ts` | 4x4 matrix transformation mathematics for articulated entities |
 
-### Cognition & Effects
+### 2. Live Tracking & Trajectory (12 modules)
 
 | File | Purpose |
 |---|---|
-| `scenarioEngine.ts` | What-if scenario definition/rollout/diff |
-| `causalGraph.ts` | Noisy-OR causal Bayesian network |
-| `blackboard.ts` | Blackboard pattern for probability writing |
-| `ghostEntity.ts` / `ghostProtocol.ts` | Ghost entity rendering + protocol |
-| `entropyHalo.ts` | Entropy halo visualization |
-| `forkRenderer.ts` | Parallel reality fork rendering |
-| `oracleChains.ts` | Oracle chain visualization |
-| `sensorStyles.ts` | GLSL sensor looks (CRT · NVG · FLIR · Noir · Snow) |
-| `photorealisticGlobe.ts` | Google Photorealistic 3D Tiles (Cesium Ion asset 2275207) |
-| `cinematicCamera.ts` | Tick-based camera engine (orbit/pan/tilt/rotate, route dolly) |
-| `detectionOverlay.ts` | Screen-space bounding boxes over live entities |
-| `navigation.ts` | Navigation utilities |
+| `aviation.ts` | Live flight position tracking and military airspace integration |
+| `flights.ts` | Great-circle flight route arcs and altitude-band hypsometric color ramps |
+| `aircraftHangar.ts` | Level-of-detail model management for commercial and military aircraft glyphs |
+| `ais.ts` | Maritime AIS vessel positioning, heading vectors, and track histories |
+| `satelliteDataSources.ts` | NORAD SGP4/SDP4 TLE orbit propagation and real-time footprint rendering |
+| `satnogs.ts` | SatNOGS satellite transmitter and radio frequency ground station records |
+| `ucsSatelliteDb.ts` | Union of Concerned Scientists satellite database overlay and country queries |
+| `trajectoryPredictor.ts` | Ballistic and orbital trajectory prediction paths |
+| `launchReplay.ts` | Rocket launch ascent trajectory reconstruction from launch logs |
+| `cctvViewshed.ts` | Public CCTV camera location markers, ground-projected FOV frustum viewsheds |
+| `tomtomTraffic.ts` | Per-segment street-level traffic flow speeds via TomTom Flow API |
+| `osrmRoute.ts` | Street-network routing polyline generation and camera fly-through |
+
+### 3. Earth Observation & Geospatial Layers (8 modules)
+
+| File | Purpose |
+|---|---|
+| `satelliteImagery.ts` | NASA GIBS, XYZ, and WMS imagery layer orchestration |
+| `photorealisticGlobe.ts` | Google Photorealistic 3D Tiles integration (Cesium Ion asset 2275207) |
+| `osmBuildings.ts` | OpenStreetMap 3D building extrusion via Cesium 3D Tiles |
+| `domainLayers.ts` | Power grids, submarine cables, gas storage, animal migration, space debris |
+| `primitiveLayers.ts` | High-performance Cesium PrimitiveCollection management |
+| `tectonic.ts` | Tectonic plate boundary fault lines and velocity vectors |
+| `earthquakes.ts` | Real-time USGS earthquake markers, magnitude scaling, and seismic wavefront rings |
+| `weather.ts` | Storm tracks, radar precipitation sites, drought zones, climate anomaly indices |
+
+### 4. Spatial Analysis, Surfaces & Archaeology (8 modules)
+
+| File | Purpose |
+|---|---|
+| `surfaceRenderer.ts` | View-dependent resolution grid generation, canvas texture colormaps |
+| `idwInterpolation.ts` | Inverse Distance Weighting interpolation with KD-tree spatial sampling |
+| `studyArea.ts` | Study area boundary clipping, GeoJSON containment checks, bounding box computation |
+| `gisFusion.ts` | Multi-source GIS data fusion for spatial risk indexing |
+| `physicsSurrogates.ts` | Rapid surrogates for liquefaction, dispersion, wildfire, and flood |
+| `archaeologyOverlay.ts` | LiDAR hillshade anomaly detection, cropmark/soilmark filters, mound extraction |
+| `toolResultParser.ts` | Tool output parsing into spatial entity coordinates |
+| `formatStepResult.ts` | Multi-step calculation result formatting for map display |
+
+### 5. Causal Cognition & Scenarios (8 modules)
+
+| File | Purpose |
+|---|---|
+| `scenarioEngine.ts` | What-if scenario definition, temporal rollout, and state differentiation |
+| `causalGraph.ts` | Noisy-OR causal Bayesian network graph structure and inference |
+| `blackboard.ts` | Shared blackboard pattern for cognitive probability distribution updates |
+| `ghostEntity.ts` | Ghost entity rendering for counterfactual alternative branches |
+| `ghostProtocol.ts` | State synchronization protocol for counterfactual scenarios |
+| `entropyHalo.ts` | Visual entropy halo indicating state uncertainty on the globe |
+| `forkRenderer.ts` | Visual branch visualization for parallel realities |
+| `oracleChains.ts` | Causal chain link visualization connecting initiating triggers to outcomes |
+
+### 6. Visual Effects, Camera & Utilities (8 modules)
+
+| File | Purpose |
+|---|---|
+| `sensorStyles.ts` | PostProcessStage GLSL shaders (CRT, NVG, FLIR thermal, Noir, Snow) |
+| `cinematicCamera.ts` | Camera movement engine (orbit, pan, tilt, rotate, dolly transitions) |
+| `cinematicSpline.ts` | Catmull-Rom and Hermite spline camera interpolation for fly-throughs |
+| `detectionOverlay.ts` | Screen-space bounding boxes and tracking reticles over live entities |
+| `navigation.ts` | Spherical navigation math, safe facility routing, distance metrics |
+| `layerRenderer.ts` | Dynamic layer fetching and visual rendering abstraction |
+| `radioWave.ts` | Animated electromagnetic radiation ring propagation from transmitter points |
+| `shpjs.d.ts` | TypeScript declarations for Shapefile parser integration |
 
 ---
 
-## Simulation overlays
+## Simulation Overlays
 
 ### Shared Core (`src/components/kaggle/`)
 
 | File | Lines | Contents |
 |---|---|---|
-| `KaggleScalarOverlay.tsx` | 680 | Generic scalar field renderer (raster → Cesium surface, colormap legend, animation) |
-| `VolcanoEnsembleOverlay.tsx` | 310 | Volcano ensemble (lava + ash) overlay |
-| `shared.ts` | 505 | Shared colormaps, color stops, config types |
-| `KaggleLegend.tsx` | 113 | Legend component |
-| `KaggleAnimationControls.tsx` | 116 | Animation timeline controls |
+| `KaggleScalarOverlay.tsx` | 677 | Scalar field renderer (raster to Cesium surface, colormap legend, timeline) |
+| `VolcanoEnsembleOverlay.tsx` | 310 | Combined volcanic ensemble (lava flow thickness + ash dispersal) overlay |
+| `shared.ts` | 505 | Colormaps, color stops, contour thresholds, and simulation configuration types |
+| `KaggleLegend.tsx` | 113 | Interactive colormap scale and unit display |
+| `KaggleAnimationControls.tsx` | 116 | Simulation playback controls (play, pause, step, speed) |
 
 ### GPU Primitives (`src/components/kaggle/gpu/`)
 
-`ScalarSurfacePrimitive.ts`, `ArrowFieldPrimitive.ts`, `ParticleAdvector.ts`, `cesiumRuntime.ts`, `cfdColormaps.ts`, `fieldData.ts`, `terrain.ts`
+`ScalarSurfacePrimitive.ts` (492L), `ArrowFieldPrimitive.ts` (721L), `ParticleAdvector.ts` (399L), `cesiumRuntime.ts`, `cfdColormaps.ts`, `fieldData.ts`, `terrain.ts`.
 
 ### Disaster Wrappers (`src/components/`)
 
 | File | Layers |
 |---|---|
-| `KaggleEarthquakeOverlay.tsx` | PGA / PGV / MMI / Sa |
-| `KaggleFloodOverlay.tsx` | Water depth + terrain |
-| `KaggleHurricaneOverlay.tsx` | Wind speed + surge + rainfall |
-| `KaggleLandslideOverlay.tsx` | Debris depth + velocity + runout |
-| `KaggleTsunamiOverlay.tsx` | Wave height + bathymetry |
-| `KaggleVolcanoOverlay.tsx` | Ash deposit + lava thickness |
-| `KaggleWildfireOverlay.tsx` | Fire intensity + fire state |
+| `KaggleEarthquakeOverlay.tsx` | Peak Ground Acceleration (PGA), PGV, Instrumental MMI, Spectral Acceleration |
+| `KaggleFloodOverlay.tsx` | Water depth, velocity vectors, flooded terrain surface |
+| `KaggleHurricaneOverlay.tsx` | Sustained wind speed, storm surge height, precipitation rate |
+| `KaggleLandslideOverlay.tsx` | Debris flow depth, velocity field, deposit runout extent |
+| `KaggleTsunamiOverlay.tsx` | Wave elevation, propagation time, coastal runup |
+| `KaggleVolcanoOverlay.tsx` | Lava flow thickness, tephra fallout, column height |
+| `KaggleWildfireOverlay.tsx` | Fire front perimeter, rate of spread, flame length, fire intensity |
 
 ---
 
@@ -214,23 +233,22 @@ Scenario types and colors:
 
 | Hook | Purpose |
 |---|---|
-| `useChat` | Chat pipeline: SSE streaming, tool calls, analytical-result auto-render |
-| `useChatSelectors` | Zustand selectors for chat UI state |
-| `useWebSocket` | WebSocket connection manager |
-| `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position |
-| `useKaggleSimulation` | Simulation job lifecycle (local CPU kernels or Kaggle kernels) |
-| `useOfflineChat` | Offline banner + local fallback |
-| `useRealtimeVoice` | Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge |
+| `useChat` | Chat pipeline: SSE streaming, function calling, automated result visualization |
+| `useChatSelectors` | Selective Zustand subscribers minimizing re-renders in chat views |
+| `useWebSocket` | WebSocket connection manager for live entity feeds and alert pub/sub |
+| `useCollaboration` | Multi-user presence: join/leave, heartbeat, typing indicator, remote cursors |
+| `useKaggleSimulation` | Simulation job lifecycle for local CPU kernels and Kaggle dispatched jobs |
+| `useOfflineChat` | Offline connectivity detection and local fallback agent switching |
+| `useRealtimeVoice` | Low-latency voice interaction via OpenAI Realtime with Gemini Live fallback |
 
 ---
 
 ## State & Data
 
 | Store | Purpose |
-|---|---|---|
-| `AuthContext` | Authentication state, token refresh |
-| `chatStore` (Zustand) | Chat messages, UI state, model selection, study-area bbox |
-| `userPrefStore` (Zustand) | User location + timezone preference (persisted, applied globally) |
-| `useChatSelectors` | Derived selectors |
-| `src/data/` | Analytical models catalog, land cover classes |
-| `src/lib/` | API client, chat store, `formatTime.ts` (timezone-aware formatting), PDF |
+|---|---|
+| `AuthContext` | User authentication state, role permissions, token refresh lifecycle |
+| `chatStore` (Zustand) | Chat messages, model configuration, study-area coordinates, tool cards |
+| `userPrefStore` (Zustand) | Location preference, timezone preference (persisted in localStorage) |
+| `src/data/` | Analytical models metadata catalog (150 tools), land cover class definitions |
+| `src/lib/` | API client (`api.ts`), desktop helpers (`desktop.ts`), time formatting (`formatTime.ts`), PDF reports |

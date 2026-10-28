@@ -113,10 +113,15 @@
 .landing .band > p { font-size: 0.98rem; }
 .landing-footer { padding: 1.6rem 1.5rem 2.6rem; font-size: 0.84rem; }
 
-/* ── justified body text across the landing page ────────────────────── */
-.landing .tagline, .landing .band-head p, .landing .feat p, .landing .hz p,
-.landing .band > p, .landing .showcase figcaption {
-  text-align: justify; text-justify: inter-word; hyphens: auto;
+/* ── typography & alignment across the landing page ─────────────────── */
+.landing .tagline {
+  text-align: center;
+}
+.landing .band-head p, .landing .section-lead {
+  text-align: center;
+}
+.landing .feat p, .landing .hz p, .landing .showcase figcaption {
+  text-align: left;
 }
 .landing .cta-band p { text-align: center; }
 

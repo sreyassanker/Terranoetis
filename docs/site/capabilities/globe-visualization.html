@@ -12,10 +12,16 @@
 <meta property="og:description" content="React 19 + Cesium 1.140 client: App shell with 11 lazy panels, 41 rendering modules, simulation overlays, sensor styles and cinematic cameras.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/globe-visualization.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="3D globe visualization — Terranoetis Documentation">
+<meta name="twitter:description" content="React 19 + Cesium 1.140 client: App shell with 11 lazy panels, 41 rendering modules, simulation overlays, sensor styles and cinematic cameras.">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html" aria-label="Terranoetis"><img src="../assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="../assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../download.html">Download</a>
       <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
       <a href="../methodology.html">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../download.html">Download Desktop</a></li>
 <li><a href="../documentation.html">Documentation home</a></li>
 <li><a href="../getting-started.html">Getting started</a></li>
 <li><a href="../architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="../capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="../capabilities/globe-visualization.html" aria-current="true">3D globe visualization</a></li>
+<ul><li><a href="../gallery.html">Visual gallery</a></li>
+<li><a href="../capabilities/globe-visualization.html" aria-current="true">3D globe visualization</a></li>
 <li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
@@ -86,6 +96,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         <span><span class="tag tag-measured">COUNTS MEASURED</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/globe-visualization.html">Read the full narrative</a></p>
@@ -97,10 +108,10 @@
 <div class="table-scroll"><table><caption>Verified counts</caption>
 <thead><tr><th scope="col">Item</th><th scope="col">Value</th><th scope="col">Verification</th></tr></thead>
 <tbody>
-<tr><td>Rendering modules in src/rendering/</td><td>41 TS modules</td><td>file count excluding .DS_Store and shpjs.d.ts declaration</td></tr>
-<tr><td>Lazy panels in App.tsx</td><td>11 (const Lazy…Panel = lazy(...))</td><td>grep count <cite class="src">src/App.tsx:135-145</cite></td></tr>
-<tr><td>App shell size</td><td>11,038 lines</td><td>wc -l src/App.tsx</td></tr>
-<tr><td>Routes</td><td>/ · /v2/globe · /v2/canvas · /v2/scenarios · /v2/tours</td><td><cite class="src">src/main.tsx:22-26</cite></td></tr>
+<tr><td>Rendering modules in src/rendering/</td><td>55 modules (54 TS + 1 d.ts)</td><td>file count in src/rendering/</td></tr>
+<tr><td>Lazy panels in App.tsx</td><td>11 (const Lazy…Panel = lazy(...))</td><td>grep count <cite class="src">src/App.tsx:158-168</cite></td></tr>
+<tr><td>App shell size</td><td>14,451 lines</td><td>wc -l src/App.tsx</td></tr>
+<tr><td>Routes</td><td>/ (main single-page application with modal/panel overlays)</td><td><cite class="src">src/main.tsx:90-97</cite></td></tr>
 <tr><td>Cesium version</td><td>1.140</td><td><code>package.json dependencies.cesium</code></td></tr>
 <tr><td>Photorealistic tiles</td><td>Google 3D Tiles, Cesium Ion asset 2275207 (needs token)</td><td><cite class="src">src/rendering/photorealisticGlobe.ts</cite></td></tr>
 <tr><td>Sensor looks</td><td>CRT · NVG · FLIR · Noir · Snow via PostProcessStage GLSL</td><td><cite class="src">src/rendering/sensorStyles.ts</cite></td></tr>

@@ -12,10 +12,16 @@
 <meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/; GET/POST/PUT/DELETE/PATCH) plus real-time WebSock…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="API Reference — Terranoetis Documentation">
+<meta name="twitter:description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/; GET/POST/PUT/DELETE/PATCH) plus real-time WebSock…">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html" aria-label="Terranoetis"><img src="../assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="../assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../download.html">Download</a>
       <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
       <a href="../methodology.html">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../download.html">Download Desktop</a></li>
 <li><a href="../documentation.html">Documentation home</a></li>
 <li><a href="../getting-started.html">Getting started</a></li>
 <li><a href="../architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="../capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="../gallery.html">Visual gallery</a></li>
+<li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
@@ -86,6 +96,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         
       </div>
       
@@ -112,6 +123,8 @@
 <li><a href="#agent--cognition">Agent &amp; Cognition</a></li>
 <li><a href="#analytical-models">Analytical Models</a></li>
 <li><a href="#live-data-feeds">Live Data Feeds</a></li>
+<li><a href="#archaeology--remote-sensing">Archaeology &amp; Remote Sensing</a></li>
+<li><a href="#cctv--webcams">CCTV &amp; Webcams</a></li>
 <li><a href="#intelligence--pulse">Intelligence &amp; Pulse</a></li>
 <li><a href="#simulations--scenarios">Simulations &amp; Scenarios</a></li>
 <li><a href="#explainability--governance">Explainability &amp; Governance</a></li>
@@ -462,6 +475,100 @@
 <tr>
 <td>Climate</td>
 <td><code>/api/climate/power</code>, <code>/api/electricity-grid</code></td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="archaeology-remote-sensing">Archaeology &amp; Remote Sensing</h2>
+
+
+<p>Multi-modal archaeological anomaly detection engine combining Sentinel-2 multispectral band indices (NDVI, cropmark indices) with LiDAR elevation hillshade and peer-reviewed benchmark datasets.</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/archaeology/scan</code></td>
+<td>Scans user-drawn study area bounding box for multi-modal archaeological anomalies</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/archaeology/benchmarks</code></td>
+<td>Returns 5 peer-reviewed reference sites with literature citations</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/archaeology/benchmark/run</code></td>
+<td>Executes validation benchmark across reference locations (spatial error, IoU, confidence)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/archaeology/benchmark/run</code></td>
+<td>Executes validation benchmark via POST trigger</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="cctv-webcams">CCTV &amp; Webcams</h2>
+
+
+<p>Worldwide public webcam feeds, directory search, and proxy services with SSRF protection.</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/worldwide</code></td>
+<td>Worldwide public CCTV cameras near coordinates or bounding box (also <code>/api/cameras</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/youtube</code></td>
+<td>Curated 24/7 YouTube live streams (space station, landmarks, world cities)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/windy</code></td>
+<td>Windy live webcams search with bounding box and category filters</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/categories</code></td>
+<td>Worldwide webcam category statistics</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/health</code></td>
+<td>Webcam feed health status and load state</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cctv/stream-proxy</code></td>
+<td>CCTV HLS/MJPEG stream proxy with SSRF validation</td>
 </tr>
 </tbody>
 </table></div>

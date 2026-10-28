@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 export const DOCS_VERSION = '3.0.0';
-export const LAST_REVIEWED = '2026-09-09';
+export const LAST_REVIEWED = '2026-10-28';
 export const SITE_ORIGIN = 'https://sreyassanker.github.io/Terranoetis';
 export const REPO = 'https://github.com/sreyassanker/Terranoetis';
 
@@ -14,6 +14,7 @@ export const REPO = 'https://github.com/sreyassanker/Terranoetis';
 export const NAV = [
   { group: 'Start', items: [
     { href: 'index.html', label: 'Product overview' },
+    { href: 'download.html', label: 'Download Desktop' },
     { href: 'documentation.html', label: 'Documentation home' },
     { href: 'getting-started.html', label: 'Getting started' },
     { href: 'architecture.html', label: 'Platform architecture' },
@@ -36,6 +37,7 @@ export const NAV = [
     { href: 'capabilities/memory.html', label: 'Memory system' },
   ]},
   { group: 'Interface & platform', items: [
+    { href: 'gallery.html', label: 'Visual gallery' },
     { href: 'capabilities/globe-visualization.html', label: '3D globe visualization' },
     { href: 'capabilities/platform-services.html', label: 'Platform services' },
   ]},
@@ -58,6 +60,8 @@ export const YOUTUBE_PLAYLIST = 'https://www.youtube.com/playlist?list=PLFp9mjre
 
 export const TOP_NAV = [
   { href: 'index.html', label: 'Overview' },
+  { href: 'gallery.html', label: 'Gallery' },
+  { href: 'download.html', label: 'Download' },
   { href: 'documentation.html', label: 'Documentation' },
   { href: 'capabilities/hazard-simulations.html', label: 'Capabilities' },
   { href: 'methodology.html', label: 'Verification' },
@@ -151,8 +155,14 @@ export function renderPage(page) {
 <meta property="og:description" content="${esc(page.desc)}">
 <meta property="og:type" content="article">
 <meta property="og:url" content="${SITE_ORIGIN}/${page.path}">
-<meta property="og:image" content="${SITE_ORIGIN}/assets/img/terranoetis.png">
+<meta property="og:image" content="${SITE_ORIGIN}/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(page.title)} — Terranoetis Documentation">
+<meta name="twitter:description" content="${esc(page.desc)}">
+<meta name="twitter:image" content="${SITE_ORIGIN}/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="${DOCS_VERSION}">
 <meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
 <meta name="generator" content="scripts/docs/build.mjs">
@@ -165,7 +175,7 @@ ${page.head || ''}
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="${r('index.html')}"><img src="${r('assets/img/terranoetis.png')}" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="${r('index.html')}" aria-label="Terranoetis"><img src="${r('assets/img/terranoetis.png')}" alt="" width="36" height="36" class="brand-logo"><img src="${r('assets/img/terranoetis-wordmark.png')}" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       ${TOP_NAV.map((t) => `<a href="${t.external ? t.href : r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}${t.external ? ' rel="noopener"' : ''}${t.cls ? ` class="${t.cls}"` : ''}>${esc(t.label)}</a>`).join('\n      ')}
     </nav>
@@ -184,6 +194,7 @@ ${page.head || ''}
       <div class="page-meta">
         <span><strong>Platform</strong> v${DOCS_VERSION}</span>
         <span><strong>Docs</strong> v${DOCS_VERSION}</span>
+        <span><strong>Last updated</strong> ${LAST_REVIEWED}</span>
         ${tags ? `<span>${tags}</span>` : ''}
       </div>
       ${page.proseMd ? `<p><strong>Full description:</strong> <a href="${r(page.proseMd)}">Read the full narrative</a></p>` : ''}

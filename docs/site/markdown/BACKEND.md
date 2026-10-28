@@ -11,6 +11,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 - [Tech Stack](#tech-stack)
 - [Top-Level Modules](#top-level-modules)
 - [Module Directories](#module-directories)
+- [Local GGUF Model](#local-gguf-model)
 - [Database](#database)
 - [Security](#security)
 - [Observability](#observability)
@@ -25,7 +26,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | Database | SQLite (`better-sqlite3`), Redis (`ioredis`) |
 | Realtime | WebSocket (`ws`), SSE |
 | Auth | JWT + RBAC, scrypt password hashing |
-| LLM routing | Omninet 9-provider router (Groq, Gemini, Bai, DeepSeek, Claude, OpenRouter, Ollama, HuggingFace, local GGUF) |
+| LLM routing | Omninet 10-provider router (OpenAI, Groq, Gemini, Bai, DeepSeek, Claude, Ollama, OpenRouter, HuggingFace, local GGUF) |
 | Observability | Pino, in-house OpenTelemetry-style tracing, Sentry |
 | Sandbox | Python / Node / Bash execution |
 
@@ -35,7 +36,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 
 | File | Purpose |
 |---|---|
-| `index.ts` | Express app: routes, middleware, startup orchestration, background services |
+| `index.ts` | Express app (15,927 lines): routes, middleware, startup orchestration, background services |
 | `agent.ts` | Intent router: natural-language → typed intent (quick_scan / deep_analysis / fly_to / toggle_layer / weather_check / compute / panel_command / unknown) |
 | `advancedAgent.ts` | Multi-step agent orchestration, dynamic tool integration |
 | `orchestrator.ts` | Agent orchestration helpers |
@@ -51,7 +52,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `disasterAssessment.ts` / `disasterFusion.ts` | Disaster risk assessment + multi-source fusion |
 | `pluginManager.ts` | Plugin system for extensibility |
 | `sandboxManager.ts` | Sandbox execution manager |
-| `apiMetadata.ts` | API metadata + category definitions |
+| `apiMetadata.ts` | API metadata + category definitions (90 configured API metadata entries) |
 | `embedding.ts` | Text embedding engine for semantic search |
 | `memoryManager.ts` | Top-level memory facade with XML context builder |
 
@@ -69,9 +70,11 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `sandboxV2/` | Simplified surrogate engines (`farsiteLite`, `adcircLite`, `wrfLite`, `hysplitLite`, FNO) — not the operational models of the same names |
 | `world-model/` | Causal graph, ensemble predictor, physics NN, prediction validator, scenario simulator |
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
+| `archaeology/` | Archaeological anomaly detection engine (Sentinel-2 multispectral band indices, LiDAR hillshade, peer-reviewed reference sites) |
+| `cctv/` | Worldwide public webcam directory, HLS/MJPEG stream proxy with SSRF protection, health monitoring |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
 | `multimodal/` | Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion |
-| `ai-router/` | Omninet 9-provider LLM router (incl. local GGUF fallback) |
+| `ai-router/` | Omninet 10-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
 | `foundation-models/` | Weather forecaster, agriculture monitor, BayFire detector, MVT tile server, SpaceX API, STAC search |
@@ -109,13 +112,13 @@ The server can fall back to a **local LLM** via `llama-server` when cloud provid
 
 On startup, the server checks for `models/LFM2.5-2.6B-Q4_K_M.gguf`. If found, it spawns `llama-server` on port **11436** (configurable via `LLAMA_SERVER_PATH`). The local model is then available as a drop-in LLM provider.
 
-### One-click download
+### Download Workflow
 
-The admin panel Home tab includes a "Download Model" button that streams the model from HuggingFace (`LiquidAI/LFM2.5-2.6B-GGUF`) directly into `models/`. The download features:
+The admin panel Local AI Hub includes a download controller that streams the model from HuggingFace (`LiquidAI/LFM2.5-2.6B-GGUF`) directly into `models/`. The download features:
 
-- **Live progress bar** with percentage, speed (MB/s), and ETA
+- **Live progress telemetry** with percentage, transfer rate (MB/s), and ETA
 - **Resume support** — writes to a `.partial` temp file; on interruption, re-triggering sends an HTTP `Range` header to HuggingFace and appends to the partial file
-- **Atomic finalisation** — the `.partial` file is renamed to the final path only when 100% complete, so a corrupt file never shows as "Installed"
+- **Atomic finalisation** — the `.partial` file is renamed to the final path only when 100% complete, so a corrupt file never shows as installed
 
 ### API
 
@@ -133,7 +136,7 @@ Override the download URL with `GGUF_DOWNLOAD_URL` environment variable.
 
 ### SQLite (`better-sqlite3`)
 
-Primary store. Schema is defined in `server/db/schema.sql` (47 tables) and applied via `server/db/index.ts` migrations:
+Primary store. Schema is defined in `server/db/schema.sql` (48 tables) and applied via `server/db/index.ts` migrations:
 
 - Users, roles, permissions
 - Scenarios + simulation jobs

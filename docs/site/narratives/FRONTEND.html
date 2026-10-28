@@ -12,10 +12,16 @@
 <meta property="og:description" content="The Terranoetis client is a React 19 + TypeScript single-page application built with Vite 7, styled with Tailwind CSS 3, and rendered on a CesiumJS 1.140 W…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/FRONTEND.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Frontend — Terranoetis Documentation">
+<meta name="twitter:description" content="The Terranoetis client is a React 19 + TypeScript single-page application built with Vite 7, styled with Tailwind CSS 3, and rendered on a CesiumJS 1.140 W…">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html" aria-label="Terranoetis"><img src="../assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="../assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../download.html">Download</a>
       <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
       <a href="../methodology.html">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../download.html">Download Desktop</a></li>
 <li><a href="../documentation.html">Documentation home</a></li>
 <li><a href="../getting-started.html">Getting started</a></li>
 <li><a href="../architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="../capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="../gallery.html">Visual gallery</a></li>
+<li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
@@ -86,6 +96,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         
       </div>
       
@@ -96,7 +107,7 @@
 
 
 <blockquote>
-<p>Verified site view: <a href="../capabilities/globe-visualization.html">3D globe visualization</a>. The UI shell (topbar, sidebar, modals) is implemented inline in <code>src/App.tsx</code> (~11,000 lines); feature surfaces are split across lazy-loaded panels.</p>
+<p>Verified site view: <a href="../capabilities/globe-visualization.html">3D globe visualization</a>. The UI shell (topbar, sidebar, modals, panels) is implemented inline in <code>src/App.tsx</code> (14,451 lines); feature surfaces are split across lazy-loaded panels and modular component trees.</p>
 </blockquote>
 
 
@@ -111,7 +122,7 @@
 <li><a href="#routing">Routing</a></li>
 <li><a href="#component-architecture">Component Architecture</a></li>
 <li><a href="#rendering-engine">Rendering Engine</a></li>
-<li><a href="#simulation-overlays">Simulation overlays</a></li>
+<li><a href="#simulation-overlays">Simulation Overlays</a></li>
 <li><a href="#hooks">Hooks</a></li>
 <li><a href="#state--data">State &amp; Data</a></li>
 </ul>
@@ -149,11 +160,11 @@
 </tr>
 <tr>
 <td>Routing</td>
-<td>React Router 7</td>
+<td>React Router 7 (<code>BrowserRouter</code> on web, <code>HashRouter</code> in Tauri desktop)</td>
 </tr>
 <tr>
 <td>State</td>
-<td>React context (AuthContext) + custom hooks + Zustand chat store</td>
+<td>React context (AuthContext) + custom hooks + Zustand chat and user preference stores</td>
 </tr>
 <tr>
 <td>Charts</td>
@@ -187,31 +198,14 @@
 <tbody>
 <tr>
 <td><code>/</code></td>
-<td>App</td>
-<td>Main Cesium globe application (11 lazy-loaded panels)</td>
-</tr>
-<tr>
-<td><code>/v2/globe</code></td>
-<td>GlobePage</td>
-<td>Dedicated Cesium globe viewport</td>
-</tr>
-<tr>
-<td><code>/v2/canvas</code></td>
-<td>CanvasPage</td>
-<td>Spatial canvas</td>
-</tr>
-<tr>
-<td><code>/v2/scenarios</code></td>
-<td>ScenariosPage</td>
-<td>Scenario gallery and editor</td>
-</tr>
-<tr>
-<td><code>/v2/tours</code></td>
-<td>ToursPage</td>
-<td>Cinematic tours</td>
+<td><code>App</code></td>
+<td>Unified Cesium globe application with 11 lazy-loaded panels, command palette, and modal dialogs</td>
 </tr>
 </tbody>
 </table></div>
+
+
+<p>In desktop builds (<code>isDesktopApp</code>), React Router automatically switches to <code>HashRouter</code> for filesystem origin compatibility (<code>tauri://localhost</code>). Administrative tools, scenario creation, spatial querying, and tool execution are operated as in-viewport panels and dialogs within <code>App.tsx</code>.</p>
 
 
 <hr></hr>
@@ -233,79 +227,164 @@
 </thead>
 <tbody>
 <tr>
-<td>CommandPalette</td>
-<td>320</td>
-<td>Cmd+K palette: search layers/locations/actions, toggle/fly-to/open intel</td>
+<td><code>ArchaeologyDiscoveryPanel.tsx</code></td>
+<td>2776</td>
+<td>Multi-spectral and elevation anomaly discovery, peer-reviewed benchmark locations</td>
 </tr>
 <tr>
-<td>PerformanceMonitor</td>
-<td>149</td>
-<td>Real-time FPS/entities/primitives/memory/JS heap, Ctrl+Shift+P</td>
+<td><code>CinematicDirector.tsx</code></td>
+<td>1669</td>
+<td>Camera path animation and waypoint fly-throughs for disaster scenarios</td>
 </tr>
 <tr>
-<td>FlightTravelView</td>
-<td>507</td>
-<td>Flight deck HUD: compass, alt/heading tapes, horizon, pitch ladder</td>
+<td><code>PluginManager.tsx</code></td>
+<td>1468</td>
+<td>Plugin installer, runtime toggle, and manifest inspection</td>
 </tr>
 <tr>
-<td>IssTravelView</td>
-<td>172</td>
-<td>ISS orbital HUD: nadir/horizon compass, pitch tape</td>
+<td><code>LocalAiHub.tsx</code></td>
+<td>1428</td>
+<td>Local GGUF model manager: download progress, resume support, <code>llama-server</code> lifecycle</td>
 </tr>
 <tr>
-<td>IssLivePanel</td>
-<td>67</td>
-<td>ISS camera iframe + position stats (lat/lon/alt)</td>
+<td><code>ApiVault.tsx</code></td>
+<td>1383</td>
+<td>Secure API key vault and external provider credentials configuration</td>
 </tr>
 <tr>
-<td>MarketIntelPanel</td>
+<td><code>MultiHazardPanel.tsx</code></td>
+<td>1279</td>
+<td>Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates</td>
+</tr>
+<tr>
+<td><code>MarketIntelPanel.tsx</code></td>
 <td>1202</td>
 <td>8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel</td>
 </tr>
 <tr>
-<td>ToolDialog</td>
-<td>1043</td>
+<td><code>ToolDialog.tsx</code></td>
+<td>1199</td>
 <td>Analysis tool execution: study area, params, grid, execution, results, export</td>
 </tr>
 <tr>
-<td>AnalyticsWorkbench</td>
-<td>353</td>
-<td>150-tool browser: tree/flat search over equations, domains, live-source counts</td>
+<td><code>ScenarioEditor.tsx</code></td>
+<td>1176</td>
+<td>Parameter forms for 7 disaster types with pinned geographic origins</td>
 </tr>
 <tr>
-<td>MultiHazardPanel</td>
-<td>1169</td>
-<td>Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates</td>
+<td><code>HelicopterHud.tsx</code></td>
+<td>1142</td>
+<td>Rotorcraft cockpit HUD: attitude, airspeed, collective tape, rotor RPM, torque</td>
 </tr>
 <tr>
-<td>LaunchReplayPanel</td>
-<td>233</td>
-<td>Scrubbable rocket ascent replay (Launch Library 2)</td>
+<td><code>MetricsDashboard.tsx</code></td>
+<td>1050</td>
+<td>Administrative runtime telemetry, heap inspection, and Prometheus metrics</td>
 </tr>
 <tr>
-<td>RadioTunerPanel</td>
-<td>206</td>
-<td>Analog tuner over 500 geolocated radio stations, stream playback</td>
+<td><code>EvolutionHub.tsx</code></td>
+<td>986</td>
+<td>Self-evolution dashboard: prompt tuning, drift evaluation, and bandit routing</td>
 </tr>
 <tr>
-<td>FirstRunCard</td>
-<td>113</td>
-<td>First-load &quot;stage a mission&quot; card</td>
+<td><code>ChatPanel.tsx</code></td>
+<td>912</td>
+<td>Primary chat interface container with SSE streaming and tool event rendering</td>
 </tr>
 <tr>
-<td>CameraControls</td>
-<td>332</td>
-<td>Zoom slider + log-scale height + fly-to-target</td>
-</tr>
-<tr>
-<td>ForkPanel</td>
-<td>68</td>
-<td>Parallel realities: pause/resume/terminate, divergence score</td>
-</tr>
-<tr>
-<td>LoginModal</td>
-<td>96</td>
+<td><code>LoginModal.tsx</code></td>
+<td>706</td>
 <td>Auth token check, manual login, listens for <code>auth:required</code></td>
+</tr>
+<tr>
+<td><code>MemoryExplorer.tsx</code></td>
+<td>586</td>
+<td>SVG knowledge graph visualizer with circular layout</td>
+</tr>
+<tr>
+<td><code>AdvancedChatViews.tsx</code></td>
+<td>571</td>
+<td>PlanCard, SubAgentActivity, InlineTable, ToolApproval, ModelTierSelector, TraceExpander</td>
+</tr>
+<tr>
+<td><code>LandCoverMapperPanel.tsx</code></td>
+<td>527</td>
+<td>Land cover classification mapper and Copernicus Sentinel integration</td>
+</tr>
+<tr>
+<td><code>FlightTravelView.tsx</code></td>
+<td>507</td>
+<td>Flight deck HUD: compass, altitude/heading tapes, artificial horizon, pitch ladder</td>
+</tr>
+<tr>
+<td><code>CommandPalette.tsx</code></td>
+<td>505</td>
+<td>Cmd+K palette: search layers, locations, actions, toggle overlays, open intel</td>
+</tr>
+<tr>
+<td><code>StudyAreaPanel.tsx</code></td>
+<td>469</td>
+<td>Study area boundary definition: GeoJSON upload, polygon sketching, clipping</td>
+</tr>
+<tr>
+<td><code>SatelliteImageryPanel.tsx</code></td>
+<td>435</td>
+<td>Satellite imagery selector: GIBS, Sentinel-2, Landsat, thermal overlays</td>
+</tr>
+<tr>
+<td><code>AnalyticsWorkbench.tsx</code></td>
+<td>419</td>
+<td>150-tool analytical engine browser: hierarchical search, live context indicators</td>
+</tr>
+<tr>
+<td><code>ScenarioGallery.tsx</code></td>
+<td>371</td>
+<td>Filterable scenario library with thumbnail cards and launch triggers</td>
+</tr>
+<tr>
+<td><code>LiveProcessPanel.tsx</code></td>
+<td>364</td>
+<td>Live agent cognitive pipeline state and execution steps</td>
+</tr>
+<tr>
+<td><code>CameraControls.tsx</code></td>
+<td>338</td>
+<td>Zoom slider, log-scale height control, and camera reorientation</td>
+</tr>
+<tr>
+<td><code>LaunchReplayPanel.tsx</code></td>
+<td>233</td>
+<td>Scrubbable rocket ascent replay via Launch Library 2 telemetry</td>
+</tr>
+<tr>
+<td><code>RadioTunerPanel.tsx</code></td>
+<td>209</td>
+<td>Analog tuner over geolocated global radio streams</td>
+</tr>
+<tr>
+<td><code>IssTravelView.tsx</code></td>
+<td>172</td>
+<td>ISS orbital perspective HUD: nadir/horizon compass, orbital velocity tape</td>
+</tr>
+<tr>
+<td><code>PerformanceMonitor.tsx</code></td>
+<td>152</td>
+<td>Real-time FPS, entity count, primitive tally, memory, and JS heap (Ctrl+Shift+P)</td>
+</tr>
+<tr>
+<td><code>FirstRunCard.tsx</code></td>
+<td>121</td>
+<td>Initial mission setup card for newly initialized sessions</td>
+</tr>
+<tr>
+<td><code>ForkPanel.tsx</code></td>
+<td>304</td>
+<td>Parallel realities manager: pause, resume, branch, divergence score</td>
+</tr>
+<tr>
+<td><code>IssLivePanel.tsx</code></td>
+<td>138</td>
+<td>Live ISS camera feed iframe and orbital position coordinates</td>
 </tr>
 </tbody>
 </table></div>
@@ -314,162 +393,41 @@
 <h3 id="cockpit-srccomponentscockpit">Cockpit (<code>src/components/cockpit/</code>)</h3>
 
 
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Component</th>
-<th>Lines</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>MemoryExplorer</td>
-<td>244</td>
-<td>SVG knowledge graph (circular layout)</td>
-</tr>
-<tr>
-<td>MultiHazardPanel</td>
-<td>1169</td>
-<td>Multi-hazard causal risk chain, IDW risk surface</td>
-</tr>
-</tbody>
-</table></div>
-
-
-<h3 id="chat-srccomponentschat-11-components">Chat (<code>src/components/chat/</code>, 11 components)</h3>
-
-
-<p><code>ChatPanel.tsx</code>, <code>ChatPanelContent.tsx</code>, <code>ChatMessageRow.tsx</code>, <code>ChatTabs.tsx</code>, <code>ChatHistoryPanel.tsx</code>, <code>AdvancedChatViews.tsx</code> (PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander), <code>LiveProcessPanel.tsx</code>, <code>RichMarkdown.tsx</code>, <code>VirtualizedMessageList.tsx</code>, <code>ModelSelector.tsx</code> (LLM provider picker), <code>StudyAreaPrompt.tsx</code> (auto-detect / draw / adjust boundary)</p>
-
-
-<h3 id="collaboration-srccomponentscollaboration">Collaboration (<code>src/components/collaboration/</code>)</h3>
-
-
 <ul>
-<li><code>PresenceComponents.tsx</code> — PresenceIndicator (avatar stack + viewer/typing count), RemoteCursor</li>
+<li><code>MultiHazardPanel.tsx</code> (1,279 lines) — Multi-hazard causal risk chain, IDW risk surface</li>
+<li><code>MemoryExplorer.tsx</code> (586 lines) — SVG knowledge graph visualizer</li>
 </ul>
 
 
-<h3 id="explainability-srccomponentsexplainability">Explainability (<code>src/components/explainability/</code>)</h3>
+<h3 id="chat-srccomponentschat">Chat (<code>src/components/chat/</code>)</h3>
+
+
+<p>11 modular components:</p>
 
 
 <ul>
-<li><code>HumanOverrideBanner.tsx</code> (238L) — pending override approval/rejection</li>
+<li><code>ChatPanel.tsx</code>, <code>ChatPanelContent.tsx</code>, <code>ChatMessageRow.tsx</code>, <code>ChatTabs.tsx</code>, <code>ChatHistoryPanel.tsx</code></li>
+<li><code>AdvancedChatViews.tsx</code> (PlanCard, SubAgentActivity, ToolApproval, ModelTierSelector, TraceExpander)</li>
+<li><code>LiveProcessPanel.tsx</code>, <code>RichMarkdown.tsx</code>, <code>VirtualizedMessageList.tsx</code>, <code>ModelSelector.tsx</code>, <code>StudyAreaPrompt.tsx</code></li>
+</ul>
+
+
+<h3 id="collaboration-explainability">Collaboration &amp; Explainability</h3>
+
+
+<ul>
+<li><code>src/components/collaboration/PresenceComponents.tsx</code> — Avatar stack, typing indicator, remote cursors</li>
+<li><code>src/components/explainability/HumanOverrideBanner.tsx</code> — Human-in-the-loop override review and approvals</li>
 </ul>
 
 
 <h3 id="trackers-srccomponentstrackers">Trackers (<code>src/components/trackers/</code>)</h3>
 
 
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Component</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>AviationTrackerPanel</td>
-<td>Live OpenSky flights, search/filter</td>
-</tr>
-<tr>
-<td>SatelliteTrackerPanel</td>
-<td>TLE catalog (CelesTrak/UCS/Starlink), track button</td>
-</tr>
-</tbody>
-</table></div>
-
-
-<h3 id="scenarios-srccomponentsscenarios">Scenarios (<code>src/components/scenarios/</code>)</h3>
-
-
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Component</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>CinematicDirector.tsx</code></td>
-<td>Camera path animation for disaster fly-throughs</td>
-</tr>
-<tr>
-<td><code>EarthquakeVisualizer.tsx</code></td>
-<td>MMI polygons, P/S/Rayleigh/Love wavefront rings</td>
-</tr>
-<tr>
-<td><code>HurricaneVisualizer.tsx</code>, <code>WildfireVisualizer.tsx</code>, <code>LandslideVisualizer.tsx</code>, <code>VolcanicVisualizer.tsx</code>, <code>FloodWaterSurface.tsx</code></td>
-<td>Per-hazard scenario visualizers</td>
-</tr>
-<tr>
-<td><code>ScenarioEditor.tsx</code></td>
-<td>Parameter forms for 7 disaster types, with globe-pinned origin points (vent / epicentre / hurricane landfall)</td>
-</tr>
-<tr>
-<td><code>ScenarioGallery.tsx</code></td>
-<td>Sortable/filterable grid, search</td>
-</tr>
-<tr>
-<td><code>SpatialSketching.tsx</code>, <code>ScenarioThumbnail.tsx</code></td>
-<td>Supporting visualizers</td>
-</tr>
-</tbody>
-</table></div>
-
-
-<p>Scenario types and colors:</p>
-
-
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Key</th>
-<th>Label</th>
-<th>Color</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>earthquake_swarm</code></td>
-<td>Earthquake</td>
-<td><code>#ef4444</code></td>
-</tr>
-<tr>
-<td><code>hurricane_landfall</code></td>
-<td>Hurricane</td>
-<td><code>#f59e0b</code></td>
-</tr>
-<tr>
-<td><code>wildfire_spread</code></td>
-<td>Wildfire</td>
-<td><code>#ff6b35</code></td>
-</tr>
-<tr>
-<td><code>volcanic_eruption</code></td>
-<td>Volcanic</td>
-<td><code>#d946ef</code></td>
-</tr>
-<tr>
-<td><code>flood_inundation</code></td>
-<td>Flood</td>
-<td><code>#3b82f6</code></td>
-</tr>
-<tr>
-<td><code>tsunami_wave</code></td>
-<td>Tsunami</td>
-<td><code>#06b6d4</code></td>
-</tr>
-<tr>
-<td><code>landslide</code></td>
-<td>Landslide</td>
-<td><code>#78350f</code></td>
-</tr>
-</tbody>
-</table></div>
+<ul>
+<li><code>AviationTrackerPanel.tsx</code> — Live OpenSky flights, callsign search, altitude filtering</li>
+<li><code>SatelliteTrackerPanel.tsx</code> — TLE catalog (CelesTrak, UCS, Starlink), real-time propagation</li>
+</ul>
 
 
 <hr></hr>
@@ -478,10 +436,10 @@
 <h2 id="rendering-engine">Rendering Engine</h2>
 
 
-<p><code>src/rendering/</code> contains <strong>41 rendering modules</strong> that transform live data into Cesium entities, surfaces, and effects.</p>
+<p><code>src/rendering/</code> contains <strong>55 rendering modules</strong> (54 TypeScript modules and 1 type declaration) that transform live feeds and computational outputs into Cesium entities, primitives, and shaders.</p>
 
 
-<h3 id="data-entity-modules">Data &amp; Entity Modules</h3>
+<h3 id="1-aerospace-rotorcraft-simulation-11-modules">1. Aerospace &amp; Rotorcraft Simulation (11 modules)</h3>
 
 
 <div class="table-scroll"><table>
@@ -493,82 +451,164 @@
 </thead>
 <tbody>
 <tr>
-<td><code>ais.ts</code></td>
-<td>Maritime AIS vessel positions/tracks</td>
+<td><code>helicopterSim.ts</code></td>
+<td>6-DOF rotorcraft flight dynamics, collective/cyclic/pedals, ground effect, autorotation</td>
 </tr>
 <tr>
-<td><code>aviation.ts</code></td>
-<td>Flight tracking</td>
+<td><code>apacheModel.ts</code></td>
+<td>AH-64 Apache glTF geometry generation, rotor articulation, weapon pylons, gear</td>
 </tr>
 <tr>
-<td><code>flights.ts</code></td>
-<td>Flight route arcs</td>
+<td><code>heliCameraRig.ts</code></td>
+<td>Camera modes: chase close, chase wide, cockpit POV, top-down, external orbit</td>
 </tr>
 <tr>
-<td><code>earthquakes.ts</code></td>
-<td>Earthquake markers</td>
+<td><code>heliCockpitScreens.ts</code></td>
+<td>Glass cockpit MFD screen management and attitude direction indicator</td>
 </tr>
 <tr>
-<td><code>satelliteDataSources.ts</code></td>
-<td>TLE orbit propagation &amp; rendering</td>
+<td><code>heliControls.ts</code></td>
+<td>Flight controls keyboard/gamepad binding, trim axes, collective hold</td>
 </tr>
 <tr>
-<td><code>satelliteImagery.ts</code></td>
-<td>GIBS/XYZ/WMS imagery layers</td>
+<td><code>heliHeadModel.ts</code></td>
+<td>Pilot head model and responsive look-at interpolation</td>
 </tr>
 <tr>
-<td><code>satnogs.ts</code></td>
-<td>SatNOGS transmitter/frequency records</td>
+<td><code>heliInstrPaint.ts</code></td>
+<td>Canvas 2D instrument cluster rendering: altimeter, airspeed, torque, VVI</td>
 </tr>
 <tr>
-<td><code>osmBuildings.ts</code></td>
-<td>OSM 3D building extrusion</td>
+<td><code>heliAudio.ts</code></td>
+<td>Web Audio API turbine whine, rotor blade slap, and audio stall warnings</td>
 </tr>
 <tr>
-<td><code>ucsSatelliteDb.ts</code></td>
-<td>UCS satellite database</td>
+<td><code>cockpitAnchors.ts</code></td>
+<td>3D cockpit space to 2D screen coordinate projection anchors</td>
 </tr>
 <tr>
-<td><code>tectonic.ts</code></td>
-<td>Tectonic plate data</td>
+<td><code>gltfBuilder.ts</code></td>
+<td>Procedural glTF 2.0 binary asset compilation for dynamic 3D models</td>
 </tr>
 <tr>
-<td><code>weather.ts</code></td>
-<td>Weather data</td>
-</tr>
-<tr>
-<td><code>trajectoryPredictor.ts</code></td>
-<td>Trajectory prediction</td>
-</tr>
-<tr>
-<td><code>tomtomTraffic.ts</code></td>
-<td>Per-segment street-level traffic flow (TomTom Flow Segment API)</td>
-</tr>
-<tr>
-<td><code>cctvViewshed.ts</code></td>
-<td>Webcam coverage cones</td>
-</tr>
-<tr>
-<td><code>launchReplay.ts</code></td>
-<td>Rocket ascent reconstruction</td>
-</tr>
-<tr>
-<td><code>aircraftHangar.ts</code></td>
-<td>Flight glyphs → 3D glTF models (LOD)</td>
-</tr>
-<tr>
-<td><code>osrmRoute.ts</code></td>
-<td>Street-following route + camera fly-through</td>
-</tr>
-<tr>
-<td><code>radioWave.ts</code></td>
-<td>Radio tuner globe wave animation</td>
+<td><code>m4.ts</code></td>
+<td>4x4 matrix transformation mathematics for articulated entities</td>
 </tr>
 </tbody>
 </table></div>
 
 
-<h3 id="spatial-analysis-modules">Spatial &amp; Analysis Modules</h3>
+<h3 id="2-live-tracking-trajectory-12-modules">2. Live Tracking &amp; Trajectory (12 modules)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aviation.ts</code></td>
+<td>Live flight position tracking and military airspace integration</td>
+</tr>
+<tr>
+<td><code>flights.ts</code></td>
+<td>Great-circle flight route arcs and altitude-band hypsometric color ramps</td>
+</tr>
+<tr>
+<td><code>aircraftHangar.ts</code></td>
+<td>Level-of-detail model management for commercial and military aircraft glyphs</td>
+</tr>
+<tr>
+<td><code>ais.ts</code></td>
+<td>Maritime AIS vessel positioning, heading vectors, and track histories</td>
+</tr>
+<tr>
+<td><code>satelliteDataSources.ts</code></td>
+<td>NORAD SGP4/SDP4 TLE orbit propagation and real-time footprint rendering</td>
+</tr>
+<tr>
+<td><code>satnogs.ts</code></td>
+<td>SatNOGS satellite transmitter and radio frequency ground station records</td>
+</tr>
+<tr>
+<td><code>ucsSatelliteDb.ts</code></td>
+<td>Union of Concerned Scientists satellite database overlay and country queries</td>
+</tr>
+<tr>
+<td><code>trajectoryPredictor.ts</code></td>
+<td>Ballistic and orbital trajectory prediction paths</td>
+</tr>
+<tr>
+<td><code>launchReplay.ts</code></td>
+<td>Rocket launch ascent trajectory reconstruction from launch logs</td>
+</tr>
+<tr>
+<td><code>cctvViewshed.ts</code></td>
+<td>Public CCTV camera location markers, ground-projected FOV frustum viewsheds</td>
+</tr>
+<tr>
+<td><code>tomtomTraffic.ts</code></td>
+<td>Per-segment street-level traffic flow speeds via TomTom Flow API</td>
+</tr>
+<tr>
+<td><code>osrmRoute.ts</code></td>
+<td>Street-network routing polyline generation and camera fly-through</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="3-earth-observation-geospatial-layers-8-modules">3. Earth Observation &amp; Geospatial Layers (8 modules)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>satelliteImagery.ts</code></td>
+<td>NASA GIBS, XYZ, and WMS imagery layer orchestration</td>
+</tr>
+<tr>
+<td><code>photorealisticGlobe.ts</code></td>
+<td>Google Photorealistic 3D Tiles integration (Cesium Ion asset 2275207)</td>
+</tr>
+<tr>
+<td><code>osmBuildings.ts</code></td>
+<td>OpenStreetMap 3D building extrusion via Cesium 3D Tiles</td>
+</tr>
+<tr>
+<td><code>domainLayers.ts</code></td>
+<td>Power grids, submarine cables, gas storage, animal migration, space debris</td>
+</tr>
+<tr>
+<td><code>primitiveLayers.ts</code></td>
+<td>High-performance Cesium PrimitiveCollection management</td>
+</tr>
+<tr>
+<td><code>tectonic.ts</code></td>
+<td>Tectonic plate boundary fault lines and velocity vectors</td>
+</tr>
+<tr>
+<td><code>earthquakes.ts</code></td>
+<td>Real-time USGS earthquake markers, magnitude scaling, and seismic wavefront rings</td>
+</tr>
+<tr>
+<td><code>weather.ts</code></td>
+<td>Storm tracks, radar precipitation sites, drought zones, climate anomaly indices</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="4-spatial-analysis-surfaces-archaeology-8-modules">4. Spatial Analysis, Surfaces &amp; Archaeology (8 modules)</h3>
 
 
 <div class="table-scroll"><table>
@@ -581,45 +621,41 @@
 <tbody>
 <tr>
 <td><code>surfaceRenderer.ts</code></td>
-<td>IDW interpolation surface rendering</td>
-</tr>
-<tr>
-<td><code>gisFusion.ts</code></td>
-<td>GIS data fusion for risk surfaces</td>
-</tr>
-<tr>
-<td><code>studyArea.ts</code></td>
-<td>GeoJSON upload/draw/export/fly-to</td>
+<td>View-dependent resolution grid generation, canvas texture colormaps</td>
 </tr>
 <tr>
 <td><code>idwInterpolation.ts</code></td>
-<td>IDW interpolation algorithm</td>
+<td>Inverse Distance Weighting interpolation with KD-tree spatial sampling</td>
 </tr>
 <tr>
-<td><code>domainLayers.ts</code></td>
-<td>Domain-specific layer management</td>
+<td><code>studyArea.ts</code></td>
+<td>Study area boundary clipping, GeoJSON containment checks, bounding box computation</td>
+</tr>
+<tr>
+<td><code>gisFusion.ts</code></td>
+<td>Multi-source GIS data fusion for spatial risk indexing</td>
 </tr>
 <tr>
 <td><code>physicsSurrogates.ts</code></td>
-<td>Liquefaction, dispersion, wildfire, flood surrogates</td>
+<td>Rapid surrogates for liquefaction, dispersion, wildfire, and flood</td>
 </tr>
 <tr>
-<td><code>layerRenderer.ts</code></td>
-<td>Generic layer rendering abstraction</td>
+<td><code>archaeologyOverlay.ts</code></td>
+<td>LiDAR hillshade anomaly detection, cropmark/soilmark filters, mound extraction</td>
 </tr>
 <tr>
 <td><code>toolResultParser.ts</code></td>
-<td>Tool result parsing</td>
+<td>Tool output parsing into spatial entity coordinates</td>
 </tr>
 <tr>
 <td><code>formatStepResult.ts</code></td>
-<td>Step result formatting</td>
+<td>Multi-step calculation result formatting for map display</td>
 </tr>
 </tbody>
 </table></div>
 
 
-<h3 id="cognition-effects">Cognition &amp; Effects</h3>
+<h3 id="5-causal-cognition-scenarios-8-modules">5. Causal Cognition &amp; Scenarios (8 modules)</h3>
 
 
 <div class="table-scroll"><table>
@@ -632,51 +668,82 @@
 <tbody>
 <tr>
 <td><code>scenarioEngine.ts</code></td>
-<td>What-if scenario definition/rollout/diff</td>
+<td>What-if scenario definition, temporal rollout, and state differentiation</td>
 </tr>
 <tr>
 <td><code>causalGraph.ts</code></td>
-<td>Noisy-OR causal Bayesian network</td>
+<td>Noisy-OR causal Bayesian network graph structure and inference</td>
 </tr>
 <tr>
 <td><code>blackboard.ts</code></td>
-<td>Blackboard pattern for probability writing</td>
+<td>Shared blackboard pattern for cognitive probability distribution updates</td>
 </tr>
 <tr>
-<td><code>ghostEntity.ts</code> / <code>ghostProtocol.ts</code></td>
-<td>Ghost entity rendering + protocol</td>
+<td><code>ghostEntity.ts</code></td>
+<td>Ghost entity rendering for counterfactual alternative branches</td>
+</tr>
+<tr>
+<td><code>ghostProtocol.ts</code></td>
+<td>State synchronization protocol for counterfactual scenarios</td>
 </tr>
 <tr>
 <td><code>entropyHalo.ts</code></td>
-<td>Entropy halo visualization</td>
+<td>Visual entropy halo indicating state uncertainty on the globe</td>
 </tr>
 <tr>
 <td><code>forkRenderer.ts</code></td>
-<td>Parallel reality fork rendering</td>
+<td>Visual branch visualization for parallel realities</td>
 </tr>
 <tr>
 <td><code>oracleChains.ts</code></td>
-<td>Oracle chain visualization</td>
+<td>Causal chain link visualization connecting initiating triggers to outcomes</td>
 </tr>
+</tbody>
+</table></div>
+
+
+<h3 id="6-visual-effects-camera-utilities-8-modules">6. Visual Effects, Camera &amp; Utilities (8 modules)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td><code>sensorStyles.ts</code></td>
-<td>GLSL sensor looks (CRT · NVG · FLIR · Noir · Snow)</td>
-</tr>
-<tr>
-<td><code>photorealisticGlobe.ts</code></td>
-<td>Google Photorealistic 3D Tiles (Cesium Ion asset 2275207)</td>
+<td>PostProcessStage GLSL shaders (CRT, NVG, FLIR thermal, Noir, Snow)</td>
 </tr>
 <tr>
 <td><code>cinematicCamera.ts</code></td>
-<td>Tick-based camera engine (orbit/pan/tilt/rotate, route dolly)</td>
+<td>Camera movement engine (orbit, pan, tilt, rotate, dolly transitions)</td>
+</tr>
+<tr>
+<td><code>cinematicSpline.ts</code></td>
+<td>Catmull-Rom and Hermite spline camera interpolation for fly-throughs</td>
 </tr>
 <tr>
 <td><code>detectionOverlay.ts</code></td>
-<td>Screen-space bounding boxes over live entities</td>
+<td>Screen-space bounding boxes and tracking reticles over live entities</td>
 </tr>
 <tr>
 <td><code>navigation.ts</code></td>
-<td>Navigation utilities</td>
+<td>Spherical navigation math, safe facility routing, distance metrics</td>
+</tr>
+<tr>
+<td><code>layerRenderer.ts</code></td>
+<td>Dynamic layer fetching and visual rendering abstraction</td>
+</tr>
+<tr>
+<td><code>radioWave.ts</code></td>
+<td>Animated electromagnetic radiation ring propagation from transmitter points</td>
+</tr>
+<tr>
+<td><code>shpjs.d.ts</code></td>
+<td>TypeScript declarations for Shapefile parser integration</td>
 </tr>
 </tbody>
 </table></div>
@@ -685,7 +752,7 @@
 <hr></hr>
 
 
-<h2 id="simulation-overlays">Simulation overlays</h2>
+<h2 id="simulation-overlays">Simulation Overlays</h2>
 
 
 <h3 id="shared-core-srccomponentskaggle">Shared Core (<code>src/components/kaggle/</code>)</h3>
@@ -702,28 +769,28 @@
 <tbody>
 <tr>
 <td><code>KaggleScalarOverlay.tsx</code></td>
-<td>680</td>
-<td>Generic scalar field renderer (raster → Cesium surface, colormap legend, animation)</td>
+<td>677</td>
+<td>Scalar field renderer (raster to Cesium surface, colormap legend, timeline)</td>
 </tr>
 <tr>
 <td><code>VolcanoEnsembleOverlay.tsx</code></td>
 <td>310</td>
-<td>Volcano ensemble (lava + ash) overlay</td>
+<td>Combined volcanic ensemble (lava flow thickness + ash dispersal) overlay</td>
 </tr>
 <tr>
 <td><code>shared.ts</code></td>
 <td>505</td>
-<td>Shared colormaps, color stops, config types</td>
+<td>Colormaps, color stops, contour thresholds, and simulation configuration types</td>
 </tr>
 <tr>
 <td><code>KaggleLegend.tsx</code></td>
 <td>113</td>
-<td>Legend component</td>
+<td>Interactive colormap scale and unit display</td>
 </tr>
 <tr>
 <td><code>KaggleAnimationControls.tsx</code></td>
 <td>116</td>
-<td>Animation timeline controls</td>
+<td>Simulation playback controls (play, pause, step, speed)</td>
 </tr>
 </tbody>
 </table></div>
@@ -732,7 +799,7 @@
 <h3 id="gpu-primitives-srccomponentskagglegpu">GPU Primitives (<code>src/components/kaggle/gpu/</code>)</h3>
 
 
-<p><code>ScalarSurfacePrimitive.ts</code>, <code>ArrowFieldPrimitive.ts</code>, <code>ParticleAdvector.ts</code>, <code>cesiumRuntime.ts</code>, <code>cfdColormaps.ts</code>, <code>fieldData.ts</code>, <code>terrain.ts</code></p>
+<p><code>ScalarSurfacePrimitive.ts</code> (492L), <code>ArrowFieldPrimitive.ts</code> (721L), <code>ParticleAdvector.ts</code> (399L), <code>cesiumRuntime.ts</code>, <code>cfdColormaps.ts</code>, <code>fieldData.ts</code>, <code>terrain.ts</code>.</p>
 
 
 <h3 id="disaster-wrappers-srccomponents">Disaster Wrappers (<code>src/components/</code>)</h3>
@@ -748,31 +815,31 @@
 <tbody>
 <tr>
 <td><code>KaggleEarthquakeOverlay.tsx</code></td>
-<td>PGA / PGV / MMI / Sa</td>
+<td>Peak Ground Acceleration (PGA), PGV, Instrumental MMI, Spectral Acceleration</td>
 </tr>
 <tr>
 <td><code>KaggleFloodOverlay.tsx</code></td>
-<td>Water depth + terrain</td>
+<td>Water depth, velocity vectors, flooded terrain surface</td>
 </tr>
 <tr>
 <td><code>KaggleHurricaneOverlay.tsx</code></td>
-<td>Wind speed + surge + rainfall</td>
+<td>Sustained wind speed, storm surge height, precipitation rate</td>
 </tr>
 <tr>
 <td><code>KaggleLandslideOverlay.tsx</code></td>
-<td>Debris depth + velocity + runout</td>
+<td>Debris flow depth, velocity field, deposit runout extent</td>
 </tr>
 <tr>
 <td><code>KaggleTsunamiOverlay.tsx</code></td>
-<td>Wave height + bathymetry</td>
+<td>Wave elevation, propagation time, coastal runup</td>
 </tr>
 <tr>
 <td><code>KaggleVolcanoOverlay.tsx</code></td>
-<td>Ash deposit + lava thickness</td>
+<td>Lava flow thickness, tephra fallout, column height</td>
 </tr>
 <tr>
 <td><code>KaggleWildfireOverlay.tsx</code></td>
-<td>Fire intensity + fire state</td>
+<td>Fire front perimeter, rate of spread, flame length, fire intensity</td>
 </tr>
 </tbody>
 </table></div>
@@ -794,31 +861,31 @@
 <tbody>
 <tr>
 <td><code>useChat</code></td>
-<td>Chat pipeline: SSE streaming, tool calls, analytical-result auto-render</td>
+<td>Chat pipeline: SSE streaming, function calling, automated result visualization</td>
 </tr>
 <tr>
 <td><code>useChatSelectors</code></td>
-<td>Zustand selectors for chat UI state</td>
+<td>Selective Zustand subscribers minimizing re-renders in chat views</td>
 </tr>
 <tr>
 <td><code>useWebSocket</code></td>
-<td>WebSocket connection manager</td>
+<td>WebSocket connection manager for live entity feeds and alert pub/sub</td>
 </tr>
 <tr>
 <td><code>useCollaboration</code></td>
-<td>Real-time presence: join/heartbeat, typing, cursor position</td>
+<td>Multi-user presence: join/leave, heartbeat, typing indicator, remote cursors</td>
 </tr>
 <tr>
 <td><code>useKaggleSimulation</code></td>
-<td>Simulation job lifecycle (local CPU kernels or Kaggle kernels)</td>
+<td>Simulation job lifecycle for local CPU kernels and Kaggle dispatched jobs</td>
 </tr>
 <tr>
 <td><code>useOfflineChat</code></td>
-<td>Offline banner + local fallback</td>
+<td>Offline connectivity detection and local fallback agent switching</td>
 </tr>
 <tr>
 <td><code>useRealtimeVoice</code></td>
-<td>Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge</td>
+<td>Low-latency voice interaction via OpenAI Realtime with Gemini Live fallback</td>
 </tr>
 </tbody>
 </table></div>
@@ -830,14 +897,36 @@
 <h2 id="state-data">State &amp; Data</h2>
 
 
-<p>| Store | Purpose |
-|---|---|---|
-| <code>AuthContext</code> | Authentication state, token refresh |
-| <code>chatStore</code> (Zustand) | Chat messages, UI state, model selection, study-area bbox |
-| <code>userPrefStore</code> (Zustand) | User location + timezone preference (persisted, applied globally) |
-| <code>useChatSelectors</code> | Derived selectors |
-| <code>src/data/</code> | Analytical models catalog, land cover classes |
-| <code>src/lib/</code> | API client, chat store, <code>formatTime.ts</code> (timezone-aware formatting), PDF |</p></div>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AuthContext</code></td>
+<td>User authentication state, role permissions, token refresh lifecycle</td>
+</tr>
+<tr>
+<td><code>chatStore</code> (Zustand)</td>
+<td>Chat messages, model configuration, study-area coordinates, tool cards</td>
+</tr>
+<tr>
+<td><code>userPrefStore</code> (Zustand)</td>
+<td>Location preference, timezone preference (persisted in localStorage)</td>
+</tr>
+<tr>
+<td><code>src/data/</code></td>
+<td>Analytical models metadata catalog (150 tools), land cover class definitions</td>
+</tr>
+<tr>
+<td><code>src/lib/</code></td>
+<td>API client (<code>api.ts</code>), desktop helpers (<code>desktop.ts</code>), time formatting (<code>formatTime.ts</code>), PDF reports</td>
+</tr>
+</tbody>
+</table></div></div>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

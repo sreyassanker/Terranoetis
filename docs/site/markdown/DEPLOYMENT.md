@@ -9,6 +9,7 @@ Terranoetis runs in a Docker Compose stack with three services, or directly with
 - [Prerequisites](#prerequisites)
 - [Quick Start (Development)](#quick-start-development)
 - [Docker Deployment](#docker-deployment)
+- [Desktop Packaging (Tauri v2)](#desktop-packaging-tauri-v2)
 - [Configuration](#configuration)
 - [Environment Variables](#environment-variables)
 - [CI/CD Pipeline](#cicd-pipeline)
@@ -105,6 +106,20 @@ docker compose up -d    # Restart with rebuilt images
 
 ---
 
+## Desktop Packaging (Tauri v2)
+
+Terranoetis is also packaged as a zero-dependency native desktop application via **Tauri v2** with an embedded Node.js intelligence engine:
+
+- **Frontend Core**: React 19 + Cesium 3D geospatial engine, bundled with Vite and WebAssembly modules (`onnxruntime-web`).
+- **Backend Bundle**: Self-contained Node 20 ESM server bundle (`dist-server/server.mjs`) compiled via `esbuild`. All 150 analytical models, WebSocket streams, and REST endpoints are packaged directly into the application's native resources.
+- **AppData Directory Isolation**: State and encrypted credentials reside in OS application data directories:
+  - macOS: `~/Library/Application Support/Terranoetis/`
+  - Windows: `%APPDATA%\Terranoetis\`
+  - Linux: `~/.local/share/terranoetis/`
+- **Packaging Command**: `npm run tauri:build` emits `Terranoetis.app` / `.dmg` (macOS), NSIS/MSI installers (Windows), and AppImage/deb (Linux). See `DISTRIBUTION.md` for full code-signing and notarization instructions.
+
+---
+
 ## Configuration
 
 ### Ports
@@ -194,7 +209,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on p
 
 ### CI Notes
 
-- **Node version:** 20 (specified in workflow and `.nvmrc`; the verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)
+- **Node version:** 20 (specified in workflow and `.nvmrc`; the test suite executes 1,794 unit + 49 integration tests passing, totalling 1,843 tests across 158 test files)
 - **Docs quality gate:** `.github/workflows/docs.yml` runs on pushes/PRs to `main`/`develop` touching `docs/site/**`, `scripts/docs/**`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, or the workflow itself; `deploy-docs.yml` publishes `docs/site/` to GitHub Pages (workflow deploy; also manually dispatchable)
 - **Browser tests** run headless in CI on `ubuntu-latest` using Chromium with software WebGL (`--use-gl=angle --enable-unsafe-swiftshader`), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.
 - **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)

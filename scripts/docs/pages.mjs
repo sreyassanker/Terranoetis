@@ -23,8 +23,8 @@ export const CORE_PAGES = [
       { kind: 'h2', id: 'verified-facts', title: 'Verified at a glance' },
       { kind: 'metrics', items: [
         verifiedFact('Analytical engines', '150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically', src('src/data/analyticalModels.ts', '801+') + src('server/analytical-models/engine.ts', '1-174')),
-        verifiedFact('Equation-engine tests', '1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code>', srcRaw('measured')),
-        verifiedFact('Integration tests', '49 passed (5 files, 5.66 s) with <code>npm run test:integration</code>', srcRaw('measured')),
+        verifiedFact('Equation-engine tests', '1,794 unit tests passed (153 files) with <code>npm run test:unit</code>', srcRaw('measured')),
+        verifiedFact('Integration tests', '49 passed (5 files) with <code>npm run test:integration</code> (1,843 tests total)', srcRaw('measured')),
         verifiedFact('Simulation kernels', '7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata.', src(SR, '126-141') + ' ' + srcRaw('kaggle-kernels/*/kernel-metadata.json')),
         verifiedFact('Hazard physics', 'All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a>', srcRaw('measured')),
         verifiedFact('Citations', '150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302)', srcRaw('src/data/analyticalModels.ts (counted)')),
@@ -32,6 +32,8 @@ export const CORE_PAGES = [
       { kind: 'h2', id: 'explore', title: 'Where to go next' },
       { kind: 'cards', items: [
         { href: 'getting-started.html', title: 'Getting started', desc: 'Install, run, verify: the five-minute local setup with measured outputs.' },
+        { href: 'download.html', title: 'Download Desktop', desc: 'Standalone Tauri v2 desktop package for macOS (Apple Silicon arm64 .app/.dmg), Windows, and Linux.' },
+        { href: 'gallery.html', title: 'Visual gallery', desc: 'Visual exhibits across hazard simulations, live entities, and analytical risk fields.' },
         { href: 'architecture.html', title: 'Platform architecture', desc: 'Three-tier topology, request lifecycle, background services.' },
         { href: 'capabilities/hazard-simulations.html', title: 'Hazard simulations', desc: 'Seven physics kernels: modes, contracts, measured timings.' },
         { href: 'capabilities/earthquake.html', title: 'Earthquake', desc: 'BSSA14 GMPE ShakeMap · local CPU · measured 0.008 s compute.' },
@@ -42,11 +44,11 @@ export const CORE_PAGES = [
         { href: 'capabilities/hurricane.html', title: 'Hurricane', desc: 'Holland wind + SWE surge + waves + rainfall + runoff · gates PASS.' },
         { href: 'capabilities/wildfire.html', title: 'Wildfire', desc: 'Rothermel/Anderson-13 · K_ROS calibration PASS measured.' },
         { href: 'capabilities/analytical-engine.html', title: 'Analytical equation engine', desc: '150 engines · 7-stage workflow · honest-NaN contract.' },
-        { href: 'capabilities/ai-cognition.html', title: 'AI chat & cognition', desc: 'Intent routing, System 1 / System 2, 9-provider Omninet router.' },
-        { href: 'capabilities/live-data-and-monitoring.html', title: 'Live data & monitoring', desc: '82 registered external APIs, Sentinel polling, reflex actions.' },
+        { href: 'capabilities/ai-cognition.html', title: 'AI chat & cognition', desc: 'Intent routing, System 1 / System 2, 10-provider Omninet router.' },
+        { href: 'capabilities/live-data-and-monitoring.html', title: 'Live data & monitoring', desc: '90 configured API metadata entries (82 active external feeds), Sentinel polling, reflex actions.' },
         { href: 'capabilities/world-model-and-causal.html', title: 'World model & causal reasoning', desc: 'Causal graph, ensemble predictor, forecast ledger, KG v2.' },
         { href: 'capabilities/memory.html', title: 'Memory system', desc: 'Tiered working/episodic/semantic memory with SQLite + Redis hot path.' },
-        { href: 'capabilities/globe-visualization.html', title: '3D globe visualization', desc: 'React 19 + Cesium 1.140; 41 rendering modules (counted).' },
+        { href: 'capabilities/globe-visualization.html', title: '3D globe visualization', desc: 'React 19 + Cesium 1.140; 55 rendering modules (counted).' },
         { href: 'capabilities/platform-services.html', title: 'Platform services', desc: 'Auth, rate limits, sandbox, queue, plugins, observability.' },
         { href: 'reference/api.html', title: 'REST & WebSocket API', desc: 'Endpoint map, auth model, error envelope; canonical list in API.md.' },
         { href: 'reference/simulation-api.html', title: 'Simulation job API', desc: 'Parameter contracts, job lifecycle, results formats, UQ endpoints.' },
@@ -65,14 +67,252 @@ export const CORE_PAGES = [
       ]},
       { kind: 'h2', id: 'repo-map', title: 'Repository map' },
       { kind: 'table', caption: 'Top-level layout', cols: ['Path', 'Contents'], rows: [
-        ['<code>src/</code>', 'React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)'],
-        ['<code>server/</code>', 'Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db'],
+        ['<code>src/</code>', 'React 19 + CesiumJS client (App shell 14,451 lines, components/, rendering/ 55 modules, hooks, lib, services, store)'],
+        ['<code>server/</code>', 'Express API: index.ts (15,927 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db (48 tables)'],
         ['<code>kaggle-kernels/</code>', 'Seven Python simulation kernels + per-kernel metadata; runtime output goes to <code>results/&lt;jobId&gt;/</code> (gitignored)'],
         ['<code>docs/</code>', 'This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap'],
-        ['<code>e2e/</code>', 'Playwright specs (7 files; 15 test declarations, 14 registered by default — 1 gated behind <code>LULC_HEAVY=1</code>)'],
+        ['<code>e2e/</code>', 'Playwright specs (29 files; 62 registered tests by default — 1 gated behind <code>LULC_HEAVY=1</code>; 63 total declarations)'],
         ['<code>scripts/</code>', 'Dev utilities, live smoke scripts, docs build + quality gate'],
         ['<code>.github/workflows/</code>', 'ci.yml (10 jobs) + docs.yml (quality gate)'],
       ]},
+    ],
+  },
+
+  // ═════════════════════════════ DOWNLOAD PAGE ══════════════════════════
+  {
+    path: 'download.html', depth: 0,
+    title: 'Download Terranoetis Desktop',
+    desc: 'Download the native desktop release of Terranoetis (Tauri v2) for macOS (Apple Silicon arm64 .app and .dmg), or access Windows, Linux, and local web setups.',
+    breadcrumb: [{ label: 'Download Desktop' }],
+    tags: ['<span class="tag tag-measured">v3.0.0 PRODUCTION BUILD</span>', '<span>TAURI v2</span>'],
+    sections: [
+      { kind: 'h2', id: 'platforms', title: 'Supported platforms & download packages' },
+      { kind: 'raw', html: `
+<div class="download-grid">
+  <!-- macOS Apple Silicon -->
+  <article class="download-card featured">
+    <div class="download-header">
+      <div class="download-platform-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></svg>
+      </div>
+      <span class="download-badge primary">Recommended &middot; arm64</span>
+    </div>
+    <h3 class="download-title" id="macos">macOS (Apple Silicon)</h3>
+    <p class="download-meta">Native Mach-O 64-bit arm64 binary compiled for Apple Silicon (M1/M2/M3/M4). Runs on macOS 11.0 (Big Sur) and newer, including macOS Sonoma and Sequoia.</p>
+    <div class="download-actions">
+      <a href="https://github.com/sreyassanker/Terranoetis/releases/download/v3.0.0/Terranoetis_3.0.0_aarch64.app.zip" class="download-btn primary" download>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download .app (ZIP &middot; 50 MB)
+      </a>
+      <a href="https://github.com/sreyassanker/Terranoetis/releases/download/v3.0.0/Terranoetis_3.0.0_aarch64.dmg" class="download-btn secondary" download>
+        Download .dmg (Installer &middot; 52 MB)
+      </a>
+    </div>
+  </article>
+
+  <!-- Windows -->
+  <article class="download-card">
+    <div class="download-header">
+      <div class="download-platform-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+      </div>
+      <span class="download-badge secondary">Windows x64</span>
+    </div>
+    <h3 class="download-title" id="windows">Windows</h3>
+    <p class="download-meta">Desktop build configuration via Tauri v2 with WiX (.msi) and NSIS (.exe) packaging configured in the repository CI release workflow.</p>
+    <div class="download-actions">
+      <a href="https://github.com/sreyassanker/Terranoetis/releases/tag/v3.0.0" class="download-btn secondary" target="_blank" rel="noopener">
+        View Release Assets on GitHub &nearr;
+      </a>
+      <a href="getting-started.html#install" class="download-btn secondary">
+        Run Locally via Node.js 20+ &rarr;
+      </a>
+    </div>
+    <div class="download-note">
+      Can also be compiled directly from source with <code>npm run tauri:build</code> on Windows with Rust and MSVC C++ Build Tools installed.
+    </div>
+  </article>
+
+  <!-- Linux -->
+  <article class="download-card">
+    <div class="download-header">
+      <div class="download-platform-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 8 3 3-3 3"/><line x1="13" x2="15" y1="14" y2="14"/></svg>
+      </div>
+      <span class="download-badge secondary">Linux x86_64</span>
+    </div>
+    <h3 class="download-title" id="linux">Linux</h3>
+    <p class="download-meta">Stand-alone AppImage and Debian (.deb) desktop configurations using WebKit2GTK-4.1, plus standard containerized deployment.</p>
+    <div class="download-actions">
+      <a href="https://github.com/sreyassanker/Terranoetis/releases/tag/v3.0.0" class="download-btn secondary" target="_blank" rel="noopener">
+        View Release Assets on GitHub &nearr;
+      </a>
+      <a href="deployment.html#stack" class="download-btn secondary">
+        Deployment Stack Guide &rarr;
+      </a>
+    </div>
+    <div class="download-note">
+      Build native packages locally on Ubuntu/Debian using <code>sudo apt install libwebkit2gtk-4.1-dev && npm run tauri:build</code>.
+    </div>
+  </article>
+</div>
+` },
+      { kind: 'h2', id: 'checksums', title: 'Cryptographic SHA-256 checksums' },
+      { kind: 'table', caption: 'Computed directly from the production release assets', cols: ['Asset filename', 'Platform / Arch', 'Size', 'SHA-256 checksum'], rows: [
+        ['<code>Terranoetis_3.0.0_aarch64.app.zip</code>', 'macOS (arm64 Apple Silicon)', '50.33 MB', '<code>7b6df978baf031d3878f9c00ea0e014839feb53223a03c0876a2ec7bf26d45d4</code>'],
+        ['<code>Terranoetis_3.0.0_aarch64.dmg</code>', 'macOS (arm64 Apple Silicon)', '51.74 MB', '<code>05375a18c5a546c9ddd45cef7946923bdf2502700c54cd9c1a80b422c9039c10</code>'],
+      ]},
+      { kind: 'h2', id: 'architecture', title: 'Desktop architecture and verified contracts' },
+      { kind: 'table', caption: 'Verified technical specifications of the desktop application bundle', cols: ['Subsystem', 'Desktop implementation contract', 'Verified source citation'], rows: [
+        ['Application shell', 'Tauri v2 native Rust wrapper embedding the system WebKit engine', srcRaw('src-tauri/tauri.conf.json:1-35')],
+        ['Analytical server', 'Embedded Express 4 + TypeScript production bundle hosted on internal loopback port', srcRaw('src-tauri/target/release/bundle/macos/Terranoetis.app/Contents/Resources/_up_/dist-server/server.mjs')],
+        ['Data persistence', 'Local SQLite 3 database with 48 relational schema tables', src('server/db/schema.sql', '1-480')],
+        ['3D Earth visualization', 'CesiumJS 1.140 with 55 modular WebGL rendering engines', src('src/rendering/gisFusion.ts', '1-300')],
+        ['Analytical models', '150 deterministic scientific equations (80 DOI, 12 ISBN, 4 flagged NO-DOI)', src('server/analytical-models/engine.ts', '1-174')],
+        ['Test verification', '1,843 automated tests passing in test suite (1,794 unit + 49 integration)', srcRaw('measured')],
+      ]},
+    ],
+  },
+
+  // ═════════════════════════════ VISUAL GALLERY ══════════════════════════
+  {
+    path: 'gallery.html', depth: 0,
+    title: 'Visual Gallery',
+    desc: 'Visual exhibits of live CesiumJS 3D globe layers, hazard simulation outputs, spatial analysis fields, and aerospace telemetry in Terranoetis.',
+    breadcrumb: [{ label: 'Visual Gallery' }],
+    tags: ['<span class="tag tag-measured">EXHIBITS VERIFIED</span>'],
+    sections: [
+      { kind: 'lede', html: `The Terranoetis Visual Gallery showcases actual renderings, simulation timesteps, and spatial analysis fields generated by the platform. These exhibits demonstrate the multi-hazard risk fusion, physical simulation kernels, orbital satellite tracking, and global aviation monitoring running on the WebGL globe.` },
+      { kind: 'raw', html: `
+<div class="gallery-filters" role="tablist" aria-label="Gallery categories">
+  <button type="button" class="gallery-filter-btn active" data-filter="all">All exhibits</button>
+  <button type="button" class="gallery-filter-btn" data-filter="sim">Hazard simulations</button>
+  <button type="button" class="gallery-filter-btn" data-filter="track">Real-time globe &amp; tracking</button>
+  <button type="button" class="gallery-filter-btn" data-filter="spatial">Spatial analysis &amp; risk</button>
+  <button type="button" class="gallery-filter-btn" data-filter="aero">Aerospace &amp; flight</button>
+</div>
+
+<div class="gallery-grid">
+  <!-- Exhibit 1: Multi-Hazard Fusion -->
+  <article class="gallery-card" data-category="sim spatial">
+    <div class="gallery-media">
+      <img src="assets/gallery/multi-hazard.webp" alt="Multi-hazard risk surfaces fused on 3D globe" width="640" height="400" loading="lazy">
+    </div>
+    <div class="gallery-content">
+      <div class="gallery-tags">
+        <span class="gallery-tag highlight">Multi-hazard</span>
+        <span class="gallery-tag">Causal CBN</span>
+        <span class="gallery-tag">IDW Surface</span>
+      </div>
+      <h2 class="gallery-title" id="multi-hazard">Multi-hazard risk surface fusion</h2>
+      <p class="gallery-desc">Continuous spatial risk surfaces dynamically fused from live seismic events, thermal wildfire anomalies, storm paths, and hydrological flooding. Discrete hazard indicators are continuously synthesized into a probabilistic risk field on the 3D globe.</p>
+      <div class="gallery-footer">
+        <span><code>src/rendering/gisFusion.ts</code></span>
+        <a href="capabilities/live-data-and-monitoring.html">Capabilities &rarr;</a>
+      </div>
+    </div>
+  </article>
+
+  <!-- Exhibit 2: Landslide Debris Flow -->
+  <article class="gallery-card" data-category="sim">
+    <div class="gallery-media">
+      <img src="assets/gallery/landslide.webp" alt="Landslide debris-flow simulation over real topography" width="560" height="350" loading="lazy">
+    </div>
+    <div class="gallery-content">
+      <div class="gallery-tags">
+        <span class="gallery-tag highlight">Landslide</span>
+        <span class="gallery-tag">Voellmy–Salm</span>
+        <span class="gallery-tag">NumPy</span>
+      </div>
+      <h2 class="gallery-title" id="landslide">Landslide debris-flow propagation</h2>
+      <p class="gallery-desc">Depth-averaged Voellmy–Salm numerical debris-flow model simulating avalanche and mudflow runout across real digital elevation models. Visualizes deposit depth, fluid momentum, and terminal runout extent.</p>
+      <div class="gallery-footer">
+        <span><code>kaggle-kernels/landslide-sim/main.py</code></span>
+        <a href="capabilities/landslide.html">Physics &amp; repro &rarr;</a>
+      </div>
+    </div>
+  </article>
+
+  <!-- Exhibit 3: Global Aviation ADS-B -->
+  <article class="gallery-card" data-category="track aero">
+    <div class="gallery-media">
+      <img src="assets/gallery/aviation.webp" alt="Live OpenSky ADS-B flight trajectories on globe" width="480" height="300" loading="lazy">
+    </div>
+    <div class="gallery-content">
+      <div class="gallery-tags">
+        <span class="gallery-tag highlight">Aviation</span>
+        <span class="gallery-tag">OpenSky ADS-B</span>
+        <span class="gallery-tag">Dead reckoning</span>
+      </div>
+      <h2 class="gallery-title" id="aviation">Live aviation tracking &amp; flight paths</h2>
+      <p class="gallery-desc">Real-time commercial and military flight tracking fed by OpenSky Network ADS-B telemetry. Positions are projected along great-circle trajectories using dead-reckoning vectors, color-coded by barometric flight level bands.</p>
+      <div class="gallery-footer">
+        <span><code>src/rendering/aviation.ts</code></span>
+        <a href="capabilities/globe-visualization.html">Globe engine &rarr;</a>
+      </div>
+    </div>
+  </article>
+
+  <!-- Exhibit 4: Orbital Satellites -->
+  <article class="gallery-card" data-category="track aero">
+    <div class="gallery-media">
+      <img src="assets/gallery/satellite.webp" alt="Real-time NORAD TLE satellite orbit propagation" width="480" height="300" loading="lazy">
+    </div>
+    <div class="gallery-content">
+      <div class="gallery-tags">
+        <span class="gallery-tag highlight">Satellites</span>
+        <span class="gallery-tag">SGP4 / SDP4</span>
+        <span class="gallery-tag">CelesTrak TLE</span>
+      </div>
+      <h2 class="gallery-title" id="satellite">Satellite constellation &amp; debris orbits</h2>
+      <p class="gallery-desc">High-precision SGP4/SDP4 analytical orbit propagation calculating real-time satellite positions, nadir ground tracks, and sensor coverage footprints from CelesTrak and UCS orbital element sets.</p>
+      <div class="gallery-footer">
+        <span><code>src/rendering/satelliteDataSources.ts</code></span>
+        <a href="capabilities/globe-visualization.html">Globe engine &rarr;</a>
+      </div>
+    </div>
+  </article>
+
+  <!-- Exhibit 5: Rotorcraft Dynamics Engine -->
+  <article class="gallery-card" data-category="aero sim">
+    <div class="gallery-content">
+      <div class="gallery-tags">
+        <span class="gallery-tag highlight">Rotorcraft</span>
+        <span class="gallery-tag">6-DOF dynamics</span>
+        <span class="gallery-tag">Apache glTF</span>
+      </div>
+      <h2 class="gallery-title" id="rotorcraft">AH-64 Apache flight dynamics simulation</h2>
+      <p class="gallery-desc">Six-degree-of-freedom rotorcraft dynamics model with collective, cyclic, and anti-torque pedal controls. Features ground effect modeling, vortex ring state boundaries, procedural glTF articulation, and projected glass cockpit MFD displays.</p>
+      <div class="gallery-footer">
+        <span><code>src/rendering/helicopterSim.ts</code></span>
+        <a href="narratives/FRONTEND.html#1-aerospace-rotorcraft-simulation-11-modules">Modules &rarr;</a>
+      </div>
+    </div>
+  </article>
+</div>
+
+<script>
+  (function() {
+    const btns = document.querySelectorAll('.gallery-filter-btn');
+    const cards = document.querySelectorAll('.gallery-grid .gallery-card');
+    btns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        btns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.getAttribute('data-filter');
+        cards.forEach(card => {
+          if (filter === 'all') {
+            card.style.display = '';
+          } else {
+            const cat = card.getAttribute('data-category') || '';
+            card.style.display = cat.includes(filter) ? '' : 'none';
+          }
+        });
+      });
+    });
+  })();
+</script>
+` },
     ],
   },
 
@@ -452,10 +692,10 @@ export const CORE_PAGES = [
     sections: [
       { kind: 'p', html: `The client renders live data and simulation outputs on a WebGL globe. “GPU” in this layer refers to rendering primitives (PostProcessStage shaders, custom Cesium Primitives) — not to GPU compute in the simulation kernels.` },
       { kind: 'table', caption: 'Verified counts', cols: ['Item', 'Value', 'Verification'], rows: [
-        ['Rendering modules in src/rendering/', '41 TS modules', 'file count excluding .DS_Store and shpjs.d.ts declaration'],
-        ['Lazy panels in App.tsx', '11 (const Lazy…Panel = lazy(...))', 'grep count ' + srcRaw('src/App.tsx:135-145')],
-        ['App shell size', '11,038 lines', 'wc -l src/App.tsx'],
-        ['Routes', '/ · /v2/globe · /v2/canvas · /v2/scenarios · /v2/tours', srcRaw('src/main.tsx:22-26')],
+        ['Rendering modules in src/rendering/', '55 modules (54 TS + 1 d.ts)', 'file count in src/rendering/'],
+        ['Lazy panels in App.tsx', '11 (const Lazy…Panel = lazy(...))', 'grep count ' + srcRaw('src/App.tsx:158-168')],
+        ['App shell size', '14,451 lines', 'wc -l src/App.tsx'],
+        ['Routes', '/ (main single-page application with modal/panel overlays)', srcRaw('src/main.tsx:90-97')],
         ['Cesium version', '1.140', '<code>package.json dependencies.cesium</code>'],
         ['Photorealistic tiles', 'Google 3D Tiles, Cesium Ion asset 2275207 (needs token)', srcRaw('src/rendering/photorealisticGlobe.ts')],
         ['Sensor looks', 'CRT · NVG · FLIR · Noir · Snow via PostProcessStage GLSL', srcRaw('src/rendering/sensorStyles.ts')],

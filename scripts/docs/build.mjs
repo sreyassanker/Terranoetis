@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { renderPage, src, SITE_ORIGIN } from './site.mjs';
+import { renderPage, src, SITE_ORIGIN, LAST_REVIEWED } from './site.mjs';
 import { HAZARDS, COMMON_GRID_SECTION } from './hazards.mjs';
 import { PAGES } from './pages.mjs';
 import { renderLanding, LANDING_PATH } from './landing.mjs';
@@ -107,7 +107,7 @@ console.log(`build: ${pages.length + 1} pages, ${changed} changed`);
 }
 
 // sitemap + robots
-const today = '2026-09-09';
+const today = LAST_REVIEWED;
 const sitemapBody =
 `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

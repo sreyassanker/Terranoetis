@@ -23,8 +23,14 @@ export function renderLanding() {
 <meta property="og:description" content="150 literature-cited equation engines · 7 hazard-physics kernels · live-data monitoring · AI-assisted analysis on a 3D globe.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${SITE_ORIGIN}/">
-<meta property="og:image" content="${SITE_ORIGIN}/assets/img/terranoetis.png">
+<meta property="og:image" content="${SITE_ORIGIN}/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Terranoetis — Real-Time Geospatial Intelligence Platform">
+<meta name="twitter:description" content="150 literature-cited equation engines · 7 hazard-physics kernels · live-data monitoring · AI-assisted analysis on a 3D globe.">
+<meta name="twitter:image" content="${SITE_ORIGIN}/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="${DOCS_VERSION}">
 <meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
 <meta name="generator" content="scripts/docs/landing.mjs">
@@ -56,10 +62,132 @@ export function renderLanding() {
   /* -------------------------------------------------------------
      Hero & High-Contrast Typography Fixes
      ------------------------------------------------------------- */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* -------------------------------------------------------------
+     Universal Resets & Full-Width Containers
+     ------------------------------------------------------------- */
+  html.landing main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .band-wrapper {
+    width: 100%;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .band-wrapper.bg-white {
+    background: #ffffff;
+  }
+  .band-wrapper.bg-subtle {
+    background: #f8fafc;
+  }
+
+  .landing .band {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 5rem 1.5rem;
+  }
+
+  /* -------------------------------------------------------------
+     Unified Section Header Design System (Gold Standard)
+     ------------------------------------------------------------- */
+  .section-header {
+    text-align: center;
+    max-width: 50rem;
+    margin: 0 auto 3.25rem;
+  }
+
+  .section-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #0284c7;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    padding: 0.3rem 0.85rem;
+    border-radius: 9999px;
+    margin-bottom: 0.85rem;
+    box-shadow: 0 1px 2px rgba(2, 132, 199, 0.06);
+  }
+
+  .section-kicker .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #0ea5e9;
+    box-shadow: 0 0 0 rgba(14, 165, 233, 0.4);
+    animation: pulse 2s infinite;
+  }
+
+  .section-title {
+    font-size: clamp(1.85rem, 3.5vw, 2.35rem);
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    margin: 0 0 0.85rem;
+    border: 0;
+    padding: 0;
+  }
+
+  .section-lead {
+    font-size: 1.02rem;
+    line-height: 1.7;
+    color: #64748b;
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  /* -------------------------------------------------------------
+     Full Coverage Cinematic Hero Banner
+     ------------------------------------------------------------- */
+  .hero-full-banner {
+    width: 100%;
+    background: #000000;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .hero-banner-inner {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #000000;
+    padding-top: 0.85rem;
+    padding-bottom: 0.35rem;
+  }
+  .hero-banner-inner img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+  }
+
   .hero-spotlight {
     max-width: 76rem;
     margin: 0 auto;
-    padding: 3.5rem 1.5rem 2rem;
+    padding: 1.35rem 1.5rem 1.75rem;
     text-align: center;
   }
 
@@ -83,54 +211,63 @@ export function renderLanding() {
   .hero-spotlight .hero-badge {
     display: inline-flex;
     align-items: center;
+    gap: 0.35rem;
     color: #0369a1;
     background: #f0f9ff;
     border: 1px solid #bae6fd;
-    font-size: 0.85rem;
-    font-weight: 600;
-    padding: 0.35rem 0.9rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.65rem;
     border-radius: 9999px;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .hero-spotlight .hero-badge .pulse-dot {
+    width: 5px;
+    height: 5px;
+    margin-right: 0;
   }
 
   .hero-spotlight h1 {
-    font-family: 'Syncopate', sans-serif;
-    font-size: clamp(2rem, 4.5vw, 3.2rem);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    line-height: 1.15;
-    margin: 0 0 1.25rem;
-    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35)) drop-shadow(0 0 20px rgba(56, 189, 248, 0.15));
+    margin: 0.75rem 0 1.5rem;
+    line-height: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
-  .hero-spotlight h1 .terra {
-    background: linear-gradient(180deg, #0b1329 0%, #0284c7 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .hero-spotlight h1 .noetis {
-    background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .hero-wordmark-img {
+    width: min(90%, 540px);
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 4px 16px rgba(2, 132, 199, 0.14));
   }
 
   .hero-spotlight .tagline {
     color: #475569 !important;
-    font-size: 1.125rem;
-    line-height: 1.7;
+    font-size: 1.05rem;
+    line-height: 1.65;
     max-width: 52rem;
-    margin: 0 auto 2.25rem;
+    margin: 0 auto 2rem;
   }
 
   .hero-spotlight .hero-actions {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 1rem;
+    gap: 0.55rem;
     flex-wrap: wrap;
-    margin-bottom: 3rem;
+    margin-bottom: 1.15rem;
+  }
+
+  .hero-spotlight .btn {
+    padding: 0.36rem 0.85rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 6px;
+    line-height: 1.35;
+    transition: all 0.2s ease;
   }
 
   .hero-spotlight .btn-ghost {
@@ -152,7 +289,14 @@ export function renderLanding() {
 
   .hero-spotlight .btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(2, 132, 199, 0.25);
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
+  }
+
+  .hero-spotlight .btn-yt::before {
+    border-left: 6px solid #ff4b4b;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    margin-right: 0.35rem;
   }
 
   /* -------------------------------------------------------------
@@ -249,12 +393,448 @@ export function renderLanding() {
     line-height: 1.45;
   }
 
-  .feat, .hz {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  /* -------------------------------------------------------------
+     Unified Card Grids & Interactive Hover Elevation
+     ------------------------------------------------------------- */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.25rem;
   }
-  .feat:hover, .hz:hover {
+
+  .feat {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.75rem 1.5rem;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    text-align: left;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feat::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #0284c7, #38bdf8);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .feat:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
+  }
+
+  .feat:hover::before {
+    opacity: 1;
+  }
+
+  .feat .k {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #0284c7;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.4rem;
+    display: block;
+  }
+
+  .feat h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0 0 0.5rem;
+  }
+
+  .feat p {
+    font-size: 0.9rem;
+    color: #64748b;
+    line-height: 1.6;
+    margin: 0 0 1.25rem;
+    flex-grow: 1;
+    text-align: left;
+  }
+
+  .feat a.more {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #0284c7;
+    text-decoration: none;
+    margin-top: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: gap 0.15s ease;
+  }
+
+  .feat a.more:hover {
+    gap: 7px;
+    text-decoration: underline;
+  }
+
+  /* Hazard Suite Grid (Balanced 4 on row 1, 3 centered on row 2) */
+  .hz-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.25rem;
+    margin-top: 0;
+  }
+
+  .hz {
+    flex: 1 1 calc(25% - 1.25rem);
+    min-width: 250px;
+    max-width: calc(25% - 1.25rem);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.6rem 1.4rem;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    text-align: left;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hz::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #0284c7, #38bdf8);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .hz:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
+  }
+
+  .hz:hover::before {
+    opacity: 1;
+  }
+
+  .hz .hz-tag {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #0284c7;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.35rem;
+    display: block;
+  }
+
+  .hz h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+  }
+
+  .hz h3 a {
+    color: #0f172a;
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  .hz h3 a:hover {
+    color: #0284c7;
+  }
+
+  .hz p {
+    font-size: 0.88rem;
+    color: #64748b;
+    line-height: 1.55;
+    margin: 0;
+    flex-grow: 1;
+    text-align: left;
+  }
+
+  @media (max-width: 1100px) {
+    .hz {
+      flex: 1 1 calc(50% - 1.25rem);
+      max-width: calc(50% - 1.25rem);
+    }
+  }
+  @media (max-width: 640px) {
+    .hz {
+      flex: 1 1 100%;
+      max-width: 100%;
+    }
+  }
+
+  /* Live WebGL Exhibits Showcase */
+  .showcase {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 0;
+  }
+  @media (max-width: 800px) {
+    .showcase {
+      grid-template-columns: 1fr;
+    }
+  }
+  .showcase figure {
+    margin: 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.08);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  .showcase figure:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 16px 32px -8px rgba(15, 23, 42, 0.12);
+  }
+  .showcase img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .showcase figcaption {
+    font-size: 0.88rem;
+    color: #475569;
+    padding: 0.85rem 1.15rem;
+    background: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    text-align: left;
+    font-weight: 500;
+  }
+
+  /* Evidence CTA Band & Social Pills */
+  .cta-band {
+    width: 100%;
+    background: radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%);
+    border-top: 1px solid #1e293b;
+    padding: 5rem 1.5rem 4.5rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta-band .section-kicker {
+    background: rgba(56, 189, 248, 0.1);
+    border-color: rgba(56, 189, 248, 0.25);
+    color: #38bdf8;
+  }
+  .cta-band .section-kicker .pulse-dot {
+    background: #38bdf8;
+    box-shadow: 0 0 0 rgba(56, 189, 248, 0.4);
+  }
+  .social-pills-row {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 2.25rem;
+  }
+  .social-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+    color: #cbd5e1;
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .social-pill:hover {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+  }
+  .social-pill svg {
+    flex-shrink: 0;
+  }
+
+  /* Footer Layout */
+  .landing-footer {
+    width: 100%;
+    background: #020617;
+    border-top: 1px solid #1e293b;
+    padding: 1.8rem 1.5rem 2.5rem;
+    font-size: 0.82rem;
+    color: #64748b;
+  }
+  .landing-footer a {
+    color: #94a3b8;
+    text-decoration: none;
+  }
+  .landing-footer a:hover {
+    color: #38bdf8;
+    text-decoration: underline;
+  }
+  .landing-footer .inner {
+    max-width: 76rem;
+    margin: 0 auto;
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  /* -------------------------------------------------------------
+     Sliding Marquee Ribbon ("Featured on ISPRS")
+     ------------------------------------------------------------- */
+  .featured-marquee-ribbon {
+    background: #000000;
+    border-top: 1px solid #1e293b;
+    border-bottom: 1px solid #1e293b;
+    padding: 1.15rem 0;
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+    margin: 2.25rem 0 1.5rem;
+  }
+  .featured-marquee-ribbon::before,
+  .featured-marquee-ribbon::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 120px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .featured-marquee-ribbon::before {
+    left: 0;
+    background: linear-gradient(90deg, #000000 0%, rgba(0, 0, 0, 0) 100%);
+  }
+  .featured-marquee-ribbon::after {
+    right: 0;
+    background: linear-gradient(-90deg, #000000 0%, rgba(0, 0, 0, 0) 100%);
+  }
+  .featured-marquee-track {
+    display: flex;
+    align-items: center;
+    width: max-content;
+    gap: 1.75rem;
+    animation: featuredLeftToRight 32s linear infinite;
+  }
+  .featured-marquee-ribbon:hover .featured-marquee-track {
+    animation-play-state: paused;
+  }
+  @keyframes featuredLeftToRight {
+    0% { transform: translateX(-50%); }
+    100% { transform: translateX(0%); }
+  }
+  .isprs-feature-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.5rem 1.15rem;
+    border-radius: 9999px;
+    background: #0b1120;
+    border: 1px solid #1e293b;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    text-decoration: none;
+    color: #f8fafc;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .isprs-feature-badge:hover {
+    background: #0f172a;
+    border-color: #38bdf8;
+    box-shadow: 0 0 18px rgba(56, 189, 248, 0.25);
+    transform: translateY(-1px);
+    color: #ffffff;
+  }
+  .isprs-logo-wrap {
+    background: #ffffff;
+    border-radius: 6px;
+    padding: 3px 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  .isprs-badge-logo {
+    display: block;
+    width: 34px;
+    height: auto;
+    object-fit: contain;
+  }
+  .isprs-badge-divider {
+    width: 1px;
+    height: 24px;
+    background: #334155;
+    flex-shrink: 0;
+  }
+  .isprs-badge-content {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    line-height: 1.25;
+  }
+  .isprs-badge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #38bdf8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .isprs-badge-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #f8fafc;
+    letter-spacing: -0.01em;
+  }
+  .isprs-badge-subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+  }
+
+  .gallery-explore-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.52rem 1.15rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #0284c7;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 9999px;
+    text-decoration: none;
+    box-shadow: 0 1px 2px rgba(2, 132, 199, 0.08);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .gallery-explore-cta:hover {
+    background: #0284c7;
+    border-color: #0284c7;
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.22);
+  }
+  .gallery-explore-cta svg {
+    color: #0284c7;
+    transition: all 0.2s ease;
+  }
+  .gallery-explore-cta:hover svg {
+    color: #ffffff;
+    transform: translateX(2px);
   }
 
   /* -------------------------------------------------------------
@@ -414,6 +994,33 @@ export function renderLanding() {
     background: #10b981;
     box-shadow: 0 0 8px #10b981;
   }
+
+  .btn-codespaces {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 1.35rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #f8fafc;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 9999px;
+    text-decoration: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-codespaces:hover {
+    background: #1e293b;
+    border-color: #38bdf8;
+    color: #ffffff;
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+    transform: translateY(-2px);
+  }
+  .btn-codespaces svg {
+    color: #38bdf8;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -421,9 +1028,12 @@ export function renderLanding() {
 
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html"><img src="assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="index.html" aria-label="Terranoetis"><img src="assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <div class="nav-right-cluster">
       <nav class="top-nav" aria-label="Primary">
+        <a href="index.html" aria-current="page">Overview</a>
+        <a href="gallery.html">Gallery</a>
+        <a href="download.html">Download</a>
         <a href="documentation.html">Documentation</a>
         <a href="capabilities/hazard-simulations.html">Capabilities</a>
         <a href="methodology.html">Verification</a>
@@ -444,28 +1054,29 @@ export function renderLanding() {
 </header>
 
 <main id="main">
-  <nav class="breadcrumbs" aria-label="Breadcrumb" style="max-width:72rem;margin:1rem auto 0;padding:0 1.5rem;"><ol><li aria-current="page">Overview</li></ol></nav>
+  <!-- Full-Coverage Cinematic Hero Banner -->
+  <section class="hero-full-banner" aria-labelledby="hero-title">
+    <h1 id="hero-title" class="sr-only">Terranoetis — Real-Time Geospatial Intelligence Platform</h1>
+    <div class="hero-banner-inner">
+      <img src="assets/img/Terranoetis_Thumbnail.webp" alt="Terranoetis Earth Intelligence Platform — Observe, Analyze, Predict, Protect" width="1600" height="640" loading="eager">
+    </div>
+  </section>
 
-  <!-- Hero Spotlight -->
-  <section class="hero-spotlight" aria-labelledby="hero-title">
-    <div>
-      <span class="hero-badge"><span class="pulse-dot"></span> Source-available · BUSL-1.1 · v${DOCS_VERSION}</span>
-      <h1 id="hero-title"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></h1>
-      <p class="tagline">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
-
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="documentation.html">Open the documentation</a>
-        <a class="btn btn-ghost" href="capabilities/hazard-simulations.html">Hazard simulations</a>
-        <a class="btn btn-ghost" href="${REPO}" rel="noopener">Source on GitHub</a>
-        <a class="btn btn-ghost btn-yt" href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener">View demo on YouTube</a>
-      </div>
+  <!-- Hero Spotlight & Actions -->
+  <section class="hero-spotlight">
+    <!-- Hero Actions -->
+    <div class="hero-actions" style="margin-bottom: 1.15rem;">
+      <a class="btn btn-primary" href="documentation.html">Open documentation</a>
+      <a class="btn btn-primary" href="download.html" style="display:inline-flex; align-items:center; gap:0.35rem;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+      <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub</a>
+      <a class="btn btn-ghost btn-yt" href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener">Demo</a>
     </div>
 
-    <!-- Wide Showcase Visual -->
-    <figure class="hero-large-mockup">
-      <img src="assets/img/Terranoetis_Thumbnail.webp" alt="Terranoetis globe interface showing live data layers and analysis panels over a 3D Earth" width="1280" height="720" loading="eager">
-      <figcaption>The Terranoetis globe — live data layers and analysis panels on a CesiumJS terrain.</figcaption>
-    </figure>
+    <!-- Platform Specification & Mission Tagline -->
+    <div style="max-width: 52rem; margin: 0 auto 2.5rem;">
+      <span class="hero-badge" style="margin-bottom: 0.85rem;"><span class="pulse-dot"></span> SOURCE-AVAILABLE · BUSL-1.1 · V${DOCS_VERSION}</span>
+      <p class="tagline" style="margin-bottom: 0;">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
+    </div>
 
     <!-- Animated Metric Cards -->
     <div class="modern-stat-grid" role="list" aria-label="Platform Specifications">
@@ -478,94 +1089,295 @@ export function renderLanding() {
         <span class="stat-txt">Hazard-physics simulation kernels with internal validation gates</span>
       </div>
       <div class="stat-card" role="listitem">
-        <span class="stat-num" data-target="1702">0</span>
+        <span class="stat-num" data-target="1843">0</span>
         <span class="stat-txt">Automated unit &amp; integration tests passing</span>
       </div>
       <div class="stat-card" role="listitem">
-        <span class="stat-num" data-target="82">0</span>
-        <span class="stat-txt">Registered external telemetry &amp; sensor integrations</span>
+        <span class="stat-num" data-target="90">0</span>
+        <span class="stat-txt">Configured external telemetry &amp; sensor integrations</span>
       </div>
     </div>
   </section>
 
-  <!-- Platform Layers -->
-  <section class="band" id="platform" aria-labelledby="platform-h">
-    <div class="band-head">
-      <h2 id="platform-h">One platform, four working layers</h2>
-      <p>Client, API, computation and persistence — documented per layer with source citations. Three tiers: React 19 + Cesium client · Express 4 + TypeScript API · SQLite primary store with optional Redis acceleration.</p>
-    </div>
-    <div class="feat-grid">
-      <div class="feat"><span class="k">Compute</span><h3>Analytical equation engine</h3><p>150 deterministic functions across 7 parts / 26 domains, each citing primary literature (80 DOI, 12 ISBN, 4 flagged NO-DOI). A never-throw contract returns honest NaN instead of invented values.</p><a class="more" href="capabilities/analytical-engine.html">Engine details →</a></div>
-      <div class="feat"><span class="k">Simulation</span><h3>Hazard-physics kernels</h3><p>Seven NumPy kernels — GMPE shakeMaps, Voellmy debris flows, Rothermel fire spread, Holland wind + SWE surge, local-inertial flood SWE, shallow-water tsunami, lava/plume/ash volcano models. Three run locally on CPU; four execute on Kaggle kernels.</p><a class="more" href="capabilities/hazard-simulations.html">Simulation architecture →</a></div>
-      <div class="feat"><span class="k">Live data</span><h3>Monitoring &amp; alerts</h3><p>82 registered integrations; Sentinel polling (USGS 60 s, EONET 120 s, FIRMS 180 s, NWS 120 s) with published detection thresholds, correlation engine and reflex actions on the globe.</p><a class="more" href="capabilities/live-data-and-monitoring.html">Data &amp; monitoring →</a></div>
-      <div class="feat"><span class="k">Cognition</span><h3>AI chat pipeline</h3><p>Eight-intent router, System 1 / System 2 thresholds (0.92 / 0.70), 4-agent debate with critic, tool loop over live data and kernels; nine-provider model router with local GGUF fallback.</p><a class="more" href="capabilities/ai-cognition.html">Cognition →</a></div>
-    </div>
-    <div class="showcase">
-      <figure><a href="capabilities/live-data-and-monitoring.html" aria-label="Live data and monitoring"><img src="assets/gallery/multi-hazard.webp" alt="Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data rendered on the 3D globe (animated)" width="640" height="400" decoding="async"></a><figcaption>Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data.</figcaption></figure>
-      <figure><a href="capabilities/landslide.html" aria-label="Landslide simulation details"><img src="assets/gallery/landslide.webp" alt="Landslide debris-flow simulation over real topography, depth field animated in time steps (animated)" width="560" height="350" decoding="async"></a><figcaption>Landslide debris-flow simulation propagating over real topography.</figcaption></figure>
-    </div>
-  </section>
-
-  <!-- Hazards Suite -->
-  <section class="band alt" id="hazards" aria-labelledby="hazards-h">
-    <div class="band-head">
-      <h2 id="hazards-h">Seven hazards, seven cited physics pages</h2>
-      <p>Every capability page carries the governing equations with their published sources, the UI → wire → kernel parameter contract, outputs with units, spatial-origin semantics, the kernel’s own validity limits verbatim, and reproduction commands — the figures below come from executing each kernel.</p>
-    </div>
-    <div class="hz-grid">
-      <div class="hz"><h3><a href="capabilities/earthquake.html">Earthquake</a></h3><p>BSSA14 NGA-West2 GMPE + USGS instrumental MMI. M 7.5 test → max PGA 251.0 cm/s², 0.008 s compute, 166 ms end-to-end job.</p></div>
-      <div class="hz"><h3><a href="capabilities/hurricane.html">Hurricane</a></h3><p>Holland 1980 wind + SWE surge + waves + Lonfat rainfall + TR-55 runoff. Physics gate PASS measured; Cat 4 test: 77.0 m/s, 1.15 m surge.</p></div>
-      <div class="hz"><h3><a href="capabilities/wildfire.html">Wildfire</a></h3><p>Rothermel 1972 over Anderson-13 fuels; K_ROS calibration to the 0.105 m/s reference reproduced (0.103 → PASS).</p></div>
-      <div class="hz"><h3><a href="capabilities/flood.html">Flood</a></h3><p>Local-inertial SWE (LISFLOOD-FP family) with conservation gates. 300 mm event: mass closure 0.0000 %, max depth 4.01 m.</p></div>
-      <div class="hz"><h3><a href="capabilities/landslide.html">Landslide</a></h3><p>Voellmy–Salm depth-averaged flow; μ×ξ calibration against observed runout; convergence script PASS (Δ₂ = 0.050).</p></div>
-      <div class="hz"><h3><a href="capabilities/volcano.html">Volcano</a></h3><p>Lava SWE + Morton–Taylor plume + ash settling PDE. Benchmark suite 4/4 PASS — Kilauea 2018 runout 15.0 vs ~13.5 km.</p></div>
-      <div class="hz"><h3><a href="capabilities/tsunami.html">Tsunami</a></h3><p>HLL/minmod SWE over real GEBCO 2020. Verification found a non-flat-bathymetry instability — documented openly with repro commands.</p></div>
-    </div>
-  </section>
-
-  <!-- Verification -->
-  <section class="band" id="verification" aria-labelledby="verif-h">
-    <div class="band-head">
-      <h2 id="verif-h">Verification is part of the product</h2>
-      <p>A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Defects found in the science are published, not buried.</p>
-    </div>
-    <div class="feat-grid">
-      <div class="feat"><h3>Kernel self-gates</h3><p>GMPE sanity, hurricane physics checks, closed-box conservation and lake-at-rest proofs abort emission on failure — each reproduced in review.</p></div>
-      <div class="feat"><h3>Published limitation register</h3><p>Every numerical or engineering finding from the review — from solver behaviour to wire-constant artifacts — is cited and linked from its capability page.</p></div>
-      <div class="feat"><h3>Discrepancy log</h3><p>Documentation claims are audited against the code; anything the code does not support is corrected and logged.</p></div>
-      <div class="feat"><h3>Reproducible numbers</h3><p>Every measured figure ships with the command that produced it, so any reviewer can rerun the check on their own machine.</p></div>
-    </div>
-    <p style="margin-top:1.2rem"><a class="btn btn-primary" href="methodology.html" style="background:var(--c-accent)">Read the methodology &amp; evidence runs</a></p>
-  </section>
-
-  <!-- Modern 3D Interactive Terminal Section -->
-  <section class="band alt" id="start" aria-labelledby="start-h">
-    <div class="band-head">
-      <h2 id="start-h">Run it locally in minutes</h2>
-      <p>Node ≥ 20 and Python 3 are enough: no API keys are required for the analytical engine, the three local simulation kernels, or the API itself.</p>
-    </div>
-
-    <div class="deck-3d-stage">
-      <div class="deck-terminal-card" id="deckTerminal">
-        <div class="terminal-glass-reflection"></div>
-        <div class="terminal-header-bar">
-          <div class="window-controls">
-            <span class="ctrl close"></span>
-            <span class="ctrl minimize"></span>
-            <span class="ctrl expand"></span>
-          </div>
-          <span class="terminal-title">bash — terranoetis-deployment — 80×24</span>
-          <button class="copy-deck-btn" id="copyCodeBtn" title="Copy code to clipboard">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span>Copy</span>
-          </button>
+  <!-- Sliding Marquee Ribbon ("Featured on ISPRS") -->
+  <aside class="featured-marquee-ribbon" aria-label="Featured on ISPRS">
+    <div class="featured-marquee-track">
+      <!-- CONTINUOUS LOOP BADGES -->
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
         </div>
+      </a>
 
-        <div class="terminal-body-code">
-          <pre><code><span class="t-comment"># 1. Clone repository &amp; configure environment</span>
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <!-- DUPLICATE SET FOR CONTINUOUS REPEATING LOOP -->
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+
+      <a href="https://www2.isprs.org/commissions/comm3/icwg-3-4a/datasets/" target="_blank" rel="noopener noreferrer" class="isprs-feature-badge" title="Featured on ISPRS Commission III/IVa Datasets &amp; Opensources — Click to open direct page">
+        <span class="isprs-logo-wrap"><img src="assets/img/isprs-logo.png" alt="ISPRS" class="isprs-badge-logo" width="34" height="28"></span>
+        <span class="isprs-badge-divider"></span>
+        <div class="isprs-badge-content">
+          <span class="isprs-badge-pill">Featured on ISPRS ↗</span>
+          <span class="isprs-badge-title">Commission III/IVa &middot; Datasets &amp; Opensources</span>
+        </div>
+      </a>
+    </div>
+  </aside>
+
+  <!-- Section 1: System Architecture -->
+  <div class="band-wrapper bg-white">
+    <section class="band" id="platform" aria-labelledby="platform-h">
+      <div class="section-header">
+        <div class="section-kicker"><span class="pulse-dot"></span> System Architecture</div>
+        <h2 class="section-title" id="platform-h">One Platform, Four Working Layers</h2>
+        <p class="section-lead">Client, API, computation, and persistence — documented per layer with primary literature citations. Three tiers: React 19 + Cesium client, Express 4 + TypeScript API, and SQLite primary store with optional Redis acceleration.</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat">
+          <span class="k">Compute</span>
+          <h3>Analytical equation engine</h3>
+          <p>150 deterministic functions across 7 parts / 26 domains, each citing primary literature (80 DOI, 12 ISBN, 4 flagged NO-DOI). A never-throw contract returns honest NaN instead of invented values.</p>
+          <a class="more" href="capabilities/analytical-engine.html">Engine details &rarr;</a>
+        </div>
+        <div class="feat">
+          <span class="k">Simulation</span>
+          <h3>Hazard-physics kernels</h3>
+          <p>Seven NumPy kernels — GMPE shakeMaps, Voellmy debris flows, Rothermel fire spread, Holland wind + SWE surge, local-inertial flood SWE, shallow-water tsunami, lava/plume/ash volcano models. Three run locally on CPU; four execute on Kaggle kernels.</p>
+          <a class="more" href="capabilities/hazard-simulations.html">Simulation architecture &rarr;</a>
+        </div>
+        <div class="feat">
+          <span class="k">Live data</span>
+          <h3>Monitoring &amp; alerts</h3>
+          <p>90 configured API metadata definitions (82 active feeds); Sentinel polling (USGS 60 s, EONET 120 s, FIRMS 180 s, NWS 120 s) with published detection thresholds, correlation engine and reflex actions on the globe.</p>
+          <a class="more" href="capabilities/live-data-and-monitoring.html">Data &amp; monitoring &rarr;</a>
+        </div>
+        <div class="feat">
+          <span class="k">Cognition</span>
+          <h3>AI chat pipeline</h3>
+          <p>Eight-intent router, System 1 / System 2 thresholds (0.92 / 0.70), 4-agent debate with critic, tool loop over live data and kernels; 10-provider model router with local GGUF fallback.</p>
+          <a class="more" href="capabilities/ai-cognition.html">Cognition &rarr;</a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Section 2: Dedicated Live WebGL Exhibits Showcase -->
+  <div class="band-wrapper bg-subtle">
+    <section class="band" id="exhibits" aria-labelledby="exhibits-h">
+      <div class="section-header">
+        <div class="section-kicker"><span class="pulse-dot"></span> Live WebGL Exhibits</div>
+        <h2 class="section-title" id="exhibits-h">Live Earth Simulation &amp; Dynamic Surfaces</h2>
+        <p class="section-lead">Operational sessions from the 3D globe: spatial multi-hazard risk surface synthesis and numerical debris-flow timesteps across real digital elevation models.</p>
+      </div>
+      <div class="showcase">
+        <figure>
+          <a href="capabilities/live-data-and-monitoring.html" aria-label="Live data and monitoring">
+            <img src="assets/gallery/multi-hazard.webp" alt="Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data rendered on the 3D globe (animated)" width="640" height="400" decoding="async">
+          </a>
+          <figcaption>Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data.</figcaption>
+        </figure>
+        <figure>
+          <a href="capabilities/landslide.html" aria-label="Landslide simulation details">
+            <img src="assets/gallery/landslide.webp" alt="Landslide debris-flow simulation over real topography, depth field animated in time steps (animated)" width="560" height="350" decoding="async">
+          </a>
+          <figcaption>Landslide debris-flow simulation propagating over real topography.</figcaption>
+        </figure>
+      </div>
+      <div style="text-align: center; margin-top: 2rem;">
+        <a class="gallery-explore-cta" href="gallery.html">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+          <span>Explore dedicated visual gallery &rarr;</span>
+        </a>
+      </div>
+    </section>
+  </div>
+
+  <!-- Section 3: Hazard Physics Suite -->
+  <div class="band-wrapper bg-white">
+    <section class="band" id="hazards" aria-labelledby="hazards-h">
+      <div class="section-header">
+        <div class="section-kicker"><span class="pulse-dot"></span> Hazard Physics Kernels</div>
+        <h2 class="section-title" id="hazards-h">Seven Hazards, Seven Cited Physics Pages</h2>
+        <p class="section-lead">Every capability page carries the governing equations with their published sources, the UI &rarr; wire &rarr; kernel parameter contract, outputs with units, spatial-origin semantics, the kernel’s own validity limits verbatim, and reproduction commands — the figures below come from executing each kernel.</p>
+      </div>
+      <div class="hz-grid">
+        <div class="hz">
+          <span class="hz-tag">Seismology</span>
+          <h3><a href="capabilities/earthquake.html">Earthquake</a></h3>
+          <p>BSSA14 NGA-West2 GMPE + USGS instrumental MMI. M 7.5 test &rarr; max PGA 251.0 cm/s², 0.008 s compute, 166 ms end-to-end job.</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Meteorology</span>
+          <h3><a href="capabilities/hurricane.html">Hurricane</a></h3>
+          <p>Holland 1980 wind + SWE surge + waves + Lonfat rainfall + TR-55 runoff. Physics gate PASS measured; Cat 4 test: 77.0 m/s, 1.15 m surge.</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Thermal Fluids</span>
+          <h3><a href="capabilities/wildfire.html">Wildfire</a></h3>
+          <p>Rothermel 1972 over Anderson-13 fuels; K_ROS calibration to the 0.105 m/s reference reproduced (0.103 &rarr; PASS).</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Hydrodynamics</span>
+          <h3><a href="capabilities/flood.html">Flood</a></h3>
+          <p>Local-inertial SWE (LISFLOOD-FP family) with conservation gates. 300 mm event: mass closure 0.0000 %, max depth 4.01 m.</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Granular Flow</span>
+          <h3><a href="capabilities/landslide.html">Landslide</a></h3>
+          <p>Voellmy–Salm depth-averaged flow; μ×ξ calibration against observed runout; convergence script PASS (Δ₂ = 0.050).</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Volcanology</span>
+          <h3><a href="capabilities/volcano.html">Volcano</a></h3>
+          <p>Lava SWE + Morton–Taylor plume + ash settling PDE. Benchmark suite 4/4 PASS — Kilauea 2018 runout 15.0 vs ~13.5 km.</p>
+        </div>
+        <div class="hz">
+          <span class="hz-tag">Shallow Water</span>
+          <h3><a href="capabilities/tsunami.html">Tsunami</a></h3>
+          <p>HLL/minmod SWE over real GEBCO 2020. Verification found a non-flat-bathymetry instability — documented openly with repro commands.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Section 4: Scientific Rigor & Verification -->
+  <div class="band-wrapper bg-subtle">
+    <section class="band" id="verification" aria-labelledby="verif-h">
+      <div class="section-header">
+        <div class="section-kicker"><span class="pulse-dot"></span> Scientific Rigor &amp; Quality Gates</div>
+        <h2 class="section-title" id="verif-h">Verification Is Part of the Product</h2>
+        <p class="section-lead">A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Defects found in the science are published, not buried.</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat">
+          <span class="k">Internal Gates</span>
+          <h3>Kernel self-gates</h3>
+          <p>GMPE sanity, hurricane physics checks, closed-box conservation and lake-at-rest proofs abort emission on failure — each reproduced in review.</p>
+        </div>
+        <div class="feat">
+          <span class="k">Audit Trail</span>
+          <h3>Published limitation register</h3>
+          <p>Every numerical or engineering finding from the review — from solver behaviour to wire-constant artifacts — is cited and linked from its capability page.</p>
+        </div>
+        <div class="feat">
+          <span class="k">Science Reviews</span>
+          <h3>Discrepancy log</h3>
+          <p>Documentation claims are audited against the code; anything the code does not support is corrected and logged.</p>
+        </div>
+        <div class="feat">
+          <span class="k">Reproducibility</span>
+          <h3>Reproducible numbers</h3>
+          <p>Every measured figure ships with the command that produced it, so any reviewer can rerun the check on their own machine.</p>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 2.25rem;">
+        <a class="btn btn-primary" href="methodology.html">Read the methodology &amp; evidence runs &rarr;</a>
+      </div>
+    </section>
+  </div>
+
+  <!-- Section 5: Modern 3D Interactive Terminal Section -->
+  <div class="band-wrapper bg-white">
+    <section class="band" id="start" aria-labelledby="start-h">
+      <div class="section-header">
+        <div class="section-kicker"><span class="pulse-dot"></span> Quickstart &amp; Local Deployment</div>
+        <h2 class="section-title" id="start-h">Run It Locally in Minutes</h2>
+        <p class="section-lead">Node ≥ 20 and Python 3 are enough: no API keys are required for the analytical engine, the three local simulation kernels, or the API itself.</p>
+      </div>
+
+      <div class="deck-3d-stage">
+        <div class="deck-terminal-card" id="deckTerminal">
+          <div class="terminal-glass-reflection"></div>
+          <div class="terminal-header-bar">
+            <div class="window-controls">
+              <span class="ctrl close"></span>
+              <span class="ctrl minimize"></span>
+              <span class="ctrl expand"></span>
+            </div>
+            <span class="terminal-title">bash — terranoetis-deployment — 80×24</span>
+            <button class="copy-deck-btn" id="copyCodeBtn" title="Copy code to clipboard">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy</span>
+            </button>
+          </div>
+
+          <div class="terminal-body-code">
+            <pre><code><span class="t-comment"># 1. Clone repository &amp; configure environment</span>
 <span class="t-prompt">$</span> <span class="t-cmd">git clone</span> ${REPO}.git
 <span class="t-prompt">$</span> <span class="t-cmd">cd</span> Terranoetis
 <span class="t-prompt">$</span> <span class="t-cmd">cp</span> .env.example .env   <span class="t-comment"># optional keys — features degrade gracefully</span>
@@ -576,34 +1388,60 @@ export function renderLanding() {
 
 <span class="t-comment"># 3. Verify real-time kernel &amp; API health</span>
 <span class="t-prompt">$</span> <span class="t-cmd">curl -s</span> http://localhost:3001/api/health<span class="t-cursor"></span></code></pre>
-        </div>
+          </div>
 
-        <div class="terminal-status-strip">
-          <span class="t-status"><span class="t-indicator"></span> Ready for deployment</span>
-          <span class="t-env">NODE ≥ 20.0 · PYTHON 3 + NUMPY</span>
+          <div class="terminal-status-strip">
+            <span class="t-status"><span class="t-indicator"></span> Ready for deployment</span>
+            <span class="t-env">NODE ≥ 20.0 · PYTHON 3 + NUMPY</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <p style="text-align:center; margin-top:2rem;">
-      Continue with <a href="getting-started.html">Getting started</a> for the measured first-run transcript, or the <a href="deployment.html">deployment guide</a> for Docker, environment variables and optional Kaggle credentials.
-    </p>
-  </section>
+      <div style="display: flex; justify-content: center; align-items: center; gap: 0.85rem; margin-top: 1.75rem; flex-wrap: wrap;">
+        <a class="btn-codespaces" href="https://codespaces.new/sreyassanker/Terranoetis" target="_blank" rel="noopener noreferrer" title="Launch Terranoetis in GitHub Codespaces with 1 click">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M22.062 10.669a4.898 4.898 0 0 0-3.328-3.037 6.438 6.438 0 0 0-5.834-4.526 6.442 6.442 0 0 0-6.195 4.673 4.904 4.904 0 0 0-3.57 3.328 4.905 4.905 0 0 0 1.258 4.783A4.902 4.902 0 0 0 7.82 17.5h.38a1.5 1.5 0 0 0 1.5-1.5v-1a1.5 1.5 0 0 0-1.5-1.5h-.38a1.902 1.902 0 0 1-1.346-.557 1.904 1.904 0 0 1-.488-1.856 1.904 1.904 0 0 1 1.386-1.292 3.442 3.442 0 0 1 3.307-2.495c1.472 0 2.723.924 3.208 2.228a1.5 1.5 0 0 0 1.41 1.022h.423a1.904 1.904 0 0 1 1.856 1.488c.174.793-.113 1.56-.75 2.016a1.902 1.902 0 0 1-1.11.353h-.38a1.5 1.5 0 0 0-1.5 1.5v1a1.5 1.5 0 0 0 1.5 1.5h.38a4.902 4.902 0 0 0 3.427-1.411 4.905 4.905 0 0 0 1.258-4.783z"/></svg>
+          <span>Launch in GitHub Codespaces (1-Click Cloud Run) &rarr;</span>
+        </a>
+      </div>
 
-  <!-- CTA Band (Shields.io star removed) -->
+      <p style="text-align:center; margin-top:1.5rem; color: #64748b; font-size: 0.95rem;">
+        Continue with <a href="getting-started.html" style="color: #0284c7; font-weight: 600;">Getting started</a> for the measured first-run transcript, or the <a href="deployment.html" style="color: #0284c7; font-weight: 600;">deployment guide</a> for Docker, environment variables and optional Kaggle credentials.
+      </p>
+    </section>
+  </div>
+
+  <!-- Section 6: Evidence & Architecture CTA Band -->
   <section class="cta-band" aria-labelledby="cta-h">
-    <h2 id="cta-h">Start with the evidence</h2>
-    <p>Capability pages, parameter contracts, API reference and verification records — all cited to source.</p>
-    <div class="hero-actions" style="justify-content:center">
+    <div class="section-header" style="margin-bottom: 2rem;">
+      <div class="section-kicker"><span class="pulse-dot"></span> Open Architecture &amp; Citations</div>
+      <h2 class="section-title" id="cta-h">Start with the Evidence</h2>
+      <p class="section-lead">Capability pages, parameter contracts, API reference specifications, and verification records — all strictly cited to literature.</p>
+    </div>
+    <div class="hero-actions" style="justify-content:center; margin-bottom: 2.5rem;">
       <a class="btn btn-primary" href="documentation.html">Documentation hub</a>
       <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub repository</a>
     </div>
-    <div class="badge-row" aria-label="Maintainer links">
-      <a href="https://sreyassanker.vercel.app" rel="noopener"><img alt="Portfolio" src="https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white"></a>
-      <a href="https://github.com/sreyassanker" rel="noopener"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white"></a>
-      <a href="https://linkedin.com/in/sreyassanker" rel="noopener"><img alt="LinkedIn" src="https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white"></a>
-      <a href="https://buymeacoffee.com/sreyassanker" rel="noopener"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black"></a>
-      <a href="https://youtube.com/playlist?list=PLFp9mjre3Lco&si=yDAxddidcQZ4w_km" rel="noopener"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
+    <div class="social-pills-row" aria-label="Maintainer links">
+      <a href="https://sreyassanker.vercel.app" rel="noopener" class="social-pill" title="Maintainer Portfolio">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L24 22H0L12 1Z"/></svg>
+        <span>Portfolio</span>
+      </a>
+      <a href="https://github.com/sreyassanker" rel="noopener" class="social-pill" title="GitHub Profile">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <a href="https://linkedin.com/in/sreyassanker" rel="noopener" class="social-pill" title="LinkedIn Profile">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
+        <span>LinkedIn</span>
+      </a>
+      <a href="https://buymeacoffee.com/sreyassanker" rel="noopener" class="social-pill" title="Buy Me a Coffee">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20.216 6.415l-.132-.666c-.119-.597-.384-1.144-.766-1.583-.4-.46-1.026-.8-1.785-.8H4.673c-.76 0-1.385.34-1.785.8-.382.439-.647.986-.766 1.583l-1.9 9.5c-.173.864.062 1.757.644 2.449.582.693 1.442 1.09 2.348 1.09h14.572c.906 0 1.766-.397 2.348-1.09.582-.692.817-1.585.644-2.449l-.562-2.81c1.23-.497 2.072-1.685 2.072-3.041 0-1.802-1.464-3.267-3.267-3.267h-.753l.202-1.015h.551c.7 0 1.267.568 1.267 1.267h2c0-1.802-1.465-3.267-3.267-3.267zm-1.849 5.267h-.451l.4-2h.051c.7 0 1.267.568 1.267 1.267 0 .7-.567 1.267-1.267 1.267z"/></svg>
+        <span>Buy Me a Coffee</span>
+      </a>
+      <a href="https://youtube.com/playlist?list=PLFp9mjre3Lco&amp;si=yDAxddidcQZ4w_km" rel="noopener" class="social-pill" title="YouTube Playlist Demo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+        <span>YouTube Demo</span>
+      </a>
     </div>
   </section>
 </main>

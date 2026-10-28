@@ -12,10 +12,16 @@
 <meta property="og:description" content="Terranoetis is a real-time geospatial intelligence platform built as a three-tier application:…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Architecture — Terranoetis Documentation">
+<meta name="twitter:description" content="Terranoetis is a real-time geospatial intelligence platform built as a three-tier application:…">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -74,9 +80,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html" aria-label="Terranoetis"><img src="../assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="../assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../download.html">Download</a>
       <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
       <a href="../methodology.html">Verification</a>
@@ -90,6 +98,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../download.html">Download Desktop</a></li>
 <li><a href="../documentation.html">Documentation home</a></li>
 <li><a href="../getting-started.html">Getting started</a></li>
 <li><a href="../architecture.html">Platform architecture</a></li></ul>
@@ -109,7 +118,8 @@
 <li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="../capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="../gallery.html">Visual gallery</a></li>
+<li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
@@ -134,6 +144,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         
       </div>
       
@@ -186,7 +197,7 @@ flowchart LR
     subgraph CLIENT[&quot;CLIENT (React 19 + CesiumJS)&quot;]
         direction LR
         UI[&quot;UI\nPanels&quot;]
-        Render[&quot;Rendering\nCesium + 41 modules&quot;]
+        Render[&quot;Rendering\nCesium + 55 modules&quot;]
         WS[&quot;WebSocket\nClient&quot;]
         API[&quot;REST\nClient&quot;]
         UI --&gt; API
@@ -196,9 +207,9 @@ flowchart LR
 
     subgraph SERVER[&quot;EXPRESS.JS SERVER&quot;]
         Security[&quot;Security &amp;\nObservability&quot;]
-        Agents[&quot;Agent &amp;\nCognition\nSystem 1 + System 2\n9-LLM Router&quot;]
+        Agents[&quot;Agent &amp;\nCognition\nSystem 1 + System 2\n10-LLM Router&quot;]
         Engine[&quot;Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels&quot;]
-        Data[&quot;Data Layer\n30+ live APIs\nFetchers + Cache&quot;]
+        Data[&quot;Data Layer\n90 configured APIs\nFetchers + Cache&quot;]
         Realtime[&quot;Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub&quot;]
         Services[&quot;World Model\nCausal KG · Memory\nDream · Forks\nScenarios&quot;]
         Security --&gt; Agents
@@ -317,27 +328,7 @@ flowchart LR
 <tr>
 <td><code>/</code></td>
 <td>App</td>
-<td>Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels)</td>
-</tr>
-<tr>
-<td><code>/v2/globe</code></td>
-<td>GlobePage</td>
-<td>Dedicated Cesium globe viewport</td>
-</tr>
-<tr>
-<td><code>/v2/canvas</code></td>
-<td>CanvasPage</td>
-<td>Spatial canvas</td>
-</tr>
-<tr>
-<td><code>/v2/scenarios</code></td>
-<td>ScenariosPage</td>
-<td>Scenario gallery and editor</td>
-</tr>
-<tr>
-<td><code>/v2/tours</code></td>
-<td>ToursPage</td>
-<td>Cinematic tours</td>
+<td>Single root entry: complete CesiumJS 3D Earth intelligence shell (14,451 lines in <code>src/App.tsx</code>, 11 lazy-loaded modular panels, administrative dialogs, and tools)</td>
 </tr>
 </tbody>
 </table></div>
@@ -425,7 +416,7 @@ flowchart LR
 <h2 id="frontend-src">Frontend (<code>src/</code>)</h2>
 
 
-<p>The frontend internals are inventoried in <a href="FRONTEND.html">FRONTEND.md</a>: the 41 rendering modules (<code>src/rendering/</code>) with per-module purposes, the simulation overlay color map, and all 7 React hooks (<code>useChat</code>, <code>useWebSocket</code>, <code>useKaggleSimulation</code>, …). Routing:</p>
+<p>The frontend internals are inventoried in <a href="FRONTEND.html">FRONTEND.md</a>: the 55 rendering modules (<code>src/rendering/</code>) with per-module purposes, the simulation overlay color map, and all 7 React hooks (<code>useChat</code>, <code>useWebSocket</code>, <code>useKaggleSimulation</code>, …). Routing:</p>
 
 
 <div class="table-scroll"><table>
@@ -440,27 +431,7 @@ flowchart LR
 <tr>
 <td><code>/</code></td>
 <td>App</td>
-<td>Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels)</td>
-</tr>
-<tr>
-<td><code>/v2/globe</code></td>
-<td>GlobePage</td>
-<td>Dedicated Cesium globe viewport</td>
-</tr>
-<tr>
-<td><code>/v2/canvas</code></td>
-<td>CanvasPage</td>
-<td>Spatial canvas</td>
-</tr>
-<tr>
-<td><code>/v2/scenarios</code></td>
-<td>ScenariosPage</td>
-<td>Scenario gallery and editor</td>
-</tr>
-<tr>
-<td><code>/v2/tours</code></td>
-<td>ToursPage</td>
-<td>Cinematic tours</td>
+<td>Single root entry: complete CesiumJS 3D Earth intelligence shell (14,451 lines in <code>src/App.tsx</code>, 11 lazy-loaded panels)</td>
 </tr>
 </tbody>
 </table></div>
@@ -525,7 +496,7 @@ flowchart LR
 </tr>
 <tr>
 <td><code>ai-router/</code></td>
-<td>Omninet 9-provider LLM router (incl. local GGUF fallback)</td>
+<td>Omninet 10-provider LLM router (incl. local GGUF fallback)</td>
 </tr>
 <tr>
 <td><code>rag/</code></td>

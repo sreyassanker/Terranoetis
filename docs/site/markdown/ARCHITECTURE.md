@@ -32,7 +32,7 @@ flowchart LR
     subgraph CLIENT["CLIENT (React 19 + CesiumJS)"]
         direction LR
         UI["UI\nPanels"]
-        Render["Rendering\nCesium + 41 modules"]
+        Render["Rendering\nCesium + 55 modules"]
         WS["WebSocket\nClient"]
         API["REST\nClient"]
         UI --> API
@@ -42,9 +42,9 @@ flowchart LR
 
     subgraph SERVER["EXPRESS.JS SERVER"]
         Security["Security &\nObservability"]
-        Agents["Agent &\nCognition\nSystem 1 + System 2\n9-LLM Router"]
+        Agents["Agent &\nCognition\nSystem 1 + System 2\n10-LLM Router"]
         Engine["Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels"]
-        Data["Data Layer\n30+ live APIs\nFetchers + Cache"]
+        Data["Data Layer\n90 configured APIs\nFetchers + Cache"]
         Realtime["Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub"]
         Services["World Model\nCausal KG · Memory\nDream · Forks\nScenarios"]
         Security --> Agents
@@ -121,11 +121,7 @@ flowchart LR
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels) |
-| `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
-| `/v2/canvas` | CanvasPage | Spatial canvas |
-| `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
-| `/v2/tours` | ToursPage | Cinematic tours |
+| `/` | App | Single root entry: complete CesiumJS 3D Earth intelligence shell (14,451 lines in `src/App.tsx`, 11 lazy-loaded modular panels, administrative dialogs, and tools) |
 
 ---
 
@@ -173,15 +169,11 @@ flowchart LR
 
 ## Frontend (`src/`)
 
-The frontend internals are inventoried in [FRONTEND.md](FRONTEND.md): the 41 rendering modules (`src/rendering/`) with per-module purposes, the simulation overlay color map, and all 7 React hooks (`useChat`, `useWebSocket`, `useKaggleSimulation`, …). Routing:
+The frontend internals are inventoried in [FRONTEND.md](FRONTEND.md): the 55 rendering modules (`src/rendering/`) with per-module purposes, the simulation overlay color map, and all 7 React hooks (`useChat`, `useWebSocket`, `useKaggleSimulation`, …). Routing:
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels) |
-| `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
-| `/v2/canvas` | CanvasPage | Spatial canvas |
-| `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
-| `/v2/tours` | ToursPage | Cinematic tours |
+| `/` | App | Single root entry: complete CesiumJS 3D Earth intelligence shell (14,451 lines in `src/App.tsx`, 11 lazy-loaded panels) |
 
 ---
 
@@ -201,7 +193,7 @@ The frontend internals are inventoried in [FRONTEND.md](FRONTEND.md): the 41 ren
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
 | `multimodal/` | Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion |
-| `ai-router/` | Omninet 9-provider LLM router (incl. local GGUF fallback) |
+| `ai-router/` | Omninet 10-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
 | `observability/` | Pino logger, metrics, in-house OpenTelemetry-style tracing, Sentry |

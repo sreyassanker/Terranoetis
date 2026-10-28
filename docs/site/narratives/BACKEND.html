@@ -12,10 +12,16 @@
 <meta property="og:description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (398 handler registrations across app/router…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Backend — Terranoetis Documentation">
+<meta name="twitter:description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (398 handler registrations across app/router…">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html" aria-label="Terranoetis"><img src="../assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="../assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../download.html">Download</a>
       <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
       <a href="../methodology.html">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../download.html">Download Desktop</a></li>
 <li><a href="../documentation.html">Documentation home</a></li>
 <li><a href="../getting-started.html">Getting started</a></li>
 <li><a href="../architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="../capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="../gallery.html">Visual gallery</a></li>
+<li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
@@ -86,6 +96,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         
       </div>
       
@@ -110,6 +121,7 @@
 <li><a href="#tech-stack">Tech Stack</a></li>
 <li><a href="#top-level-modules">Top-Level Modules</a></li>
 <li><a href="#module-directories">Module Directories</a></li>
+<li><a href="#local-gguf-model">Local GGUF Model</a></li>
 <li><a href="#database">Database</a></li>
 <li><a href="#security">Security</a></li>
 <li><a href="#observability">Observability</a></li>
@@ -148,7 +160,7 @@
 </tr>
 <tr>
 <td>LLM routing</td>
-<td>Omninet 9-provider router (Groq, Gemini, Bai, DeepSeek, Claude, OpenRouter, Ollama, HuggingFace, local GGUF)</td>
+<td>Omninet 10-provider router (OpenAI, Groq, Gemini, Bai, DeepSeek, Claude, Ollama, OpenRouter, HuggingFace, local GGUF)</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -178,7 +190,7 @@
 <tbody>
 <tr>
 <td><code>index.ts</code></td>
-<td>Express app: routes, middleware, startup orchestration, background services</td>
+<td>Express app (15,927 lines): routes, middleware, startup orchestration, background services</td>
 </tr>
 <tr>
 <td><code>agent.ts</code></td>
@@ -242,7 +254,7 @@
 </tr>
 <tr>
 <td><code>apiMetadata.ts</code></td>
-<td>API metadata + category definitions</td>
+<td>API metadata + category definitions (90 configured API metadata entries)</td>
 </tr>
 <tr>
 <td><code>embedding.ts</code></td>
@@ -303,6 +315,14 @@
 <td>Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy)</td>
 </tr>
 <tr>
+<td><code>archaeology/</code></td>
+<td>Archaeological anomaly detection engine (Sentinel-2 multispectral band indices, LiDAR hillshade, peer-reviewed reference sites)</td>
+</tr>
+<tr>
+<td><code>cctv/</code></td>
+<td>Worldwide public webcam directory, HLS/MJPEG stream proxy with SSRF protection, health monitoring</td>
+</tr>
+<tr>
 <td><code>kgV2/</code></td>
 <td>Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph</td>
 </tr>
@@ -312,7 +332,7 @@
 </tr>
 <tr>
 <td><code>ai-router/</code></td>
-<td>Omninet 9-provider LLM router (incl. local GGUF fallback)</td>
+<td>Omninet 10-provider LLM router (incl. local GGUF fallback)</td>
 </tr>
 <tr>
 <td><code>rag/</code></td>
@@ -437,16 +457,16 @@
 <p>On startup, the server checks for <code>models/LFM2.5-2.6B-Q4_K_M.gguf</code>. If found, it spawns <code>llama-server</code> on port <strong>11436</strong> (configurable via <code>LLAMA_SERVER_PATH</code>). The local model is then available as a drop-in LLM provider.</p>
 
 
-<h3 id="one-click-download">One-click download</h3>
+<h3 id="download-workflow">Download Workflow</h3>
 
 
-<p>The admin panel Home tab includes a &quot;Download Model&quot; button that streams the model from HuggingFace (<code>LiquidAI/LFM2.5-2.6B-GGUF</code>) directly into <code>models/</code>. The download features:</p>
+<p>The admin panel Local AI Hub includes a download controller that streams the model from HuggingFace (<code>LiquidAI/LFM2.5-2.6B-GGUF</code>) directly into <code>models/</code>. The download features:</p>
 
 
 <ul>
-<li><strong>Live progress bar</strong> with percentage, speed (MB/s), and ETA</li>
+<li><strong>Live progress telemetry</strong> with percentage, transfer rate (MB/s), and ETA</li>
 <li><strong>Resume support</strong> — writes to a <code>.partial</code> temp file; on interruption, re-triggering sends an HTTP <code>Range</code> header to HuggingFace and appends to the partial file</li>
-<li><strong>Atomic finalisation</strong> — the <code>.partial</code> file is renamed to the final path only when 100% complete, so a corrupt file never shows as &quot;Installed&quot;</li>
+<li><strong>Atomic finalisation</strong> — the <code>.partial</code> file is renamed to the final path only when 100% complete, so a corrupt file never shows as installed</li>
 </ul>
 
 
@@ -489,7 +509,7 @@
 <h3 id="sqlite-better-sqlite3">SQLite (<code>better-sqlite3</code>)</h3>
 
 
-<p>Primary store. Schema is defined in <code>server/db/schema.sql</code> (47 tables) and applied via <code>server/db/index.ts</code> migrations:</p>
+<p>Primary store. Schema is defined in <code>server/db/schema.sql</code> (48 tables) and applied via <code>server/db/index.ts</code> migrations:</p>
 
 
 <ul>

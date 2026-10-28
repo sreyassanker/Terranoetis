@@ -12,10 +12,16 @@
 <meta property="og:description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/methodology.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Methodology &amp; verification — Terranoetis Documentation">
+<meta name="twitter:description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html"><img src="assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="index.html" aria-label="Terranoetis"><img src="assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="index.html">Overview</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="download.html">Download</a>
       <a href="documentation.html">Documentation</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
       <a href="methodology.html" aria-current="page">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="index.html">Product overview</a></li>
+<li><a href="download.html">Download Desktop</a></li>
 <li><a href="documentation.html">Documentation home</a></li>
 <li><a href="getting-started.html">Getting started</a></li>
 <li><a href="architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="gallery.html">Visual gallery</a></li>
+<li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="reference/api.html">REST &amp; WebSocket API</a></li>
@@ -85,6 +95,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED</span></span>
       </div>
       
@@ -171,6 +182,8 @@
 <tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
 <tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
 <tr><td>C-11</td><td>Second verification pass (re-executed kernels, suites, boot; line-by-line claim audit)</td><td>Nine fixes: e2e suite counts “38 declarations” (naive grep artifact) → 15 declarations / 14 registered; handler count 371 (literal <code>app|router</code> only) → 398 across all router identifiers; “~100 provider keys” → 103 variables (62 key/token/secret); “archived example artifacts in <code>kaggle-kernels/results/</code>” → directory is empty and gitignored; error shape → two coexisting forms (string from handlers, <code>{error:{code,message}}</code> from central middleware); public-route wording → tiles/pulse/shared are public and unthrottled; phantom “vault” module removed from <code>routes/</code> inventory; “OpenTelemetry” relabelled as in-house OpenTelemetry-style tracing (official SDK imports are stubbed); Pages deployment paragraph → <code>docs/site/</code> via <code>deploy-docs.yml</code>; landing prerequisites badge “PYTHON 3.12+” → “PYTHON 3 + NumPy” (nothing enforces 3.12).</td><td>README.md · SECURITY.md · CONTRIBUTING.md · API.md · BACKEND.md · ARCHITECTURE.md · DEPLOYMENT.md · FRONTEND.md · MODELS.md · getting-started.md · capability pages · this site</td></tr>
+<tr><td>C-12</td><td>“Playwright browser tests (7 files)” (README · docs)</td><td>Suite expanded to 29 spec files; 62 tests registered by default per <code>npx playwright test --list</code> (63 declarations including the heavy LULC test). Updated all docs and repository tables.</td><td>README.md · CONTRIBUTING.md · documentation hub · methodology.html</td></tr>
+<tr><td>C-13</td><td>Native Desktop distribution & cross-platform builds</td><td>Compiled and published standalone <code>Terranoetis.app</code> (50.33 MB) and <code>Terranoetis_3.0.0_aarch64.dmg</code> (51.74 MB) to GitHub Releases v3.0.0 with SHA-256 checksums; added dedicated <code>download.html</code> hub and verified <code>.github/workflows/desktop-release.yml</code> multi-platform CI configuration.</td><td>download.html · index.html · DISTRIBUTION.md · DEPLOYMENT.md</td></tr>
 </tbody></table></div>
 <h2 id="unverified">Claims not verifiable in this environment</h2>
 <div class="table-scroll"><table><caption></caption>

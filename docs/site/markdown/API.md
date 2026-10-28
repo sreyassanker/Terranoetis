@@ -13,6 +13,8 @@ Terranoetis exposes **360+ REST endpoints** (398 handler registrations across `a
 - [Agent & Cognition](#agent--cognition)
 - [Analytical Models](#analytical-models)
 - [Live Data Feeds](#live-data-feeds)
+- [Archaeology & Remote Sensing](#archaeology--remote-sensing)
+- [CCTV & Webcams](#cctv--webcams)
 - [Intelligence & Pulse](#intelligence--pulse)
 - [Simulations & Scenarios](#simulations--scenarios)
 - [Explainability & Governance](#explainability--governance)
@@ -117,6 +119,34 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | Space | `/api/satellites/tle`, `/api/ucs-satellites`, `/api/spacex/launches`, `/api/space-debris`, `/api/space-weather/donki`, `/api/space-weather/kp`, `/api/aurora`, `/api/iss` |
 | Traffic | `/api/road-traffic/analyze` |
 | Climate | `/api/climate/power`, `/api/electricity-grid` |
+
+---
+
+## Archaeology & Remote Sensing
+
+Multi-modal archaeological anomaly detection engine combining Sentinel-2 multispectral band indices (NDVI, cropmark indices) with LiDAR elevation hillshade and peer-reviewed benchmark datasets.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/archaeology/scan` | Scans user-drawn study area bounding box for multi-modal archaeological anomalies |
+| GET | `/api/archaeology/benchmarks` | Returns 5 peer-reviewed reference sites with literature citations |
+| GET | `/api/archaeology/benchmark/run` | Executes validation benchmark across reference locations (spatial error, IoU, confidence) |
+| POST | `/api/archaeology/benchmark/run` | Executes validation benchmark via POST trigger |
+
+---
+
+## CCTV & Webcams
+
+Worldwide public webcam feeds, directory search, and proxy services with SSRF protection.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/cctv/worldwide` | Worldwide public CCTV cameras near coordinates or bounding box (also `/api/cameras`) |
+| GET | `/api/cctv/youtube` | Curated 24/7 YouTube live streams (space station, landmarks, world cities) |
+| GET | `/api/cctv/windy` | Windy live webcams search with bounding box and category filters |
+| GET | `/api/cctv/categories` | Worldwide webcam category statistics |
+| GET | `/api/cctv/health` | Webcam feed health status and load state |
+| GET | `/api/cctv/stream-proxy` | CCTV HLS/MJPEG stream proxy with SSRF validation |
 
 ---
 

@@ -28,7 +28,7 @@ The client runs on `http://localhost:3000` and the server on `http://localhost:3
 
 ```bash
 # Unit + integration tests
-npm test              # vitest — 1,702 tests (1,653 unit + 49 integration)
+npm test              # vitest — 1,843 tests (1,794 unit + 49 integration)
 
 # TypeScript type checking
 npx tsc -p tsconfig.server.json --noEmit
@@ -38,7 +38,7 @@ npx tsc -p tsconfig.app.json --noEmit
 npm run lint          # eslint — 0 errors required
 
 # E2E browser tests
-npx playwright test   # 7 spec files, headless Chromium
+npx playwright test   # 29 spec files (62 registered tests), headless Chromium
 
 # Build
 npm run build         # tsc + vite build

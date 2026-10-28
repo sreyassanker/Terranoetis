@@ -10,6 +10,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 <div align="center">
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sreyassanker/Terranoetis)
 [![Website](https://img.shields.io/badge/Docs_Site-2560EB?style=for-the-badge&logo=githubpages&logoColor=white)](https://sreyassanker.github.io/Terranoetis/)
 [![Website](https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://sreyassanker.vercel.app)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker)
@@ -24,10 +25,10 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 ## Highlights
 
 - **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI) ([catalog](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html) · [verified engine page](https://sreyassanker.github.io/Terranoetis/capabilities/analytical-engine.html))
-- **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
+- **Photorealistic CesiumJS 3D globe** with 55 rendering and visualization modules, dynamic OSM boundary clipping, and viewshed/CCTV projections
 - **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html#modes))
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
-- **82 registered live-data integrations** — seismic, weather, aviation, maritime, satellite, traffic, space ([inventory](https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html#inventory))
+- **90 configured telemetry & sensor metadata integrations** (82+ registered active services) — seismic, weather, aviation, maritime, satellite, traffic, space ([inventory](https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html#inventory))
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)
 - **Explainable AI** — evidence chains, uncertainty quantification, human-override workflow
 - **Global model selector** — pick any LLM provider (or local GGUF) from the AI chat panel
@@ -57,6 +58,10 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
     <td align="center"><b>Satellite Tracker</b><br/>real-time TLE orbit propagation</td>
   </tr>
 </table>
+
+<p align="center">
+  <a href="https://sreyassanker.github.io/Terranoetis/gallery.html"><strong>Explore the full Dedicated Visual Gallery &rarr;</strong></a>
+</p>
 
 ---
 
@@ -102,10 +107,10 @@ file-level citations, measured verification data and a CI quality gate. Highligh
 ```
 terranoetis/
 ├── src/                          # React 19 + CesiumJS frontend
-│   ├── main.tsx                  # Router: /, /v2/globe, /v2/canvas, /v2/scenarios, /v2/tours
-│   ├── App.tsx                   # Globe shell (~11k lines, 11 lazy-loaded panels)
+│   ├── main.tsx                  # Root entry, router (/) with ErrorBoundary, Toaster, and service worker
+│   ├── App.tsx                   # Globe shell (14,451 lines, 11 lazy-loaded panels)
 │   ├── components/               # UI components (chat/, cockpit/, scenarios/, kaggle/, ...)
-│   ├── rendering/                # 41 Cesium rendering modules (ais, flights, satellites, ...)
+│   ├── rendering/                # 55 Cesium rendering modules (ais, flights, satellites, cctvViewshed, studyArea, ...)
 │   ├── hooks/                    # useChat, useWebSocket, useRealtimeVoice, ...
 │   ├── lib/                      # API client, chat store, formatTime, PDF
 │   ├── data/                     # Analytical models catalog, land cover classes
@@ -113,22 +118,22 @@ terranoetis/
 │   └── __tests__/                # Frontend unit tests
 │
 ├── server/                       # Express 4 + TypeScript API
-│   ├── index.ts                  # App entry: routes, middleware, background services (14,573 lines)
+│   ├── index.ts                  # App entry: routes, middleware, background services (15,927 lines)
 │   ├── agent.ts                  # Intent router + cognition pipeline
 │   ├── analytical-models/        # 150-equation engine, 7 parts, 26 domains
 │   ├── cognition/                # System 1 / System 2, MCTS, tree-of-thoughts
 │   ├── sentinel/                 # Continuous monitoring, anomaly detection
 │   ├── memory/ + memoryV2/       # Working/episodic/semantic/procedural memory
-│   ├── ai-router/                # Omninet 9-provider LLM router (incl. local GGUF)
+│   ├── ai-router/                # Omninet 10-provider LLM router (incl. local GGUF)
 │   ├── sandboxV2/                # Simplified surrogate engines (farsiteLite, adcircLite, wrfLite, hysplitLite, FNO)
 │   ├── causal/ + kgV2/           # Causal reasoning + knowledge graph
 │   ├── scenarios/                # Disaster scenario generation
-│   ├── data/                     # Live-data fetchers (82 registered sources)
-│   ├── db/                       # SQLite schema (47 tables), migrations
+│   ├── data/                     # Live-data fetchers (90 configured API configs, 82+ registered sources)
+│   ├── db/                       # SQLite schema (48 tables), migrations
 │   ├── middleware/               # JWT auth, rate limiter, validation, audit
 │   ├── observability/            # Pino, in-house OpenTelemetry-style tracing, Sentry
 │   ├── selfImprover.ts           # Feedback-driven prompt evolution
-│   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing)
+│   └── __tests__/                # 1,843 tests (1,794 unit + 49 integration passing across 158 test files)
 │
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
 ├── server/plugins/               # Modular extension drop-in directory (auto-loads *.ts / *.js; managed by pluginManager.ts)
@@ -142,7 +147,7 @@ terranoetis/
 │   │   └── platform-overview.html # Legacy URL — redirects to the docs index
 │   └── Research papers/          # Source PDFs backing the equation citations → local-only (gitignored)
 │
-├── e2e/                          # Playwright browser tests (7 spec files; 15 test declarations, 14 registered by default — 1 gated behind LULC_HEAVY=1)
+├── e2e/                          # Playwright browser tests (29 spec files; 62 registered tests by default — 1 gated behind LULC_HEAVY=1)
 ├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
 ├── data/                         # Runtime databases + ML models → gitignored
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
@@ -151,7 +156,7 @@ terranoetis/
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
 ├── Dockerfile                    # Multi-stage build (node:20-alpine)
 ├── .github/workflows/ci.yml      # 10 CI jobs (typecheck, lint, tests, coverage, build, docker, audit, browser, summary)
-├── package.json                  # 96 dependencies, 14 scripts
+├── package.json                  # 96 dependencies (130 with dev), 23 scripts
 ├── tsconfig.json                 # Project references: app + node + server + scripts
 ├── vite.config.ts                # Vite 7 config with a custom Cesium asset-copy plugin
 ├── playwright.config.ts          # Playwright: WebGL args, reuse server

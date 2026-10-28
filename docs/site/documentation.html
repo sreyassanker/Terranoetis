@@ -12,10 +12,16 @@
 <meta property="og:description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/documentation.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Terranoetis — Real-Time Earth Intelligence Platform">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Documentation — Terranoetis Documentation">
+<meta name="twitter:description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.">
+<meta name="twitter:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis-og-preview.png">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-09">
+<meta name="docs-last-reviewed" content="2026-10-28">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +32,11 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html"><img src="assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="index.html" aria-label="Terranoetis"><img src="assets/img/terranoetis.png" alt="" width="36" height="36" class="brand-logo"><img src="assets/img/terranoetis-wordmark.png" alt="Terranoetis" class="brand-wordmark" width="168" height="15"></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="index.html">Overview</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="download.html">Download</a>
       <a href="documentation.html" aria-current="page">Documentation</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
       <a href="methodology.html">Verification</a>
@@ -42,6 +50,7 @@
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
 <ul><li><a href="index.html">Product overview</a></li>
+<li><a href="download.html">Download Desktop</a></li>
 <li><a href="documentation.html" aria-current="true">Documentation home</a></li>
 <li><a href="getting-started.html">Getting started</a></li>
 <li><a href="architecture.html">Platform architecture</a></li></ul>
@@ -61,7 +70,8 @@
 <li><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
 <li><a href="capabilities/memory.html">Memory system</a></li></ul>
 <h2>Interface &amp; platform</h2>
-<ul><li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
+<ul><li><a href="gallery.html">Visual gallery</a></li>
+<li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
 <li><a href="capabilities/platform-services.html">Platform services</a></li></ul>
 <h2>Reference</h2>
 <ul><li><a href="reference/api.html">REST &amp; WebSocket API</a></li>
@@ -85,6 +95,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last updated</strong> 2026-10-28</span>
         
       </div>
       
@@ -98,13 +109,15 @@
 <div class="callout callout-verified" role="note"><div class="callout-title">Accuracy policy</div><p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged <span class="tag tag-measured">MEASURED</span>. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
 <h2 id="verified-facts">Verified at a glance</h2>
 <dl class="metrics"><dt><strong>Analytical engines</strong></dt><dd>150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically <cite class="src">src/data/analyticalModels.ts:801+</cite><cite class="src">server/analytical-models/engine.ts:1-174</cite></dd>
-<dt><strong>Equation-engine tests</strong></dt><dd>1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> <cite class="src">measured</cite></dd>
-<dt><strong>Integration tests</strong></dt><dd>49 passed (5 files, 5.66 s) with <code>npm run test:integration</code> <cite class="src">measured</cite></dd>
+<dt><strong>Equation-engine tests</strong></dt><dd>1,794 unit tests passed (153 files) with <code>npm run test:unit</code> <cite class="src">measured</cite></dd>
+<dt><strong>Integration tests</strong></dt><dd>49 passed (5 files) with <code>npm run test:integration</code> (1,843 tests total) <cite class="src">measured</cite></dd>
 <dt><strong>Simulation kernels</strong></dt><dd>7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata. <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">kaggle-kernels/*/kernel-metadata.json</cite></dd>
 <dt><strong>Hazard physics</strong></dt><dd>All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a> <cite class="src">measured</cite></dd>
 <dt><strong>Citations</strong></dt><dd>150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302) <cite class="src">src/data/analyticalModels.ts (counted)</cite></dd></dl>
 <h2 id="explore">Where to go next</h2>
 <div class="card-grid"><div class="card"><a href="getting-started.html">Getting started</a><p>Install, run, verify: the five-minute local setup with measured outputs.</p></div>
+<div class="card"><a href="download.html">Download Desktop</a><p>Standalone Tauri v2 desktop package for macOS (Apple Silicon arm64 .app/.dmg), Windows, and Linux.</p></div>
+<div class="card"><a href="gallery.html">Visual gallery</a><p>Visual exhibits across hazard simulations, live entities, and analytical risk fields.</p></div>
 <div class="card"><a href="architecture.html">Platform architecture</a><p>Three-tier topology, request lifecycle, background services.</p></div>
 <div class="card"><a href="capabilities/hazard-simulations.html">Hazard simulations</a><p>Seven physics kernels: modes, contracts, measured timings.</p></div>
 <div class="card"><a href="capabilities/earthquake.html">Earthquake</a><p>BSSA14 GMPE ShakeMap · local CPU · measured 0.008 s compute.</p></div>
@@ -115,11 +128,11 @@
 <div class="card"><a href="capabilities/hurricane.html">Hurricane</a><p>Holland wind + SWE surge + waves + rainfall + runoff · gates PASS.</p></div>
 <div class="card"><a href="capabilities/wildfire.html">Wildfire</a><p>Rothermel/Anderson-13 · K_ROS calibration PASS measured.</p></div>
 <div class="card"><a href="capabilities/analytical-engine.html">Analytical equation engine</a><p>150 engines · 7-stage workflow · honest-NaN contract.</p></div>
-<div class="card"><a href="capabilities/ai-cognition.html">AI chat &amp; cognition</a><p>Intent routing, System 1 / System 2, 9-provider Omninet router.</p></div>
-<div class="card"><a href="capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a><p>82 registered external APIs, Sentinel polling, reflex actions.</p></div>
+<div class="card"><a href="capabilities/ai-cognition.html">AI chat &amp; cognition</a><p>Intent routing, System 1 / System 2, 10-provider Omninet router.</p></div>
+<div class="card"><a href="capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a><p>90 configured API metadata entries (82 active external feeds), Sentinel polling, reflex actions.</p></div>
 <div class="card"><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a><p>Causal graph, ensemble predictor, forecast ledger, KG v2.</p></div>
 <div class="card"><a href="capabilities/memory.html">Memory system</a><p>Tiered working/episodic/semantic memory with SQLite + Redis hot path.</p></div>
-<div class="card"><a href="capabilities/globe-visualization.html">3D globe visualization</a><p>React 19 + Cesium 1.140; 41 rendering modules (counted).</p></div>
+<div class="card"><a href="capabilities/globe-visualization.html">3D globe visualization</a><p>React 19 + Cesium 1.140; 55 rendering modules (counted).</p></div>
 <div class="card"><a href="capabilities/platform-services.html">Platform services</a><p>Auth, rate limits, sandbox, queue, plugins, observability.</p></div>
 <div class="card"><a href="reference/api.html">REST &amp; WebSocket API</a><p>Endpoint map, auth model, error envelope; canonical list in API.md.</p></div>
 <div class="card"><a href="reference/simulation-api.html">Simulation job API</a><p>Parameter contracts, job lifecycle, results formats, UQ endpoints.</p></div>
@@ -141,11 +154,11 @@
 <div class="table-scroll"><table><caption>Top-level layout</caption>
 <thead><tr><th scope="col">Path</th><th scope="col">Contents</th></tr></thead>
 <tbody>
-<tr><td><code>src/</code></td><td>React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)</td></tr>
-<tr><td><code>server/</code></td><td>Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db</td></tr>
+<tr><td><code>src/</code></td><td>React 19 + CesiumJS client (App shell 14,451 lines, components/, rendering/ 55 modules, hooks, lib, services, store)</td></tr>
+<tr><td><code>server/</code></td><td>Express API: index.ts (15,927 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db (48 tables)</td></tr>
 <tr><td><code>kaggle-kernels/</code></td><td>Seven Python simulation kernels + per-kernel metadata; runtime output goes to <code>results/&lt;jobId&gt;/</code> (gitignored)</td></tr>
 <tr><td><code>docs/</code></td><td>This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap</td></tr>
-<tr><td><code>e2e/</code></td><td>Playwright specs (7 files; 15 test declarations, 14 registered by default — 1 gated behind <code>LULC_HEAVY=1</code>)</td></tr>
+<tr><td><code>e2e/</code></td><td>Playwright specs (29 files; 62 registered tests by default — 1 gated behind <code>LULC_HEAVY=1</code>; 63 total declarations)</td></tr>
 <tr><td><code>scripts/</code></td><td>Dev utilities, live smoke scripts, docs build + quality gate</td></tr>
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>
