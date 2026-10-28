@@ -195,4 +195,4 @@ Terranoetis is licensed under the **Business Source License 1.1 (BUSL-1.1)**.
 
 Third-party components (CesiumJS, ONNX models, satellite data sources, etc.) remain under their own original licenses.
 
-Copyright (c) 2026 Sreyas S S.
+Copyright (c) 2026 Terranoetis.
