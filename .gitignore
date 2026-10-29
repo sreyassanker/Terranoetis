@@ -168,3 +168,8 @@ e2e/tmp*
 
 # Original Three.js heli showcase (reference only, not part of the app)
 src/Flying models/
+
+# Local media captures (>100MB exceed GitHub push limits)
+*.mp4
+docs/site/assets/media/*.mp4
+
