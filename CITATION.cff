@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or project, please cite it as below."
+type: software
+authors:
+  - given-names: "Sreyas"
+    family-names: "S S"
+    email: "sreyassanker001@gmail.com"
+title: "Terranoetis: A Real-Time Geospatial Intelligence and Analytical Simulation Platform"
+abstract: >-
+  Terranoetis is a real-time geospatial intelligence platform combining photorealistic
+  CesiumJS 3D globe visualization with live environmental telemetry, physics simulations,
+  and 150 computational engines implementing analytical models from primary scientific
+  literature across 26 earth and atmospheric domains. Note: The mathematical equations and
+  scientific models implemented in the platform remain the intellectual property of their
+  respective published authors and are individually cited within the catalog.
+version: 3.0.0
+date-released: "2026-09-12"
+license: BUSL-1.1
+repository-code: "https://github.com/sreyassanker/Terranoetis"
+url: "https://sreyassanker.github.io/Terranoetis/"
+keywords:
+  - "geospatial intelligence"
+  - "cesium"
+  - "earth observation"
+  - "hazard simulation"
+  - "scientific computing"
+  - "environmental monitoring"
+  - "remote sensing"
