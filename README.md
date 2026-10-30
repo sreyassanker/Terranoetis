@@ -13,10 +13,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 [![Release](https://img.shields.io/badge/Release-v3.0.1-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker/Terranoetis/releases/tag/v3.0.1)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23803853-1073B1?style=for-the-badge&logo=zenodo&logoColor=white)](https://doi.org/10.5281/zenodo.23803853)
 [![Docs Site](https://img.shields.io/badge/Docs_Site-2560EB?style=for-the-badge&logo=githubpages&logoColor=white)](https://sreyassanker.github.io/Terranoetis/)
-[![Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?style=for-the-badge&logo=github&logoColor=white)](https://codespaces.new/sreyassanker/Terranoetis)
-
-<br />
-
+[![Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?style=for-the-badge&logo=github&logoColor=white)](https://codespaces.new/sreyassanker/Terranoetis)<br/>
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/sreyassanker)
 [![Portfolio](https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://sreyassanker.vercel.app)
