@@ -10,6 +10,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 <div align="center">
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23803853.svg)](https://doi.org/10.5281/zenodo.23803853)
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sreyassanker/Terranoetis)
 [![Website](https://img.shields.io/badge/Docs_Site-2560EB?style=for-the-badge&logo=githubpages&logoColor=white)](https://sreyassanker.github.io/Terranoetis/)
 [![Website](https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://sreyassanker.vercel.app)
@@ -182,6 +183,33 @@ terranoetis/
 npm test              # Vitest — unit + integration tests
 npx playwright test   # Playwright — Chromium with software WebGL (SwiftShader); runs headless in CI
 ```
+
+---
+
+## Citation
+
+If you use Terranoetis in your research, academic study, or technical project, please cite the software implementation as follows:
+
+```text
+Sreyas, S. S. (2026). Terranoetis: A Real-Time Geospatial Intelligence and Analytical Simulation Platform (Version 3.0.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23803853
+```
+
+### BibTeX
+
+```bibtex
+@software{sreyas_terranoetis_2026,
+  author       = {Sreyas, S. S.},
+  title        = {Terranoetis: A Real-Time Geospatial Intelligence and Analytical Simulation Platform},
+  year         = 2026,
+  month        = sep,
+  publisher    = {Zenodo},
+  version      = {v3.0.1},
+  doi          = {10.5281/zenodo.23803853},
+  url          = {https://doi.org/10.5281/zenodo.23803853}
+}
+```
+
+> **Literature Attribution:** Terranoetis implements 150 analytical models grounded in published scientific literature across 26 earth and atmospheric domains. When citing specific scientific formulations or analytical equations, please also cite the primary literature sources documented in the [Analytical Models Catalog](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html).
 
 ---
 

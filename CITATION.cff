@@ -13,7 +13,8 @@ abstract: >-
   literature across 26 earth and atmospheric domains. Note: The mathematical equations and
   scientific models implemented in the platform remain the intellectual property of their
   respective published authors and are individually cited within the catalog.
-version: 3.0.0
+version: 3.0.1
+doi: 10.5281/zenodo.23803853
 date-released: "2026-09-12"
 license: BUSL-1.1
 repository-code: "https://github.com/sreyassanker/Terranoetis"
