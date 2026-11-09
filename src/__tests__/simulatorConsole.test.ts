@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SIMULATOR_CITIES, LANDMARK_PRESETS } from '@/components/FlightSimulatorPanel';
+import { SIMULATOR_CITIES, LANDMARK_PRESETS } from '@/components/SimulatorConsole';
 import { API_METADATA } from '../../server/apiMetadata';
 
 describe('Flight Simulator & Exploration Hub', () => {

@@ -26,11 +26,17 @@ import {
   Sun,
   Lightbulb,
   Terminal,
+  Keyboard,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
+  Square,
+  Footprints,
 } from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
 import { GroundWalkController, type GroundExplorerMode, type CameraViewPerspective } from '@/rendering/groundWalkController';
-import { loadOsmBuildings, hideOsmBuildings } from '@/rendering/osmBuildings';
+import { hideOsmBuildings, removeOsmBuildings } from '@/rendering/osmBuildings';
 import { getPegmanSvgUri, updatePegman, removePegman, flyToStreetLevel } from '@/rendering/streetViewPegman';
 import { TeslaRoadsterCockpitView } from '@/components/TeslaRoadsterCockpitView';
 import { SIMULATOR_CITIES, LANDMARK_PRESETS, type CityPreset } from '@/data/simulatorPresets';
@@ -49,7 +55,65 @@ export interface HeliSpawn {
 
 export type SimulatorMode = 'helicopter' | 'streetview' | 'car' | 'drone' | 'walk';
 
-export interface FlightSimulatorPanelProps {
+interface SimulationModeCardItem {
+  id: SimulatorMode;
+  title: string;
+  badge: string;
+  desc: string;
+  activeModel: string;
+  icon: React.ComponentType<{ size?: number; color?: string; style?: React.CSSProperties }>;
+  accent: string;
+}
+
+const SIMULATION_MODES: SimulationModeCardItem[] = [
+  {
+    id: 'car',
+    title: 'Car',
+    badge: 'GROUND',
+    desc: 'Tri-motor hypercar dynamics & thrusters',
+    activeModel: 'Tesla Roadster (Tri-Motor AWD)',
+    icon: Car,
+    accent: '#ef4444',
+  },
+  {
+    id: 'helicopter',
+    title: 'Helicopter',
+    badge: 'FLIGHT',
+    desc: 'Tactical rotorcraft flight & avionics',
+    activeModel: 'Boeing AH-64E Apache Guardian',
+    icon: Rocket,
+    accent: '#22c55e',
+  },
+  {
+    id: 'streetview',
+    title: 'Street View',
+    badge: '360° EMBED',
+    desc: 'Live panoramic street embed & Pegman',
+    activeModel: 'Google Street View (Live 360°)',
+    icon: MapPin,
+    accent: '#fbbc04',
+  },
+  {
+    id: 'drone',
+    title: 'Drone',
+    badge: 'AERIAL',
+    desc: 'Tactical aerial surveillance & gimbal',
+    activeModel: 'Tactical Reconnaissance Micro-UAV',
+    icon: Radio,
+    accent: '#a855f7',
+  },
+  {
+    id: 'walk',
+    title: 'Street Walk',
+    badge: 'PEDESTRIAN',
+    desc: 'Human-scale 1.7m eye-level walk',
+    activeModel: 'First-Person Pedestrian View',
+    icon: Footprints,
+    accent: '#34d399',
+  },
+];
+
+export interface SimulatorConsoleProps {
   viewer: Cesium.Viewer | null;
   initialMode?: SimulatorMode;
   initialLat?: number;
@@ -63,19 +127,19 @@ export interface FlightSimulatorPanelProps {
   toggleConsoleNonce?: number;
 }
 
-export function FlightSimulatorPanel({
+export function SimulatorConsole({
   viewer,
-  initialMode = 'car',
+  initialMode = 'streetview',
   initialLat,
   initialLon,
   initialHeading = 0,
   googleMapsApiKey,
-  onOpenApiVault: _onOpenApiVault,
+  onOpenApiVault,
   onLaunchHelicopter,
   onClose,
   onSimulationActiveChange,
   toggleConsoleNonce,
-}: FlightSimulatorPanelProps) {
+}: SimulatorConsoleProps) {
   // Mode selection: car | helicopter | streetview | drone | walk
   const [mode, setMode] = useState<SimulatorMode>(initialMode);
 
@@ -116,6 +180,7 @@ export function FlightSimulatorPanel({
 
   // UI state
   const [minimized, setMinimized] = useState(false);
+  const [controlsExpanded, setControlsExpanded] = useState(false);
 
   // Sync initial coordinates if passed
   useEffect(() => {
@@ -229,6 +294,7 @@ export function FlightSimulatorPanel({
       }
       hideOsmBuildings();
       if (viewer && !viewer.isDestroyed()) {
+        removeOsmBuildings(viewer);
         removePegman(viewer);
       }
     };
@@ -258,9 +324,6 @@ export function FlightSimulatorPanel({
     }
 
     setPerspective(targetMode === 'drive' ? 'chase' : 'cockpit');
-
-    // Automatically stream 3D OSM buildings
-    void loadOsmBuildings(viewer).catch(() => {});
 
     groundWalkRef.current.start(
       viewer,
@@ -305,7 +368,10 @@ export function FlightSimulatorPanel({
       setTargaOpen(false);
     }
     hideOsmBuildings();
-  }, []);
+    if (viewer && !viewer.isDestroyed()) {
+      removeOsmBuildings(viewer);
+    }
+  }, [viewer]);
 
   // Teleport to city preset
   const handleSelectCityPreset = (preset: CityPreset) => {
@@ -956,11 +1022,10 @@ export function FlightSimulatorPanel({
         left: '50%',
         transform: 'translate(-50%, -50%)',
         zIndex: 600,
-        width: mode === 'streetview' && embedUrl ? 740 : 540,
+        width: 720,
         maxWidth: '94vw',
-        maxHeight: '92vh',
+        maxHeight: '90vh',
         overflowY: 'auto',
-        transition: 'width 0.25s ease',
       }}
     >
       <Panel
@@ -975,7 +1040,7 @@ export function FlightSimulatorPanel({
           {/* Header Subtitle with active mode indicator */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
-              Multi-Vehicle Telemetry & Simulation Console · Tesla Roadster · Helicopter · Street View · Drone · Walk
+              Multi-Vehicle Telemetry &amp; Simulation Console · Common Origin Coordinates · Professional Flight &amp; Ground Dynamics
             </div>
             <span
               style={{
@@ -990,118 +1055,68 @@ export function FlightSimulatorPanel({
                 whiteSpace: 'nowrap',
               }}
             >
-              {mode === 'car' ? 'TESLA ROADSTER' : mode === 'helicopter' ? 'APACHE HELICOPTER' : mode === 'streetview' ? 'STREET VIEW 360°' : mode === 'drone' ? 'DRONE RECON' : 'STREET WALK'}
+              {mode === 'car' ? 'CAR' : mode === 'helicopter' ? 'HELICOPTER' : mode === 'streetview' ? 'STREET VIEW 360°' : mode === 'drone' ? 'DRONE' : 'STREET WALK'}
             </span>
           </div>
 
           {/* ══════════════════════════════════════════════════════════════
-              MODE SELECTOR TABS (Google Maps & Earth Style Segmented Bar)
+              UNIVERSAL COMMON LOCATION & TELEPORT TARGET
               ══════════════════════════════════════════════════════════════ */}
           <div
             style={{
-              display: 'flex',
-              background: 'rgba(0, 0, 0, 0.45)',
+              background: 'rgba(0,0,0,0.3)',
+              padding: '10px 12px',
               borderRadius: 8,
-              padding: 3,
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              gap: 2,
-            }}
-          >
-            {[
-              { id: 'car', label: 'Tesla Roadster', icon: Car, color: '#ef4444' },
-              { id: 'helicopter', label: 'Helicopter', icon: Rocket, color: '#22c55e' },
-              { id: 'streetview', label: 'Street View', icon: MapPin, color: '#fbbc04' },
-              { id: 'drone', label: 'Drone', icon: Radio, color: '#a855f7' },
-              { id: 'walk', label: 'Street Walk', icon: Eye, color: '#34d399' },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = mode === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setMode(tab.id as SimulatorMode);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '8px 4px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: isActive ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                    boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.3)' : 'none',
-                    color: isActive ? tab.color : '#94a3b8',
-                    fontSize: 10.5,
-                    fontWeight: isActive ? 700 : 500,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 4,
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <Icon size={14} color={isActive ? tab.color : '#94a3b8'} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* ══════════════════════════════════════════════════════════════
-              LOCATION CONTROLS & GEODETIC PREVIEWS
-              ══════════════════════════════════════════════════════════════ */}
-          <div
-            style={{
-              background: 'rgba(0,0,0,0.25)',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.08)',
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
             }}
           >
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                onClick={() => setLocationType('current')}
-                style={{
-                  flex: 1,
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  background: locationType === 'current' ? 'rgba(56,189,248,0.16)' : 'transparent',
-                  border: `1px solid ${locationType === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(255,255,255,0.1)'}`,
-                  color: locationType === 'current' ? '#38bdf8' : '#94a3b8',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                }}
-              >
-                <LocateFixed size={12} /> CURRENT VIEWPOINT
-              </button>
-              <button
-                onClick={() => setLocationType('preset')}
-                style={{
-                  flex: 1,
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  background: locationType === 'preset' ? 'rgba(56,189,248,0.16)' : 'transparent',
-                  border: `1px solid ${locationType === 'preset' ? 'rgba(56,189,248,0.45)' : 'rgba(255,255,255,0.1)'}`,
-                  color: locationType === 'preset' ? '#38bdf8' : '#94a3b8',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                }}
-              >
-                <MapPin size={12} /> 3D CITY ENCLAVE
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Compass size={12} style={{ color: '#38bdf8' }} /> COMMON SIMULATION TARGET
+              </span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setLocationType('current')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    fontSize: 9.5,
+                    cursor: 'pointer',
+                    background: locationType === 'current' ? 'rgba(56,189,248,0.16)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${locationType === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                    color: locationType === 'current' ? '#38bdf8' : '#94a3b8',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <LocateFixed size={11} /> Current Viewpoint
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocationType('preset')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    fontSize: 9.5,
+                    cursor: 'pointer',
+                    background: locationType === 'preset' ? 'rgba(56,189,248,0.16)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${locationType === 'preset' ? 'rgba(56,189,248,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                    color: locationType === 'preset' ? '#38bdf8' : '#94a3b8',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <MapPin size={11} /> City Enclave
+                </button>
+              </div>
             </div>
 
             {locationType === 'preset' ? (
@@ -1116,7 +1131,7 @@ export function FlightSimulatorPanel({
                   padding: '7px 10px',
                   borderRadius: 6,
                   fontSize: 11,
-                  background: 'rgba(0,0,0,0.4)',
+                  background: 'rgba(0,0,0,0.5)',
                   color: '#e2e8f0',
                   border: '1px solid rgba(255,255,255,0.12)',
                 }}
@@ -1128,29 +1143,96 @@ export function FlightSimulatorPanel({
                 ))}
               </select>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10.5, color: '#cbd5e1' }}>
-                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
                   {locationName}
                 </span>
                 <button
+                  type="button"
                   onClick={copyCoordinates}
                   style={{
-                    background: 'transparent',
-                    border: 'none',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    padding: '3px 7px',
                     color: copiedCoords ? '#4ade80' : '#94a3b8',
                     cursor: 'pointer',
                     fontSize: 9.5,
                     fontFamily: 'monospace',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 3,
+                    gap: 4,
                   }}
+                  title="Copy Coordinates"
                 >
-                  {copiedCoords ? <Check size={10} /> : <Copy size={10} />}
+                  {copiedCoords ? <Check size={11} /> : <Copy size={11} />}
                   {lat.toFixed(4)}°, {lon.toFixed(4)}°
                 </button>
               </div>
             )}
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════
+              SIMULATION MODE CARDS (Grid like Admin Dashboard Sections)
+              ══════════════════════════════════════════════════════════════ */}
+          <div>
+            <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 6 }}>
+              SIMULATION DOMAINS
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+              {SIMULATION_MODES.map((card) => {
+                const Icon = card.icon;
+                const isActive = mode === card.id;
+                return (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => setMode(card.id)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '10px 10px',
+                      background: isActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                      borderRadius: 8,
+                      border: `1px solid ${isActive ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)'}`,
+                      color: '#e2e8f0',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      position: 'relative',
+                      boxShadow: isActive ? '0 0 16px rgba(56, 189, 248, 0.2)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ color: isActive ? '#38bdf8' : card.accent }}>
+                        <Icon size={16} />
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 700,
+                          color: isActive ? '#38bdf8' : '#64748b',
+                          background: isActive ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        {card.badge}
+                      </span>
+                    </div>
+                    <strong style={{ fontSize: 12, fontWeight: 700, color: isActive ? '#f8fafc' : '#cbd5e1' }}>
+                      {card.title}
+                    </strong>
+                    <span style={{ fontSize: 9.5, color: '#94a3b8', lineHeight: 1.3 }}>
+                      {card.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* ══════════════════════════════════════════════════════════════
@@ -1172,10 +1254,10 @@ export function FlightSimulatorPanel({
               >
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#86efac', letterSpacing: '0.04em' }}>
-                    AH-64E APACHE GUARDIAN
+                    HELICOPTER FLIGHT · ACTIVE AIRFRAME: BOEING AH-64E APACHE
                   </div>
                   <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
-                    Heavy Attack · Twin Turboshaft · 4-Blade Main Rotor · 3D Avionics & Weapons
+                    Heavy Attack Rotorcraft · Twin Turboshaft · 4-Blade Main Rotor · 3D Avionics &amp; Telemetry
                   </div>
                 </div>
                 <span
@@ -1235,6 +1317,7 @@ export function FlightSimulatorPanel({
 
               {/* Cold & Dark Start */}
               <button
+                type="button"
                 onClick={() => setColdStart(v => !v)}
                 style={{
                   padding: '7px 10px',
@@ -1242,34 +1325,78 @@ export function FlightSimulatorPanel({
                   fontSize: 10,
                   cursor: 'pointer',
                   textAlign: 'left',
-                  background: coldStart ? 'rgba(251,191,36,0.14)' : 'transparent',
-                  border: `1px solid ${coldStart ? 'rgba(251,191,36,0.55)' : 'rgba(255,255,255,0.12)'}`,
+                  background: coldStart ? 'rgba(251,191,36,0.14)' : 'rgba(0,0,0,0.3)',
+                  border: `1px solid ${coldStart ? 'rgba(251,191,36,0.55)' : 'rgba(255,255,255,0.08)'}`,
                   color: coldStart ? '#fbbf24' : '#94a3b8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
                 }}
               >
-                {coldStart ? '☑ COLD & DARK' : '☐ COLD & DARK'} — Start on pad: AVN · ECL · STARTER · FLIGHT
+                {coldStart ? <CheckSquare size={13} style={{ color: '#fbbf24' }} /> : <Square size={13} />}
+                <span>COLD &amp; DARK START — Initialize on pad: AVN · ECL · STARTER · FLIGHT</span>
               </button>
 
-              {/* Helicopter Flight Controls Reference */}
-              <div
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: 8,
-                  borderRadius: 6,
-                  fontSize: 9.5,
-                  color: '#94a3b8',
-                  lineHeight: 1.7,
-                }}
-              >
-                <div><span style={{ color: '#4ade80', fontWeight: 600 }}>W / S · PgUp/PgDn</span> — Collective (climb / descend)</div>
-                <div><span style={{ color: '#4ade80', fontWeight: 600 }}>A / D</span> — Throttle (accelerate / decelerate)</div>
-                <div><span style={{ color: '#4ade80', fontWeight: 600 }}>↑ ↓ ← →</span> — Cyclic (pitch fwd/aft, roll left/right)</div>
-                <div><span style={{ color: '#4ade80', fontWeight: 600 }}>Q / E · , .</span> — Anti-torque pedals (yaw)</div>
-                <div><span style={{ color: '#4ade80', fontWeight: 600 }}>Space</span> — Hover assist · <span style={{ color: '#4ade80', fontWeight: 600 }}>C/V</span> — Cameras</div>
+              {/* Collapsible Keybindings Cheatsheet */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setControlsExpanded(v => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 10px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Keyboard size={13} style={{ color: '#4ade80' }} />
+                    <span>Flight Controls Cheatsheet</span>
+                    <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 400 }}>
+                      (W / S · A / D · Cyclic · Pedals)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8', fontSize: 9.5 }}>
+                    <span>{controlsExpanded ? 'Hide' : 'Expand'}</span>
+                    {controlsExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </div>
+                </button>
+
+                {controlsExpanded && (
+                  <div
+                    style={{
+                      background: 'rgba(0,0,0,0.35)',
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      fontSize: 9.5,
+                      color: '#94a3b8',
+                      lineHeight: 1.8,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '4px 12px',
+                    }}
+                  >
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>W / S · PgUp/PgDn</span> — Collective (climb / descend)</div>
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>A / D</span> — Throttle (accelerate / decelerate)</div>
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>↑ ↓ ← →</span> — Cyclic (pitch fwd/aft, roll left/right)</div>
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>Q / E · , .</span> — Anti-torque pedals (yaw)</div>
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>Space</span> — Hover assist hold</div>
+                    <div><span style={{ color: '#4ade80', fontWeight: 600 }}>C / V</span> — Cockpit MFD &amp; chase cameras</div>
+                  </div>
+                )}
               </div>
 
               {/* Launch CTA */}
               <button
+                type="button"
                 onClick={handleLaunchHelicopter}
                 style={{
                   padding: '10px 14px',
@@ -1359,6 +1486,27 @@ export function FlightSimulatorPanel({
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {onOpenApiVault && (
+                      <button
+                        onClick={onOpenApiVault}
+                        title="Configure Google Maps API Key in Vault for live 360° Street View panoramas"
+                        style={{
+                          background: 'rgba(251, 188, 4, 0.15)',
+                          border: '1px solid rgba(251, 188, 4, 0.45)',
+                          color: '#fbbc04',
+                          fontWeight: 700,
+                          fontSize: 11,
+                          padding: '7px 13px',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <Zap size={13} /> Add Google Maps Key
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setMode('car');
@@ -1504,7 +1652,7 @@ export function FlightSimulatorPanel({
                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px 10px', borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 8.5, color: '#94a3b8', fontWeight: 600 }}>CAMERA VIEW</div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: '#f87171', marginTop: 4 }}>
-                        {perspective === 'chase' ? '📷 Chase Cam' : '💺 Cockpit'}
+                        {perspective === 'chase' ? 'Chase Cam' : 'Cockpit View'}
                       </div>
                     </div>
                   </div>
@@ -1918,7 +2066,7 @@ export function FlightSimulatorPanel({
                   >
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 700, color: '#f87171', letterSpacing: '0.04em' }}>
-                        TESLA ROADSTER (TRI-MOTOR AWD)
+                        CAR SIMULATOR · ACTIVE MODEL: TESLA ROADSTER (TRI-MOTOR AWD)
                       </div>
                       <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
                         0–100 km/h: 1.9s (&lt; 1.0s SpaceX Package) · 10,000 Nm Torque · 400+ km/h · 1,000 km Range · Removable Targa Glass Roof
@@ -1938,32 +2086,71 @@ export function FlightSimulatorPanel({
                     </span>
                   </div>
 
-                  {/* Driving & Flight Controls Guide */}
-                  <div
-                    style={{
-                      background: 'rgba(0,0,0,0.3)',
-                      padding: 8,
-                      borderRadius: 6,
-                      fontSize: 9.5,
-                      color: '#94a3b8',
-                      lineHeight: 1.7,
-                    }}
-                  >
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>W / ↑</span> — Instant Electric Throttle (cruising ~140 km/h)</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>Shift</span> — Ludicrous+ Hypercar Boost (up to 400+ km/h)</div>
-                    <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>Space</span> — Fire SpaceX Cold-Gas Thrusters (Hover & Fly using 10,000 PSI air pressure)</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>S / ↓</span> — Carbon-Ceramic Brembo Brake & Reverse</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>A / D</span> — Aerodynamic Vectoring Steering</div>
-                    <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>T</span> — Convertible Targa Mode (Stow / Mount Removable Glass Roof in Trunk)</div>
-                    <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>U</span> — Audio Sound Engine (Procedural Tri-Motor Inverter & SpaceX Pneumatics)</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>Mouse Drag</span> — 360° Spherical Orbit (Clockwise & Anticlockwise continuous)</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>Mouse Wheel</span> — Smooth Zoom In / Out · <span style={{ color: '#f87171', fontWeight: 600 }}>Dbl-Click</span> — Reset Orbit</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>C / V</span> — Switch Cockpit View (Steer-by-wire yoke, dash & windshield) & Chase Cam</div>
-                    <div><span style={{ color: '#f87171', fontWeight: 600 }}>R</span> — 360° Showcase Studio Turntable Spin</div>
+                  {/* Collapsible Keybindings Cheatsheet */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setControlsExpanded(v => !v)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '7px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(0,0,0,0.3)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        color: '#cbd5e1',
+                        cursor: 'pointer',
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        width: '100%',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Keyboard size={13} style={{ color: '#f87171' }} />
+                        <span>Car Controls Cheatsheet</span>
+                        <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 400 }}>
+                          (W / A / S / D · Space Thrusters · Shift)
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8', fontSize: 9.5 }}>
+                        <span>{controlsExpanded ? 'Hide' : 'Expand'}</span>
+                        {controlsExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </div>
+                    </button>
+
+                    {controlsExpanded && (
+                      <div
+                        style={{
+                          background: 'rgba(0,0,0,0.35)',
+                          padding: '10px 12px',
+                          borderRadius: 6,
+                          fontSize: 9.5,
+                          color: '#94a3b8',
+                          lineHeight: 1.8,
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(2, 1fr)',
+                          gap: '4px 12px',
+                        }}
+                      >
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>W / ↑</span> — Instant Electric Throttle (~140 km/h)</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>Shift</span> — Ludicrous+ Boost (400+ km/h)</div>
+                        <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>Space</span> — SpaceX Cold-Gas Thrusters (Hover &amp; Fly)</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>S / ↓</span> — Carbon-Ceramic Brembo Brake &amp; Reverse</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>A / D</span> — Aerodynamic Vectoring Steering</div>
+                        <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>T</span> — Convertible Targa Glass Roof Mode</div>
+                        <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>U</span> — Procedural Sound Engine &amp; Pneumatics</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>Mouse Drag</span> — 360° Spherical Vehicle Orbit</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>Mouse Wheel</span> — Smooth Zoom In / Out</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>C / V</span> — Switch Cockpit View &amp; Chase Cam</div>
+                        <div><span style={{ color: '#f87171', fontWeight: 600 }}>R</span> — 360° Studio Turntable Showcase Spin</div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Start 3D Car Drive CTA */}
                   <button
+                    type="button"
                     onClick={() => startGroundSimulation('drive')}
                     style={{
                       padding: '10px 14px',
@@ -1982,7 +2169,7 @@ export function FlightSimulatorPanel({
                       gap: 6,
                     }}
                   >
-                    <Car size={14} /> DRIVE TESLA ROADSTER ON GLOBE
+                    <Car size={14} /> LAUNCH CAR SIMULATION
                   </button>
                 </>
               )}
@@ -2007,10 +2194,10 @@ export function FlightSimulatorPanel({
               >
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#c084fc', letterSpacing: '0.04em' }}>
-                    LOW-ALTITUDE DRONE SURVEY
+                    DRONE RECONNAISSANCE · ACTIVE PLATFORM: MICRO-UAV
                   </div>
                   <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
-                    24m Operating Ceiling · 360° Gimbal Pitch · Urban Grid Recon
+                    24m Operating Ceiling · 360° Sensor Gimbal Pitch · Urban Grid Recon
                   </div>
                 </div>
                 <span
@@ -2023,27 +2210,67 @@ export function FlightSimulatorPanel({
                     borderRadius: 4,
                   }}
                 >
-                  24M SURVEY
+                  SURVEILLANCE
                 </span>
               </div>
 
-              <div
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: 8,
-                  borderRadius: 6,
-                  fontSize: 9.5,
-                  color: '#94a3b8',
-                  lineHeight: 1.7,
-                }}
-              >
-                <div><span style={{ color: '#c084fc', fontWeight: 600 }}>W / S</span> — Fly Forward / Backward</div>
-                <div><span style={{ color: '#c084fc', fontWeight: 600 }}>A / D</span> — Lateral Strafe Left / Right</div>
-                <div><span style={{ color: '#c084fc', fontWeight: 600 }}>Drag Mouse</span> — 360° Sensor Gimbal Pitch & Heading</div>
-                <div><span style={{ color: '#c084fc', fontWeight: 600 }}>Shift</span> — High-speed survey flight</div>
+              {/* Collapsible Keybindings Cheatsheet */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setControlsExpanded(v => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 10px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Keyboard size={13} style={{ color: '#c084fc' }} />
+                    <span>Drone Controls Cheatsheet</span>
+                    <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 400 }}>
+                      (W / A / S / D · Gimbal · Shift)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8', fontSize: 9.5 }}>
+                    <span>{controlsExpanded ? 'Hide' : 'Expand'}</span>
+                    {controlsExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </div>
+                </button>
+
+                {controlsExpanded && (
+                  <div
+                    style={{
+                      background: 'rgba(0,0,0,0.35)',
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      fontSize: 9.5,
+                      color: '#94a3b8',
+                      lineHeight: 1.8,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '4px 12px',
+                    }}
+                  >
+                    <div><span style={{ color: '#c084fc', fontWeight: 600 }}>W / S</span> — Fly Forward / Backward</div>
+                    <div><span style={{ color: '#c084fc', fontWeight: 600 }}>A / D</span> — Lateral Strafe Left / Right</div>
+                    <div><span style={{ color: '#c084fc', fontWeight: 600 }}>Drag Mouse</span> — 360° Sensor Gimbal Pitch &amp; Heading</div>
+                    <div><span style={{ color: '#c084fc', fontWeight: 600 }}>Shift</span> — High-Speed Survey Boost</div>
+                  </div>
+                )}
               </div>
 
               <button
+                type="button"
                 onClick={() => startGroundSimulation('drone')}
                 style={{
                   padding: '10px 14px',
@@ -2085,10 +2312,10 @@ export function FlightSimulatorPanel({
               >
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#6ee7b7', letterSpacing: '0.04em' }}>
-                    HUMAN-SCALE PEDESTRIAN WALK
+                    STREET WALK · ACTIVE PERSPECTIVE: FIRST-PERSON PEDESTRIAN
                   </div>
                   <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
-                    1.7m Ground Clamped · Dynamic Footstep Cadence · 3D Buildings
+                    1.7m Ground Clamped · Dynamic Footstep Cadence · Eye-Level Exploration
                   </div>
                 </div>
                 <span
@@ -2101,27 +2328,67 @@ export function FlightSimulatorPanel({
                     borderRadius: 4,
                   }}
                 >
-                  1.7M EYE-LEVEL
+                  PEDESTRIAN
                 </span>
               </div>
 
-              <div
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: 8,
-                  borderRadius: 6,
-                  fontSize: 9.5,
-                  color: '#94a3b8',
-                  lineHeight: 1.7,
-                }}
-              >
-                <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>W / S</span> — Step Forward / Step Backward</div>
-                <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>A / D</span> — Sidestep Left / Right</div>
-                <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>Drag Mouse</span> — Look 360° around the environment</div>
-                <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>Shift</span> — Sprint</div>
+              {/* Collapsible Keybindings Cheatsheet */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setControlsExpanded(v => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 10px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Keyboard size={13} style={{ color: '#6ee7b7' }} />
+                    <span>Walk Controls Cheatsheet</span>
+                    <span style={{ fontSize: 9.5, color: '#64748b', fontWeight: 400 }}>
+                      (W / A / S / D · Look · Shift)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8', fontSize: 9.5 }}>
+                    <span>{controlsExpanded ? 'Hide' : 'Expand'}</span>
+                    {controlsExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </div>
+                </button>
+
+                {controlsExpanded && (
+                  <div
+                    style={{
+                      background: 'rgba(0,0,0,0.35)',
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      fontSize: 9.5,
+                      color: '#94a3b8',
+                      lineHeight: 1.8,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '4px 12px',
+                    }}
+                  >
+                    <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>W / S</span> — Step Forward / Step Backward</div>
+                    <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>A / D</span> — Sidestep Left / Right</div>
+                    <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>Drag Mouse</span> — 360° Free Look Angle</div>
+                    <div><span style={{ color: '#6ee7b7', fontWeight: 600 }}>Shift</span> — Sprint</div>
+                  </div>
+                )}
               </div>
 
               <button
+                type="button"
                 onClick={() => startGroundSimulation('walk')}
                 style={{
                   padding: '10px 14px',
@@ -2140,41 +2407,56 @@ export function FlightSimulatorPanel({
                   gap: 6,
                 }}
               >
-                <Eye size={14} /> START STREET WALK
+                <Footprints size={14} /> START STREET WALK
               </button>
             </div>
           )}
 
           {/* ══════════════════════════════════════════════════════════════
-              FEATURED 3D CITY ENCLAVES (QUICK TELEPORT)
+              COMMON CITY ENCLAVES (QUICK TELEPORT)
               ══════════════════════════════════════════════════════════════ */}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10 }}>
-            <div style={{ fontSize: 9.5, color: '#64748b', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 6 }}>
-              FEATURED 3D CITY ENCLAVES (3D BUILDINGS STREAMED)
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em' }}>
+                COMMON CITY ENCLAVES
+              </span>
+              <span style={{ fontSize: 9, color: '#64748b' }}>
+                Click to set common simulation target
+              </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
-              {SIMULATOR_CITIES.slice(0, 10).map((c) => (
-                <button
-                  key={c.label}
-                  onClick={() => handleSelectCityPreset(c)}
-                  style={{
-                    padding: '5px 4px',
-                    borderRadius: 4,
-                    background: selectedCity === c.label && locationType === 'preset' ? 'rgba(56,189,248,0.2)' : 'rgba(0,0,0,0.3)',
-                    border: `1px solid ${selectedCity === c.label && locationType === 'preset' ? '#38bdf8' : 'rgba(255,255,255,0.08)'}`,
-                    color: selectedCity === c.label && locationType === 'preset' ? '#38bdf8' : '#cbd5e1',
-                    fontSize: 9,
-                    cursor: 'pointer',
-                    textAlign: 'center',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={c.label}
-                >
-                  {c.city}
-                </button>
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 5 }}>
+              {SIMULATOR_CITIES.slice(0, 10).map((c) => {
+                const isSelected = selectedCity === c.label && locationType === 'preset';
+                return (
+                  <button
+                    key={c.label}
+                    type="button"
+                    onClick={() => handleSelectCityPreset(c)}
+                    style={{
+                      padding: '7px 8px',
+                      borderRadius: 6,
+                      background: isSelected ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${isSelected ? '#38bdf8' : 'rgba(255,255,255,0.08)'}`,
+                      color: isSelected ? '#38bdf8' : '#cbd5e1',
+                      fontSize: 10,
+                      fontWeight: isSelected ? 700 : 500,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={`${c.city}, ${c.country} (${c.lat.toFixed(2)}°, ${c.lon.toFixed(2)}°)`}
+                  >
+                    <MapPin size={11} style={{ color: isSelected ? '#38bdf8' : '#64748b', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.city}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

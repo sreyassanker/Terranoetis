@@ -45,7 +45,13 @@ export async function loadOsmBuildings(
 
 export function hideOsmBuildings() {
   if (osmBuildingsTileset) {
-    osmBuildingsTileset.show = false;
+    try {
+      if (!osmBuildingsTileset.isDestroyed()) {
+        osmBuildingsTileset.show = false;
+      }
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -54,10 +60,18 @@ export function getOsmBuildingsTileset(): Cesium.Cesium3DTileset | null {
   return osmBuildingsTileset;
 }
 
-export function removeOsmBuildings(viewer: Cesium.Viewer) {
+export function removeOsmBuildings(viewer?: Cesium.Viewer | null) {
   if (osmBuildingsTileset) {
-    viewer.scene.primitives.remove(osmBuildingsTileset);
-    osmBuildingsTileset.destroy();
+    try {
+      if (viewer && !viewer.isDestroyed() && viewer.scene?.primitives) {
+        viewer.scene.primitives.remove(osmBuildingsTileset);
+      }
+      if (!osmBuildingsTileset.isDestroyed()) {
+        osmBuildingsTileset.destroy();
+      }
+    } catch {
+      // ignore
+    }
     osmBuildingsTileset = null;
   }
 }

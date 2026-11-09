@@ -18,7 +18,7 @@ import {
   WHEEL_PIVOT_RR,
 } from './roadsterModel';
 import { RoadsterAudioEngine } from './roadsterAudio';
-import { loadOsmBuildings, hideOsmBuildings, getOsmBuildingsTileset } from './osmBuildings';
+import { hideOsmBuildings, removeOsmBuildings } from './osmBuildings';
 
 export type GroundExplorerMode = 'drive' | 'walk' | 'drone';
 export type CameraViewPerspective = 'chase' | 'cockpit';
@@ -186,12 +186,7 @@ export class GroundWalkController {
     this.heading = Cesium.Math.toRadians(initialHeadingDeg);
     this.pitch = Cesium.Math.toRadians(-8); // slight forward glance
 
-    // 1. Automatically load 3D buildings so city architecture streams in
-    if (!getOsmBuildingsTileset()) {
-      void loadOsmBuildings(viewer).catch(() => {});
-    }
-
-    // 2. Save and disable Cesium default camera interaction
+    // 1. Save and disable Cesium default camera interaction
     const ctrl = viewer.scene.screenSpaceCameraController;
     this.prevRotateState = ctrl.enableRotate;
     this.prevZoomState = ctrl.enableZoom;
@@ -259,6 +254,9 @@ export class GroundWalkController {
       this.audioEngine = null;
     }
     hideOsmBuildings();
+    if (this.viewer && !this.viewer.isDestroyed()) {
+      removeOsmBuildings(this.viewer);
+    }
 
     if (this.viewer && !this.viewer.isDestroyed()) {
       const ctrl = this.viewer.scene.screenSpaceCameraController;

@@ -13,7 +13,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import * as satellite from 'satellite.js';
 import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
-import { flyToStreetLevel, getPegmanSvgUri } from '@/rendering/streetViewPegman';
+import { flyToStreetLevel, getPegmanSvgUri, removePegman } from '@/rendering/streetViewPegman';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
 import { isGlobePickMode } from '@/lib/globePickMode';
@@ -85,7 +85,7 @@ import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { HelicopterHud } from '@/components/HelicopterHud';
-import { FlightSimulatorPanel, type HeliSpawn, type SimulatorMode } from '@/components/FlightSimulatorPanel';
+import { SimulatorConsole, type HeliSpawn, type SimulatorMode } from '@/components/SimulatorConsole';
 import { getApacheGltf, APACHE_MODEL_SCALE, APACHE_GEAR_BOTTOM, MAIN_ROTOR_PIVOT, TAIL_ROTOR_PIVOT } from '@/rendering/apacheModel';
 import { HelicopterSim, PROFILES, type HeliState, type HelicopterInput, type RotorcraftProfile } from '@/rendering/helicopterSim';
 import { ChaseRig, CHASE_CLOSE_CONFIG, CHASE_WIDE_CONFIG } from '@/rendering/heliCameraRig';
@@ -762,6 +762,8 @@ function resolveAiProvider(vault: ApiVaultState): AiProvider {
 }
 
 function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
+  const envToken = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN || import.meta.env.VITE_CESIUM_ION_TOKEN || '').trim();
+  if (envToken) return envToken;
   const t = (vault.keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
   if (t && !t.includes('••••')) return t;
   return undefined;
@@ -1631,8 +1633,8 @@ export default function App() {
   const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
   const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
 
-  /* ── Apache helicopter flight simulator & ground exploration (in-globe) ── */
-  const [showHelicopterPanel, setShowHelicopterPanel] = useState(false);
+  /* ── Multi-vehicle simulation & exploration console (in-globe) ── */
+  const [showSimulatorConsole, setShowSimulatorConsole] = useState(false);
   const [simulatorInitialMode, setSimulatorInitialMode] = useState<SimulatorMode>('car');
   const [simulatorActive, setSimulatorActive] = useState(false);
   const [consoleToggleNonce, setConsoleToggleNonce] = useState(0);
@@ -3171,10 +3173,10 @@ export default function App() {
             const heading = Cesium.Math.toDegrees(v.camera.heading);
             setSimulatorTarget({ lat, lon, heading });
             setSimulatorInitialMode('streetview');
-            setShowHelicopterPanel(true);
+            setShowSimulatorConsole(true);
             setPegmanMode(false);
             void flyToStreetLevel(v, lat, lon, heading);
-            showNotification('Flight & Exploration Simulator: Street View', 'success');
+            showNotification('Simulator Console: Street View', 'success');
             return;
           }
         }
@@ -8129,6 +8131,8 @@ export default function App() {
     }
     if (layerId === 'dt_buildings') {
       hideOsmBuildings();
+      const v = viewerRef.current;
+      if (v) removeOsmBuildings(v);
     }
     if (layerId === 'satnogs_db' || layerId === 'ucs_satellite_db') {
       const v2 = viewerRef.current;
@@ -11223,9 +11227,9 @@ case 'openPanel':
       const heading = Cesium.Math.toDegrees(v.camera.heading);
       setSimulatorTarget({ lat: cm.lat, lon: cm.lon, heading });
       setSimulatorInitialMode('streetview');
-      setShowHelicopterPanel(true);
+      setShowSimulatorConsole(true);
       void flyToStreetLevel(v, cm.lat, cm.lon, heading);
-      showNotification('Flight & Exploration Simulator: Street View', 'success');
+      showNotification('Simulator Console: Street View', 'success');
     }
   }, [contextMenu, addWeatherCard, getLocationContextData, focusLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -13097,17 +13101,22 @@ case 'openPanel':
         <CameraControls
           viewer={viewerRef.current}
           onTogglePegman={() => {
-            setSimulatorInitialMode('car');
-            if (!showHelicopterPanel) {
-              setShowHelicopterPanel(true);
-            } else if (simulatorActive) {
-              // Simulator active: toggle between HUD and full console without exiting drive
-              setConsoleToggleNonce(n => n + 1);
+            if (showSimulatorConsole) {
+              setShowSimulatorConsole(false);
+              setSimulatorActive(false);
+              setSimulatorTarget(null);
+              const v = viewerRef.current;
+              if (v) {
+                hideOsmBuildings();
+                removeOsmBuildings(v);
+                removePegman(v);
+              }
             } else {
-              setShowHelicopterPanel(false);
+              setSimulatorInitialMode('streetview');
+              setShowSimulatorConsole(true);
             }
           }}
-          pegmanActive={showHelicopterPanel}
+          pegmanActive={showSimulatorConsole}
         />
       )}
 
@@ -13449,8 +13458,8 @@ case 'openPanel':
         />
       )}
 
-      {showHelicopterPanel && (
-        <FlightSimulatorPanel
+      {showSimulatorConsole && (
+        <SimulatorConsole
           viewer={viewerRef.current}
           initialMode={simulatorInitialMode}
           initialLat={simulatorTarget?.lat}
@@ -13461,9 +13470,15 @@ case 'openPanel':
           onSimulationActiveChange={setSimulatorActive}
           toggleConsoleNonce={consoleToggleNonce}
           onClose={() => {
-            setShowHelicopterPanel(false);
+            setShowSimulatorConsole(false);
             setSimulatorActive(false);
             setSimulatorTarget(null);
+            const v = viewerRef.current;
+            if (v) {
+              hideOsmBuildings();
+              removeOsmBuildings(v);
+              removePegman(v);
+            }
           }}
           onLaunchHelicopter={async (sp) => {
             const v = viewerRef.current;
@@ -13472,7 +13487,7 @@ case 'openPanel':
               ? (getCurrentViewPosition() ?? { lat: 28.61, lon: 77.21 })
               : { lat: sp.lat, lon: sp.lon };
             const spawn = { ...sp, lat: pos.lat, lon: pos.lon };
-            setShowHelicopterPanel(false);
+            setShowSimulatorConsole(false);
             const ground = await sampleHeliGroundAlt(v, spawn.lat, spawn.lon);
             enterHeliSim(v, spawn, ground);
           }}
