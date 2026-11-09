@@ -1,9 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Plus, Minus, Target } from 'lucide-react';
 import * as Cesium from 'cesium';
+import { getPegmanSvgUri } from '@/rendering/streetViewPegman';
 
 interface CameraControlsProps {
   viewer: Cesium.Viewer | null;
+  onTogglePegman?: () => void;
+  pegmanActive?: boolean;
 }
 
 const ZOOM_STEP_RATIO = 0.35;
@@ -21,7 +24,7 @@ const LOG_MIN = Math.log10(MIN_HEIGHT);
 const LOG_MAX = Math.log10(MAX_HEIGHT);
 const LOG_RANGE = LOG_MAX - LOG_MIN;
 
-export function CameraControls({ viewer }: CameraControlsProps) {
+export function CameraControls({ viewer, onTogglePegman, pegmanActive }: CameraControlsProps) {
   const [height, setHeight] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -333,6 +336,62 @@ export function CameraControls({ viewer }: CameraControlsProps) {
       >
         <Target size={13} />
       </button>
+
+      {onTogglePegman && (
+        <button
+          onClick={onTogglePegman}
+          aria-label="Flight & Exploration Simulator Console"
+          title={pegmanActive ? 'Close Simulator Console' : 'Open Flight & Exploration Simulator Console'}
+          style={{
+            width: 36,
+            height: 34,
+            border: pegmanActive ? '1.5px solid #FBBC04' : '1px solid rgba(148,163,184,0.12)',
+            background: pegmanActive ? 'rgba(251,188,4,0.22)' : 'rgba(15,23,42,0.75)',
+            boxShadow: pegmanActive ? '0 0 14px rgba(251,188,4,0.5)' : 'none',
+            backdropFilter: 'blur(16px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 8,
+            transition: 'all 0.15s',
+            position: 'relative',
+          } as React.CSSProperties}
+          onMouseEnter={e => {
+            if (!pegmanActive) {
+              e.currentTarget.style.borderColor = 'rgba(251,188,4,0.4)';
+              e.currentTarget.style.background = 'rgba(251,188,4,0.1)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (!pegmanActive) {
+              e.currentTarget.style.borderColor = 'rgba(148,163,184,0.12)';
+              e.currentTarget.style.background = 'rgba(15,23,42,0.75)';
+            }
+          }}
+        >
+          <img
+            src={getPegmanSvgUri()}
+            alt="Pegman"
+            style={{ width: 20, height: 20, filter: pegmanActive ? 'drop-shadow(0 0 4px #FBBC04)' : undefined }}
+          />
+          {pegmanActive && (
+            <span
+              style={{
+                position: 'absolute',
+                top: 2,
+                right: 2,
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: '#22c55e',
+                boxShadow: '0 0 6px #22c55e',
+              }}
+            />
+          )}
+        </button>
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ function loadState(): SavedState {
   return { x: window.innerWidth - 64, y: 12, locked: false };
 }
 
-const STYLE_HUE: Record<string, number> = { normal: 180, crt: 0, nvg: 120, flir: 30, noir: 0, snow: 200 };
+const STYLE_HUE: Record<string, number> = { normal: 180, crt: 0, nvg: 120, flir: 30, noir: 0, snow: 200, cyberpunk: 300 };
 
 export default function SensorStyleWidget({ activeStyle, onSelect }: Props) {
   const [open, setOpen] = useState(false);

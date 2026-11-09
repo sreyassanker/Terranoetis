@@ -32,6 +32,18 @@ export const API_METADATA: ApiConfig[] = [
     status: 'authenticated',
   },
   {
+    id: 'google_maps',
+    name: 'Google Maps & Street View',
+    category: 'Satellite & Imagery',
+    description: 'Street View 360° panoramas & Maps Embed API (100% Free with unlimited requests)',
+    registrationUrl: 'https://console.cloud.google.com/google/maps-apis/overview',
+    docsUrl: 'https://developers.google.com/maps/documentation/embed/get-started',
+    envKey: 'GOOGLE_MAPS_API_KEY',
+    free: true,
+    rateLimit: 'Unlimited (Maps Embed API)',
+    status: 'authenticated',
+  },
+  {
     id: 'sentinel_hub',
     name: 'Sentinel Hub',
     category: 'Satellite & Imagery',

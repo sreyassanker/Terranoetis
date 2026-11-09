@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark, Video } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Lock, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, Trash2, FileDown, Layers, Rocket, Wind, Waves, Anchor, Sliders, GitFork, Zap, Compass, Landmark, Video, Car } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -13,6 +13,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import * as satellite from 'satellite.js';
 import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
+import { flyToStreetLevel, getPegmanSvgUri } from '@/rendering/streetViewPegman';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
 import { isGlobePickMode } from '@/lib/globePickMode';
@@ -84,7 +85,7 @@ import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { HelicopterHud } from '@/components/HelicopterHud';
-import { HelicopterPanel, type HeliSpawn } from '@/components/HelicopterPanel';
+import { FlightSimulatorPanel, type HeliSpawn, type SimulatorMode } from '@/components/FlightSimulatorPanel';
 import { getApacheGltf, APACHE_MODEL_SCALE, APACHE_GEAR_BOTTOM, MAIN_ROTOR_PIVOT, TAIL_ROTOR_PIVOT } from '@/rendering/apacheModel';
 import { HelicopterSim, PROFILES, type HeliState, type HelicopterInput, type RotorcraftProfile } from '@/rendering/helicopterSim';
 import { ChaseRig, CHASE_CLOSE_CONFIG, CHASE_WIDE_CONFIG } from '@/rendering/heliCameraRig';
@@ -762,6 +763,14 @@ function resolveAiProvider(vault: ApiVaultState): AiProvider {
 
 function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
   const t = (vault.keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
+  if (t && !t.includes('••••')) return t;
+  return undefined;
+}
+
+function resolveGoogleMapsKey(vault: ApiVaultState): string | undefined {
+  const envKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+  if (envKey) return envKey;
+  const t = (vault.keys.GOOGLE_MAPS_API_KEY || vault.keys.VITE_GOOGLE_MAPS_API_KEY || '').trim();
   if (t && !t.includes('••••')) return t;
   return undefined;
 }
@@ -1622,8 +1631,11 @@ export default function App() {
   const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
   const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
 
-  /* ── Apache helicopter flight simulator (in-globe) ── */
+  /* ── Apache helicopter flight simulator & ground exploration (in-globe) ── */
   const [showHelicopterPanel, setShowHelicopterPanel] = useState(false);
+  const [simulatorInitialMode, setSimulatorInitialMode] = useState<SimulatorMode>('car');
+  const [simulatorActive, setSimulatorActive] = useState(false);
+  const [consoleToggleNonce, setConsoleToggleNonce] = useState(0);
   const [heliFlying, setHeliFlying] = useState(false);
   const [heliHud, setHeliHud] = useState<HeliState | null>(null);
   const heliActiveRef = useRef(false);
@@ -1817,6 +1829,24 @@ export default function App() {
   const aircraftHangarRef = useRef<AircraftHangar | null>(null);
   const photorealGlobeRef = useRef<PhotorealisticGlobe | null>(null);
   const [photoreal, setPhotoreal] = useState(false);
+  const [pegmanMode, setPegmanMode] = useState(false);
+  const pegmanModeRef = useRef(false);
+  useEffect(() => { pegmanModeRef.current = pegmanMode; }, [pegmanMode]);
+  const [simulatorTarget, setSimulatorTarget] = useState<{
+    lat: number;
+    lon: number;
+    heading: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const canvas = viewerRef.current?.scene?.canvas;
+    if (!canvas) return;
+    if (pegmanMode) {
+      canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = 'default';
+    }
+  }, [pegmanMode]);
   const cinematicCameraRef = useRef<CinematicCamera | null>(null);
   const [showFirstRun, setShowFirstRun] = useState<boolean>(() => isFirstRun());
   const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
@@ -1833,9 +1863,9 @@ export default function App() {
         e.preventDefault();
         setShowCommandPalette(prev => !prev);
       }
-      // Sensor styles: 1–6 cycle CRT / NVG / FLIR / Noir / Snow (1 = Normal).
+      // Sensor styles: 1–7 cycle CRT / NVG / FLIR / Noir / Snow / Cyberpunk (1 = Normal).
       // Only when no text input has focus.
-      if (!e.metaKey && !e.ctrlKey && !e.altKey && /^[1-6]$/.test(e.key)) {
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && /^[1-7]$/.test(e.key)) {
         const el = document.activeElement as HTMLElement | null;
         if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
         const def = SENSOR_STYLES[Number(e.key) - 1];
@@ -3128,6 +3158,27 @@ export default function App() {
       // The scenario editor's point picker (vent / epicentre / landfall) owns
       // the click while armed — don't zoom-to-entity or open the context menu.
       if (isGlobePickMode()) return;
+
+      // ── Pegman Street View picker ──
+      if (pegmanModeRef.current) {
+        let cart = v.scene.pickPosition(click.position);
+        if (!cart || !Cesium.defined(cart)) cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid) as Cesium.Cartesian3;
+        if (cart && Cesium.defined(cart)) {
+          const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+          if (carto) {
+            const lon = Cesium.Math.toDegrees(carto.longitude);
+            const lat = Cesium.Math.toDegrees(carto.latitude);
+            const heading = Cesium.Math.toDegrees(v.camera.heading);
+            setSimulatorTarget({ lat, lon, heading });
+            setSimulatorInitialMode('streetview');
+            setShowHelicopterPanel(true);
+            setPegmanMode(false);
+            void flyToStreetLevel(v, lat, lon, heading);
+            showNotification('Flight & Exploration Simulator: Street View', 'success');
+            return;
+          }
+        }
+      }
       // ── Navigation / Spatial Safety tools ──
       if (navModeRef.current === 'route' || navModeRef.current === 'safest') {
         let cart = v.scene.pickPosition(click.position);
@@ -3548,6 +3599,9 @@ export default function App() {
         if (focusMarkerTimerRef.current) { clearTimeout(focusMarkerTimerRef.current); focusMarkerTimerRef.current = null; }
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
+        if (pegmanModeRef.current) {
+          setPegmanMode(false);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -11165,6 +11219,13 @@ case 'openPanel':
       setShowAI(true); focusPanel('ai');
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
       getLocationContextData(cm.lat, cm.lon);
+    } else if (action === 'street_view') {
+      const heading = Cesium.Math.toDegrees(v.camera.heading);
+      setSimulatorTarget({ lat: cm.lat, lon: cm.lon, heading });
+      setSimulatorInitialMode('streetview');
+      setShowHelicopterPanel(true);
+      void flyToStreetLevel(v, cm.lat, cm.lon, heading);
+      showNotification('Flight & Exploration Simulator: Street View', 'success');
     }
   }, [contextMenu, addWeatherCard, getLocationContextData, focusLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -12478,19 +12539,6 @@ case 'openPanel':
           />
 
           <TopbarMenu
-            id="fly" title="Flight Simulator" icon={<Rocket size={16} />}
-            menuId={openMenu} setMenuId={setOpenMenu}
-            active={heliFlying}
-            items={[
-              { label: 'Apache Helicopter Sim', icon: <Rocket size={15} />, active: heliFlying || showHelicopterPanel, onClick: () => setShowHelicopterPanel(p => !p) },
-              ...(heliFlying ? [{
-                label: 'Exit Flight', icon: <X size={15} />,
-                onClick: () => { const v = viewerRef.current; if (v) exitHeliSim(v); },
-              }] : []),
-            ]}
-          />
-
-          <TopbarMenu
             id="view" title="View & Capture" icon={<Eye size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
             active={isLayerEnabled('live_cctv') || isAutoRotating}
@@ -13044,8 +13092,70 @@ case 'openPanel':
         </button>
         </div>
 
-      {/* Camera Controls — advanced zoom with smooth flyTo */}
-      {!satTravel && !flightTravel && !heliFlying && <CameraControls viewer={viewerRef.current} />}
+      {/* Camera Controls — advanced zoom with smooth flyTo + Google Pegman */}
+      {!satTravel && !flightTravel && !heliFlying && (
+        <CameraControls
+          viewer={viewerRef.current}
+          onTogglePegman={() => {
+            setSimulatorInitialMode('car');
+            if (!showHelicopterPanel) {
+              setShowHelicopterPanel(true);
+            } else if (simulatorActive) {
+              // Simulator active: toggle between HUD and full console without exiting drive
+              setConsoleToggleNonce(n => n + 1);
+            } else {
+              setShowHelicopterPanel(false);
+            }
+          }}
+          pegmanActive={showHelicopterPanel}
+        />
+      )}
+
+      {/* Pegman armed banner */}
+      {pegmanMode && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 72,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(15, 23, 42, 0.94)',
+            backdropFilter: 'blur(16px)',
+            border: '1.5px solid #FBBC04',
+            boxShadow: '0 8px 30px rgba(251, 188, 4, 0.4)',
+            borderRadius: 30,
+            padding: '8px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            zIndex: 100,
+            color: '#f8fafc',
+            fontSize: 12,
+            fontWeight: 600,
+            userSelect: 'none',
+          }}
+        >
+          <img src={getPegmanSvgUri()} alt="Pegman" style={{ width: 22, height: 22 }} />
+          <span>Click anywhere on the globe or a road to drop Pegman</span>
+          <button
+            onClick={() => setPegmanMode(false)}
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: 'none',
+              borderRadius: 14,
+              color: '#94a3b8',
+              padding: '3px 10px',
+              fontSize: 11,
+              cursor: 'pointer',
+              marginLeft: 4,
+            }}
+          >
+            Cancel (Esc)
+          </button>
+        </div>
+      )}
+
+
 
       {/* Context Menu */}
       <div ref={contextMenuRef} className={`context-menu ${contextMenu.show ? 'active' : ''}`}
@@ -13071,6 +13181,10 @@ case 'openPanel':
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{left:'50%',top:0,transform:'translateX(-50%)'}}
             onClick={() => handleContextAction('ai_intel')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('ai_intel'); } }}>
             <Brain size={14} className="ctx-emoji" /><span className="ctx-label">AI Intel</span>
+          </div>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{right:'14%',bottom:'14%'}}
+            onClick={() => handleContextAction('street_view')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('street_view'); } }}>
+            <img src={getPegmanSvgUri()} alt="Street View" style={{width:14,height:14}} className="ctx-emoji" /><span className="ctx-label">Street</span>
           </div>
         </div>
       </div>
@@ -13336,12 +13450,27 @@ case 'openPanel':
       )}
 
       {showHelicopterPanel && (
-        <HelicopterPanel
-          onClose={() => setShowHelicopterPanel(false)}
-          onLaunch={async (sp) => {
+        <FlightSimulatorPanel
+          viewer={viewerRef.current}
+          initialMode={simulatorInitialMode}
+          initialLat={simulatorTarget?.lat}
+          initialLon={simulatorTarget?.lon}
+          initialHeading={simulatorTarget?.heading}
+          googleMapsApiKey={resolveGoogleMapsKey(apiVault)}
+          onOpenApiVault={() => setShowApiVault(true)}
+          onSimulationActiveChange={setSimulatorActive}
+          toggleConsoleNonce={consoleToggleNonce}
+          onClose={() => {
+            setShowHelicopterPanel(false);
+            setSimulatorActive(false);
+            setSimulatorTarget(null);
+          }}
+          onLaunchHelicopter={async (sp) => {
             const v = viewerRef.current;
             if (!v) return;
-            const pos = sp.label === 'Current view' ? (getCurrentViewPosition() ?? { lat: 28.61, lon: 77.21 }) : { lat: sp.lat, lon: sp.lon };
+            const pos = sp.label === 'Current view' || (sp.lat === 0 && sp.lon === 0)
+              ? (getCurrentViewPosition() ?? { lat: 28.61, lon: 77.21 })
+              : { lat: sp.lat, lon: sp.lon };
             const spawn = { ...sp, lat: pos.lat, lon: pos.lon };
             setShowHelicopterPanel(false);
             const ground = await sampleHeliGroundAlt(v, spawn.lat, spawn.lon);

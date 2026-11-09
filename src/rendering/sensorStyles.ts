@@ -10,7 +10,7 @@
 import * as Cesium from 'cesium';
 import { sanitizeGlsl } from '../components/kaggle/gpu/cesiumRuntime';
 
-export type SensorStyleId = 'normal' | 'crt' | 'nvg' | 'flir' | 'noir' | 'snow';
+export type SensorStyleId = 'normal' | 'crt' | 'nvg' | 'flir' | 'noir' | 'snow' | 'cyberpunk';
 
 export interface SensorStyleDef {
   id: SensorStyleId;
@@ -139,6 +139,38 @@ void main(void) {
 }
 `;
 
+const CYBERPUNK_FRAG = `
+uniform sampler2D colorTexture;
+uniform float time;
+in vec2 v_textureCoordinates;
+${NOISE_HELPERS}
+
+void main(void) {
+  vec2 uv = v_textureCoordinates;
+  float sub = 0.0016;
+  float r = texture(colorTexture, uv + vec2(sub, 0.0)).r;
+  float g = texture(colorTexture, uv).g;
+  float b = texture(colorTexture, uv - vec2(sub, 0.0)).b;
+  vec3 col = vec3(r, g, b);
+
+  // Neon boost: magenta & cyan grading
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  vec3 neon = mix(vec3(0.0, 0.9, 1.0) * lum, vec3(1.0, 0.08, 0.65) * (1.0 - lum), 0.38);
+  col = mix(col * 1.25, neon, 0.45);
+
+  // Scanline pulse
+  float scan = 0.94 + 0.06 * sin(uv.y * 680.0 - time * 3.5);
+  col *= scan;
+
+  // Vignette
+  vec2 c = uv - 0.5;
+  float vig = 1.0 - dot(c, c) * 0.85;
+  col *= vig;
+
+  out_FragColor = vec4(col, 1.0);
+}
+`;
+
 export const SENSOR_STYLES: SensorStyleDef[] = [
   {
     id: 'normal',
@@ -146,6 +178,13 @@ export const SENSOR_STYLES: SensorStyleDef[] = [
     hint: 'No post-processing',
     frag: '',
     key: '1',
+  },
+  {
+    id: 'cyberpunk',
+    label: 'Cyberpunk',
+    hint: 'Neon synthwave + chromatic aberration (Genie 3)',
+    frag: CYBERPUNK_FRAG,
+    key: '7',
   },
   {
     id: 'crt',

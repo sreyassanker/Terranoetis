@@ -30,7 +30,7 @@ export async function loadOsmBuildings(
     showCreditsOnScreen: false,
   } as any);
   tileset.style = new Cesium.Cesium3DTileStyle({
-    color: "Boolean(${feature['cesium#color']}) ? color(${feature['cesium#color']}) : color('#00ff88')",
+    color: "Boolean(${feature['cesium#color']}) ? color(${feature['cesium#color']}) : color('white', 0.95)",
   });
 
   viewer.scene.primitives.add(tileset);

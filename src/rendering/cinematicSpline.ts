@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import type { SensorStyleId } from './sensorStyles';
 
 export interface TargetPoint {
   lat: number;
@@ -29,7 +30,7 @@ export interface CameraPath {
   narration: string[];
   isCustom?: boolean;
   targetLock?: TargetPoint;
-  sensorStyle?: 'normal' | 'flir' | 'nvg' | 'crt' | 'noir' | 'snow';
+  sensorStyle?: SensorStyleId;
 }
 
 export interface EvaluatedCameraFrame {
