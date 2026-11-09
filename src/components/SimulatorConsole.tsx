@@ -294,6 +294,7 @@ export function SimulatorConsole({
       if (groundWalkRef.current) {
         groundWalkRef.current.stop(0);
         groundWalkRef.current = null;
+        (window as any).__groundWalk = null;
       }
       hideOsmBuildings();
       if (viewer && !viewer.isDestroyed()) {
@@ -325,6 +326,7 @@ export function SimulatorConsole({
     if (!groundWalkRef.current) {
       groundWalkRef.current = new GroundWalkController();
     }
+    (window as any).__groundWalk = groundWalkRef.current;
 
     setPerspective(targetMode === 'drive' ? 'chase' : 'cockpit');
 

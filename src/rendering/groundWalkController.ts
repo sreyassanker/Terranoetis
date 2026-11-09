@@ -111,6 +111,13 @@ export class GroundWalkController {
   private thrusterGlowEntity: Cesium.Entity | null = null;
   private brakeLightNode: Cesium.ModelNode | null = null;
   private headlightBeamEntity: Cesium.Entity | null = null;
+  private headlightStripNode: Cesium.ModelNode | null = null;
+  private headlight001Node: Cesium.ModelNode | null = null;
+  private headlight002Node: Cesium.ModelNode | null = null;
+  private headlight14Node: Cesium.ModelNode | null = null;
+  private headlightLeds: Cesium.ModelNode[] = [];
+  private taillightLeds: Cesium.ModelNode[] = [];
+  private static cachedHeadlightTexture: string | null = null;
   private manualThrottleInput = 0;
   private manualSteerInput = 0;
   private autoTurntable = false;
@@ -128,6 +135,10 @@ export class GroundWalkController {
   private rainStage: Cesium.PostProcessStage | null = null;
   private lastWeatherCheckTime = 0;
   private rainShaderTime = 0;
+
+  // Multi-point terrain slope conformance & anti-submersion tracking
+  private currentSlopePitch = 0;
+  private currentSlopeRoll = 0;
 
   // Mouse orbit and look tracking
   private isMouseDown = false;
@@ -480,6 +491,23 @@ export class GroundWalkController {
             // When stopped or braking, show intense brake light
             this.brakeLightNode.show = Math.abs(this.velocityMps) < 0.25;
           }
+          this.headlightStripNode = model.getNode('head light strip_13') ?? null;
+          this.headlight001Node = model.getNode('head light.001_15') ?? null;
+          this.headlight002Node = model.getNode('head light.002_16') ?? null;
+          this.headlight14Node = model.getNode('head light_14') ?? null;
+          this.headlightLeds = [
+            model.getNode('Object_37'),
+            model.getNode('Object_40'),
+            model.getNode('Object_43'),
+            model.getNode('Object_46'),
+          ].filter(Boolean) as Cesium.ModelNode[];
+
+          this.taillightLeds = [
+            model.getNode('Object_28'),
+            model.getNode('Object_30'),
+          ].filter(Boolean) as Cesium.ModelNode[];
+
+          this.updateLightingNodes();
           this.updateRoofVisibility();
         } catch { /* degrade gracefully */ }
       };
@@ -512,6 +540,12 @@ export class GroundWalkController {
     this.verticalThrusterNode = null;
     this.horizontalThrusterNode = null;
     this.brakeLightNode = null;
+    this.headlightStripNode = null;
+    this.headlight001Node = null;
+    this.headlight002Node = null;
+    this.headlight14Node = null;
+    this.headlightLeds = [];
+    this.taillightLeds = [];
     this.yokeNode = null;
     this.initialYokeMatrix = null;
     this.wiperNode = null;
@@ -807,6 +841,65 @@ export class GroundWalkController {
     return true;
   }
 
+  private getOrCreateHeadlightTexture(): string {
+    if (GroundWalkController.cachedHeadlightTexture) {
+      return GroundWalkController.cachedHeadlightTexture;
+    }
+    try {
+      if (typeof document !== 'undefined') {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Soft radial falloff for realistic automotive road projector beam
+          const grad = ctx.createRadialGradient(128, 128, 6, 128, 128, 122);
+          grad.addColorStop(0.0, 'rgba(255, 253, 240, 0.45)');
+          grad.addColorStop(0.2, 'rgba(255, 250, 230, 0.32)');
+          grad.addColorStop(0.55, 'rgba(240, 245, 255, 0.18)');
+          grad.addColorStop(0.85, 'rgba(220, 235, 255, 0.06)');
+          grad.addColorStop(1.0, 'rgba(200, 220, 255, 0.0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 256, 256);
+          GroundWalkController.cachedHeadlightTexture = canvas.toDataURL('image/png');
+          return GroundWalkController.cachedHeadlightTexture;
+        }
+      }
+    } catch { /* degrade gracefully */ }
+    return '';
+  }
+
+  private updateLightingNodes(): void {
+    if (!this.roverModel || this.roverModel.isDestroyed()) return;
+
+    // Headlight LED strips in car model: physically illuminated when light switch is ON
+    const showHeadlights = this.headlightsOn;
+    if (this.headlightLeds.length > 0) {
+      for (const node of this.headlightLeds) {
+        node.show = showHeadlights;
+      }
+    } else {
+      if (this.headlightStripNode) this.headlightStripNode.show = showHeadlights;
+      if (this.headlight001Node) this.headlight001Node.show = showHeadlights;
+      if (this.headlight002Node) this.headlight002Node.show = showHeadlights;
+      if (this.headlight14Node) this.headlight14Node.show = showHeadlights;
+    }
+
+    // Rear continuous taillight strip: illuminated when light switch is ON
+    const showTaillights = this.headlightsOn;
+    for (const node of this.taillightLeds) {
+      node.show = showTaillights;
+    }
+
+    // High-mount intense brake light strip: illuminates when braking or stationary
+    if (this.brakeLightNode) {
+      const isBraking = (this.throttleInput < -0.05 && Math.abs(this.velocityMps) > 0.5) ||
+                        (this.keysHeld['KeyS'] || this.keysHeld['ArrowDown']) ||
+                        Math.abs(this.velocityMps) < 0.25;
+      this.brakeLightNode.show = isBraking;
+    }
+  }
+
   private updateFlightGroundEffects(): void {
     if (!this.viewer || this.viewer.isDestroyed() || this.mode !== 'drive') {
       if (this.hoverCushionEntity) this.hoverCushionEntity.show = false;
@@ -815,16 +908,15 @@ export class GroundWalkController {
       return;
     }
 
-    const groundH = Math.max(0, this.currentGroundHeight);
-
     // 1. Functional Headlights Projector Road Beam
-    // Real automotive physics: In bright daylight, headlight ground illumination is invisible.
-    // The road projector beam only illuminates the tarmac in night / low brightness conditions or twilight.
-    const isDarkOrNight = !this.isDaylight();
-    const shouldProjectBeam = (this.headlightsOn || isDarkOrNight) && isDarkOrNight && !this.isFlying;
+    // Real automotive physics & strict user light switch control:
+    // When the light switch is OFF (this.headlightsOn === false), ALL lights and ground projector beams are strictly OFF.
+    // When the light switch is ON (this.headlightsOn === true), headlights illuminate and project forward onto terrain/road.
+    const shouldProjectBeam = this.headlightsOn && !this.isFlying && this.flightAltitudeM < 0.4;
 
     if (shouldProjectBeam) {
       if (!this.headlightBeamEntity) {
+        const textureUri = this.getOrCreateHeadlightTexture();
         this.headlightBeamEntity = this.viewer.entities.add({
           id: 'roadster_headlights_road_beam',
           position: new Cesium.CallbackProperty(() => {
@@ -833,14 +925,21 @@ export class GroundWalkController {
             const fy = Math.cos(h);
             const mLat = 1 / 111139;
             const mLon = 1 / (111139 * Math.max(0.1, Math.cos(Cesium.Math.toRadians(this.lat))));
-            return Cesium.Cartesian3.fromDegrees(this.lon + 8.5 * fx * mLon, this.lat + 8.5 * fy * mLat, groundH + 0.03);
+            // Centered 11.0m ahead of front bumper along heading
+            return Cesium.Cartesian3.fromDegrees(
+              this.lon + 11.0 * fx * mLon,
+              this.lat + 11.0 * fy * mLat
+            );
           }, false) as unknown as Cesium.PositionProperty,
           ellipse: {
-            semiMajorAxis: 8.5,
-            semiMinorAxis: 3.2,
+            semiMajorAxis: 13.5, // Reaches ~24.5m forward down the road
+            semiMinorAxis: 4.8,  // Spans full road lane
             rotation: new Cesium.CallbackProperty(() => -this.heading, false),
-            material: new Cesium.Color(1.0, 0.98, 0.92, 0.32),
-            height: new Cesium.CallbackProperty(() => Math.max(0, this.currentGroundHeight) + 0.03, false),
+            classificationType: Cesium.ClassificationType.BOTH,
+            material: textureUri ? new Cesium.ImageMaterialProperty({
+              image: textureUri,
+              transparent: true,
+            }) : new Cesium.Color(1.0, 0.98, 0.90, 0.20),
           },
         });
       } else {
@@ -857,24 +956,24 @@ export class GroundWalkController {
       return;
     }
 
-    // 3. Dense Billowing White Cold-Gas Condensation Cloud underneath vehicle on terrain
+    // 2. Dense Billowing White Cold-Gas Condensation Cloud underneath vehicle on terrain
     if (!this.hoverCushionEntity) {
       this.hoverCushionEntity = this.viewer.entities.add({
         id: 'roadster_hover_cushion_ground_wash',
-        position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(this.lon, this.lat, groundH + 0.04), false) as unknown as Cesium.PositionProperty,
+        position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(this.lon, this.lat), false) as unknown as Cesium.PositionProperty,
         ellipse: {
           semiMajorAxis: new Cesium.CallbackProperty(() => (4.4 + Math.sin(performance.now() * 0.024) * 0.45), false),
           semiMinorAxis: new Cesium.CallbackProperty(() => (3.5 + Math.cos(performance.now() * 0.022) * 0.35), false),
           rotation: new Cesium.CallbackProperty(() => -this.heading, false),
-          material: new Cesium.Color(0.97, 0.98, 1.0, 0.76), // Pure dense white cold-gas vapor condensation cloud
-          height: new Cesium.CallbackProperty(() => Math.max(0, this.currentGroundHeight) + 0.04, false),
+          classificationType: Cesium.ClassificationType.BOTH,
+          material: new Cesium.Color(0.97, 0.98, 1.0, 0.65),
         },
       });
     } else {
       this.hoverCushionEntity.show = true;
     }
 
-    // 4. Rear Diffuser Downward Cold-Gas Thruster Impact Cloud on Ground
+    // 3. Rear Diffuser Downward Cold-Gas Thruster Impact Cloud on Ground
     if (!this.thrusterGlowEntity) {
       this.thrusterGlowEntity = this.viewer.entities.add({
         id: 'roadster_thruster_ground_glow',
@@ -884,14 +983,14 @@ export class GroundWalkController {
           const fy = Math.cos(h);
           const mLat = 1 / 111139;
           const mLon = 1 / (111139 * Math.max(0.1, Math.cos(Cesium.Math.toRadians(this.lat))));
-          return Cesium.Cartesian3.fromDegrees(this.lon - 1.5 * fx * mLon, this.lat - 1.5 * fy * mLat, groundH + 0.04);
+          return Cesium.Cartesian3.fromDegrees(this.lon - 1.5 * fx * mLon, this.lat - 1.5 * fy * mLat);
         }, false) as unknown as Cesium.PositionProperty,
         ellipse: {
           semiMajorAxis: new Cesium.CallbackProperty(() => 3.6 + Math.sin(performance.now() * 0.042) * 0.40, false),
           semiMinorAxis: 2.2,
           rotation: new Cesium.CallbackProperty(() => -this.heading, false),
-          material: new Cesium.Color(1.0, 1.0, 1.0, 0.88), // High-intensity turbulent impact cloud
-          height: new Cesium.CallbackProperty(() => Math.max(0, this.currentGroundHeight) + 0.04, false),
+          classificationType: Cesium.ClassificationType.BOTH,
+          material: new Cesium.Color(1.0, 1.0, 1.0, 0.70),
         },
       });
     } else {
@@ -903,9 +1002,8 @@ export class GroundWalkController {
     if (!this.roverModel || this.roverModel.isDestroyed()) return;
 
     // Vehicle ground position + SpaceX cold-gas thruster flight altitude
-    // Model tire contact patch sits at Y = 0.000m. Adding +0.08m clearance ensures all tires
-    // rest 100% cleanly ABOVE the Cesium terrain surface / tiles with zero clipping or sunken rims.
-    const groundClearance = 0.08;
+    // Multi-point terrain envelope guarantees no part of tires or bumpers can ever penetrate below ground.
+    const groundClearance = 0.14;
     // When flying, add subtle aerodynamic ground-effect micro-heave breathing
     const hoverBreathing = (this.isFlying && this.flightAltitudeM > 0.15)
       ? Math.sin(performance.now() * 0.011) * 0.022
@@ -913,19 +1011,24 @@ export class GroundWalkController {
     const groundAlt = Math.max(0, this.currentGroundHeight) + groundClearance + this.flightAltitudeM + hoverBreathing;
     const pos = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, groundAlt);
 
-    // Orientation: Heading angle around local Z (Up) axis, plus flight pitch and banking when airborne
-    // RCS Pitch: Forward rocket launch pitches nose down (-3.5°); retro-braking pitches nose up (+3.0°)
-    // RCS Roll: Hypercar high-speed bank-to-turn roll (±9.0°)
-    const flightPitch = this.flightAltitudeM > 0.08
+    // Orientation: Heading angle around local Z (Up) axis, plus slope pitch/roll and airborne RCS
+    const isAirborne = this.flightAltitudeM > 0.12;
+    const slopeWeight = isAirborne ? Math.max(0, 1.0 - (this.flightAltitudeM - 0.12) / 2.0) : 1.0;
+
+    const rcsPitch = this.flightAltitudeM > 0.08
       ? Cesium.Math.toRadians(Math.max(-4.5, Math.min(3.5, this.throttleInput > 0 ? -3.5 : this.throttleInput < 0 ? 3.0 : 0.0)))
-      : 0;
-    const flightRoll = this.flightAltitudeM > 0.08
+      : (this.throttleInput > 0 ? 0.02 : this.throttleInput < 0 ? -0.03 : 0);
+    const rcsRoll = this.flightAltitudeM > 0.08
       ? Cesium.Math.toRadians(Math.max(-10.0, Math.min(10.0, this.steeringInput * 9.0)))
-      : 0;
+      : (this.steeringInput * -0.015);
+
+    const finalPitch = this.currentSlopePitch * slopeWeight + rcsPitch;
+    const finalRoll = this.currentSlopeRoll * slopeWeight + rcsRoll;
+
     // Model is aligned so front headlights point precisely along this.heading:
     // GlTF asset in ENU requires +PI/2 rotation so that headlights and front splitter face precisely along this.heading (0° North, 90° East).
     const modelHeading = this.heading + Math.PI * 0.5;
-    const hpr = new Cesium.HeadingPitchRoll(modelHeading, flightPitch, flightRoll);
+    const hpr = new Cesium.HeadingPitchRoll(modelHeading, finalPitch, finalRoll);
     const qRot = Cesium.Quaternion.fromHeadingPitchRoll(hpr, new Cesium.Quaternion());
 
     const rotM = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
@@ -937,6 +1040,7 @@ export class GroundWalkController {
 
     const enuFixed = Cesium.Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, new Cesium.Matrix4());
     this.roverModel.modelMatrix = Cesium.Matrix4.multiply(enuFixed, rotM, new Cesium.Matrix4());
+    this.updateLightingNodes();
   }
 
   private attachListeners(): void {
@@ -1245,14 +1349,104 @@ export class GroundWalkController {
     // Keep heading in [0, 2PI)
     this.heading = (this.heading % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
 
-    // ── Continuous Ground Elevation Tracking ──
-    // Sample ground elevation every frame so when terrain tiles stream in asynchronously,
-    // the vehicle and camera immediately settle cleanly ON TOP of the terrain (never underground!)
-    const sampledGround = this.sampleGroundHeight(this.lat, this.lon);
-    if (this.currentGroundHeight <= 0.01 && sampledGround > 0.05) {
-      this.currentGroundHeight = sampledGround;
-    } else if (sampledGround > -500 && Math.abs(sampledGround - this.currentGroundHeight) > 0.02) {
-      this.currentGroundHeight = this.currentGroundHeight * 0.85 + sampledGround * 0.15;
+    // ── Continuous Multi-Point Ground Elevation & Slope Tracking ──
+    // Samples 7 key contact points (Center, 4 Wheels, Front Bumper, Rear Diffuser)
+    // to calculate real terrain pitch/roll and guarantee zero clipping into mountain slopes.
+    if (this.mode === 'drive') {
+      const radLat = Cesium.Math.toRadians(this.lat);
+      const mPerDegLat = 111132.954;
+      const mPerDegLon = 111132.954 * Math.max(0.1, Math.cos(radLat));
+
+      const fN = Math.cos(this.heading);
+      const fE = Math.sin(this.heading);
+      const rN = -Math.sin(this.heading);
+      const rE = Math.cos(this.heading);
+
+      // Roadster wheelbase ~2.7m (wheels at ±1.35m), track ~1.7m (half-track 0.85m), overhangs to ±2.25m
+      const lFwd = 1.35;
+      const lAft = -1.35;
+      const wHalf = 0.85;
+      const lNose = 2.25;
+      const lTail = -2.25;
+
+      const sampleOffsets = [
+        { x: 0, y: 0 },          // 0: Center
+        { x: lFwd, y: -wHalf },  // 1: FL Wheel
+        { x: lFwd, y: wHalf },   // 2: FR Wheel
+        { x: lAft, y: -wHalf },  // 3: RL Wheel
+        { x: lAft, y: wHalf },   // 4: RR Wheel
+        { x: lNose, y: 0 },      // 5: Front Bumper
+        { x: lTail, y: 0 },      // 6: Rear Diffuser
+        { x: lNose * 0.95, y: -wHalf * 0.90 }, // 7: Front Left Splitter Tip
+        { x: lNose * 0.95, y: wHalf * 0.90 },  // 8: Front Right Splitter Tip
+        { x: lTail * 0.95, y: -wHalf * 0.80 }, // 9: Rear Left Diffuser Edge
+        { x: lTail * 0.95, y: wHalf * 0.80 },  // 10: Rear Right Diffuser Edge
+      ];
+
+      const elevations: number[] = [];
+      let hFront = 0;
+      let hRear = 0;
+      let hLeft = 0;
+      let hRight = 0;
+
+      for (let i = 0; i < sampleOffsets.length; i++) {
+        const smp = sampleOffsets[i];
+        const dNorth = smp.x * fN + smp.y * rN;
+        const dEast = smp.x * fE + smp.y * rE;
+        const sLat = this.lat + dNorth / mPerDegLat;
+        const sLon = this.lon + dEast / mPerDegLon;
+        const h = this.sampleGroundHeight(sLat, sLon);
+        elevations.push(h);
+
+        if (i === 1 || i === 2 || i === 5 || i === 7 || i === 8) hFront += h / 5.0;
+        if (i === 3 || i === 4 || i === 6 || i === 9 || i === 10) hRear += h / 5.0;
+        if (i === 1 || i === 3 || i === 7 || i === 9) hLeft += h / 4.0;
+        if (i === 2 || i === 4 || i === 8 || i === 10) hRight += h / 4.0;
+      }
+
+      const centerH = elevations[0];
+      // Slope pitch (longitudinal incline: + is nose-up uphill, - is nose-down downhill)
+      const targetSlopePitch = Math.atan2(hFront - hRear, lNose - lTail);
+      // Slope roll (lateral banking: + is right side higher, - is left side higher)
+      const targetSlopeRoll = Math.atan2(hRight - hLeft, wHalf * 2.0);
+
+      const filterK = Math.min(1.0, dt * 14.0);
+      this.currentSlopePitch += (targetSlopePitch - this.currentSlopePitch) * filterK;
+      this.currentSlopeRoll += (targetSlopeRoll - this.currentSlopeRoll) * filterK;
+
+      // Strict Anti-Submersion Clearance Floor:
+      // Project each contact point's height relative to center with current pitch/roll
+      const sinP = Math.sin(this.currentSlopePitch);
+      const sinR = Math.sin(this.currentSlopeRoll);
+      let maxRequiredCenter = centerH;
+
+      for (let i = 0; i < sampleOffsets.length; i++) {
+        const smp = sampleOffsets[i];
+        const h = elevations[i];
+        const relZ = smp.x * sinP + smp.y * sinR;
+        const reqCenter = h - relZ;
+        if (reqCenter > maxRequiredCenter) {
+          maxRequiredCenter = reqCenter;
+        }
+      }
+
+      if (this.currentGroundHeight <= 0.01 && maxRequiredCenter > 0.05) {
+        this.currentGroundHeight = maxRequiredCenter;
+      } else if (maxRequiredCenter > -500) {
+        if (maxRequiredCenter > this.currentGroundHeight) {
+          // Instant anti-submersion floor: strictly ensure car center rises immediately so no wheel or bumper penetrates terrain
+          this.currentGroundHeight = maxRequiredCenter;
+        } else {
+          this.currentGroundHeight = this.currentGroundHeight * 0.82 + maxRequiredCenter * 0.18;
+        }
+      }
+    } else {
+      const sampledGround = this.sampleGroundHeight(this.lat, this.lon);
+      if (this.currentGroundHeight <= 0.01 && sampledGround > 0.05) {
+        this.currentGroundHeight = sampledGround;
+      } else if (sampledGround > -500 && Math.abs(sampledGround - this.currentGroundHeight) > 0.02) {
+        this.currentGroundHeight = this.currentGroundHeight * 0.85 + sampledGround * 0.15;
+      }
     }
 
     // ── Position Displacement along East-North ──
@@ -1377,11 +1571,14 @@ export class GroundWalkController {
 
         // Vehicle center target height (~0.58m above terrain + flight altitude)
         const targetHeight = baseAlt + this.flightAltitudeM + 0.58;
-        const camHeight = Math.max(baseAlt + 0.35, targetHeight + vertDist);
+        const camLon = this.lon + dEast / mPerDegLon;
+        const camLat = this.lat + dNorth / mPerDegLat;
+        const camTerrainH = this.sampleGroundHeight(camLat, camLon);
+        const camHeight = Math.max(camTerrainH + 0.65, Math.max(baseAlt + 0.35, targetHeight + vertDist));
 
         camPos = Cesium.Cartesian3.fromDegrees(
-          this.lon + dEast / mPerDegLon,
-          this.lat + dNorth / mPerDegLat,
+          camLon,
+          camLat,
           camHeight
         );
 
@@ -1402,7 +1599,7 @@ export class GroundWalkController {
 
         const driverForwardOffset = 0.12; // Authentic driver bucket seat position along heading
         const driverLateralOffset = 0.38;  // 0.38m to the left (driver bucket seat center)
-        const camHeight = baseAlt + this.flightAltitudeM + 0.98;
+        const camHeight = baseAlt + this.flightAltitudeM + 0.98 + driverForwardOffset * Math.sin(this.currentSlopePitch);
 
         const radLat = Cesium.Math.toRadians(this.lat);
         const mPerDegLat = 111132.954;
@@ -1415,7 +1612,7 @@ export class GroundWalkController {
         camPos = Cesium.Cartesian3.fromDegrees(this.lon + dEast / mPerDegLon, this.lat + dNorth / mPerDegLat, camHeight);
         camHeading = (this.heading + this.mouseYawOffset) % (Math.PI * 2);
         if (camHeading < 0) camHeading += Math.PI * 2;
-        camPitch = Math.max(-0.6, Math.min(0.6, Cesium.Math.toRadians(-4.0) + this.mousePitchOffset));
+        camPitch = Math.max(-0.6, Math.min(0.6, Cesium.Math.toRadians(-4.0) + this.currentSlopePitch + this.mousePitchOffset));
       }
     } else if (this.mode === 'walk') {
       // ── Human Eye-Level Walking Perspective ──
@@ -1546,12 +1743,16 @@ export class GroundWalkController {
 
   toggleHeadlights(): boolean {
     this.headlightsOn = !this.headlightsOn;
+    this.updateLightingNodes();
+    this.updateFlightGroundEffects();
     this.emitUpdate();
     return this.headlightsOn;
   }
 
   setHeadlights(on: boolean): void {
     this.headlightsOn = on;
+    this.updateLightingNodes();
+    this.updateFlightGroundEffects();
     this.emitUpdate();
   }
 

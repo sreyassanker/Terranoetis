@@ -6192,6 +6192,85 @@ export default function App() {
     return heliLastGroundAltRef.current;
   }
 
+  function heliSampleEffectiveGroundAlt(
+    v: Cesium.Viewer,
+    lat: number,
+    lon: number,
+    headingDeg: number,
+    pitchDeg: number,
+    rollDeg: number
+  ): { effectiveGroundAlt: number; slopePitchDeg: number; slopeRollDeg: number } {
+    const radLat = Cesium.Math.toRadians(lat);
+    const mPerDegLat = 111132.954;
+    const mPerDegLon = 111132.954 * Math.max(0.1, Math.cos(radLat));
+
+    const hRad = Cesium.Math.toRadians(headingDeg);
+    const fN = Math.cos(hRad);
+    const fE = Math.sin(hRad);
+    const rN = -Math.sin(hRad);
+    const rE = Math.cos(hRad);
+
+    // AH-64E Apache bounding footprint:
+    // Model origin is center of rotor mast:
+    // Nose (+8.2m forward), Tail (-9.5m aft), Left Rotor (+7.3m left), Right Rotor (+7.3m right)
+    // Plus wing sponsons and midpoints
+    const samplePoints = [
+      { x: 0, y: 0 },         // 0: Mast Center
+      { x: 8.2, y: 0 },       // 1: Nose (30mm chain gun / FLIR)
+      { x: 4.5, y: 0 },       // 2: Cockpit
+      { x: -4.5, y: 0 },      // 3: Tail boom
+      { x: -9.5, y: 0 },      // 4: Tail rotor
+      { x: 0, y: -7.3 },      // 5: Left rotor tip
+      { x: 0, y: 7.3 },       // 6: Right rotor tip
+      { x: 4.5, y: -4.5 },    // 7: Left wingtip / rocket pod
+      { x: 4.5, y: 4.5 },     // 8: Right wingtip / rocket pod
+    ];
+
+    const pRad = Cesium.Math.toRadians(pitchDeg);
+    const rRad = Cesium.Math.toRadians(rollDeg);
+    const sinP = Math.sin(pRad);
+    const sinR = Math.sin(rRad);
+
+    let maxRequiredAlt = -Infinity;
+    let hNose = 0;
+    let hTail = 0;
+    let hLeft = 0;
+    let hRight = 0;
+
+    for (let i = 0; i < samplePoints.length; i++) {
+      const pt = samplePoints[i];
+      const dNorth = pt.x * fN + pt.y * rN;
+      const dEast = pt.x * fE + pt.y * rE;
+      const sLat = lat + dNorth / mPerDegLat;
+      const sLon = lon + dEast / mPerDegLon;
+      const h = heliGroundHeight(v, sLat, sLon);
+
+      if (i === 1) hNose = h;
+      if (i === 4) hTail = h;
+      if (i === 5) hLeft = h;
+      if (i === 6) hRight = h;
+
+      // Vertical offset of this airframe part relative to rotor mast center due to pitch & roll
+      const relZ = pt.x * sinP + pt.y * sinR;
+      // In order for this airframe point to be strictly at or above ground h:
+      // mastCenterAlt + relZ >= h  =>  mastCenterAlt >= h - relZ
+      const reqMastAlt = h - relZ;
+      if (reqMastAlt > maxRequiredAlt) {
+        maxRequiredAlt = reqMastAlt;
+      }
+    }
+
+    const centerH = heliGroundHeight(v, lat, lon);
+    const effectiveGroundAlt = Number.isFinite(maxRequiredAlt) && maxRequiredAlt > -500
+      ? Math.max(centerH, maxRequiredAlt)
+      : centerH;
+
+    const slopePitchDeg = Cesium.Math.toDegrees(Math.atan2(hNose - hTail, 17.7));
+    const slopeRollDeg = Cesium.Math.toDegrees(Math.atan2(hRight - hLeft, 14.6));
+
+    return { effectiveGroundAlt, slopePitchDeg, slopeRollDeg };
+  }
+
   function getCurrentViewPosition(): { lat: number; lon: number } | null {
     const v = viewerRef.current;
     if (!v) return null;
@@ -6829,7 +6908,10 @@ export default function App() {
     heliFrameRef.current = nowMs;
 
     const before = sim.state;
-    sim.setGroundAlt(heliGroundHeight(v, before.lat, before.lon));
+    const { effectiveGroundAlt, slopePitchDeg, slopeRollDeg } = heliSampleEffectiveGroundAlt(
+      v, before.lat, before.lon, before.headingDeg, before.pitchDeg, before.rollDeg
+    );
+    sim.setGroundAlt(effectiveGroundAlt);
 
     const k = heliKeysRef.current;
     const inp = heliInputRef.current;
@@ -6875,8 +6957,13 @@ export default function App() {
     // Roll: rotation about longitudinal axis +Y (+rRad, right bank > 0, left bank < 0)
     const pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.altM);
     const hRad = Cesium.Math.toRadians(s.headingDeg);
-    const pRad = Cesium.Math.toRadians(s.pitchDeg);
-    const rRad = Cesium.Math.toRadians(s.rollDeg);
+
+    // When on ground or touching down, conform airframe pitch/roll to the mountain slope
+    const groundSlopeWeight = s.onGround ? 1.0 : Math.max(0, 1.0 - s.aglM / 3.0);
+    const effPitchDeg = s.pitchDeg * (1.0 - groundSlopeWeight) + slopePitchDeg * groundSlopeWeight;
+    const effRollDeg = s.rollDeg * (1.0 - groundSlopeWeight) + slopeRollDeg * groundSlopeWeight;
+    const pRad = Cesium.Math.toRadians(effPitchDeg);
+    const rRad = Cesium.Math.toRadians(effRollDeg);
     const qHdg = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Z, -hRad, new Cesium.Quaternion());
     const qPitch = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X, pRad, new Cesium.Quaternion());
     const qRoll = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y, rRad, new Cesium.Quaternion());
