@@ -85,6 +85,15 @@ function buildConePrimitive(
   return { positions, normals, indices };
 }
 
+function buildCylinderPrimitive(
+  baseCenter: [number, number, number],
+  tipCenter: [number, number, number],
+  radius: number,
+  segments = 14
+): MeshPrimitiveData {
+  return buildConePrimitive(baseCenter, tipCenter, radius, radius, segments);
+}
+
 function buildBiconePrimitive(
   center: [number, number, number],
   rMax: number,
@@ -255,6 +264,10 @@ export function generateRoadsterGlbs() {
   const chassisBuf = Buffer.from(chassis.buffers[0].uri.replace(/^data:application\/octet-stream;base64,/, ''), 'base64');
   const wheelBuf = Buffer.from(wheel.buffers[0].uri.replace(/^data:application\/octet-stream;base64,/, ''), 'base64');
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Chassis and Wheel base buffers
+  // Note: Factory mesh vertices are preserved in their pristine, watertight state.
+  // ─────────────────────────────────────────────────────────────────────────────
   const padChassis = (4 - (chassisBuf.length % 4)) % 4;
   const paddedChassisBuf = Buffer.concat([chassisBuf, Buffer.alloc(padChassis, 0)]);
 
@@ -426,14 +439,15 @@ export function generateRoadsterGlbs() {
   const sceneRootNode = chassis.nodes[sceneRootNodeIdx];
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PRUNE LEGACY ARTIFACTS, UNTEXTURED BLOCKS & STATIC WHEELS
+  // PRUNE LEGACY ARTIFACTS, UNTEXTURED BLOCKS, STUDIO BACKDROPS & STATIC WHEELS
   // ─────────────────────────────────────────────────────────────────────────────
   // Prunes:
   // - WHEEL.003_39, WHEEL.004_40, WHEEL.005_41 (legacy non-spinning wheels)
   // - Plane_30 (artist showcase platform stand)
   // - Cylinder.001_25 (legacy artifact cylinder)
   // - Cylinder_24 (legacy crude cylinder)
-  // NOTE: Cube_23 (dashboard), SCREEN_37 (OLED display), Cube.001_34 (front bucket seats),
+  // - Cube_23, Object_61, Object_62 (giant 10.8m curved studio backdrop reflector in the sky)
+  // NOTE: SCREEN_37 (OLED display), Cube.001_34 (front bucket seats),
   // and Plane.002_29 (cabin seating) are preserved to keep authentic fit, clearances, and materials!
   const staticNodesToPrune = [
     'WHEEL.003_39',
@@ -442,11 +456,20 @@ export function generateRoadsterGlbs() {
     'Plane_30',
     'Cylinder.001_25',
     'Cylinder_24',
+    'Cube_23',
+    'Object_61',
+    'Object_62',
   ];
   const pruneIndices = staticNodesToPrune
     .map(name => chassis.nodes.findIndex((n: { name: string }) => n.name === name))
     .filter(idx => idx !== -1);
   sceneRootNode.children = sceneRootNode.children.filter((id: number) => !pruneIndices.includes(id));
+  for (const idx of pruneIndices) {
+    if (chassis.nodes[idx]) {
+      delete chassis.nodes[idx].mesh;
+      delete chassis.nodes[idx].children;
+    }
+  }
 
   // 4 Dynamic Wheel Nodes with individual pivots for 60 FPS steer & roll:
   // Perfectly symmetric, tucked inside the fender haunches (Left: +0.585m, Right: -0.585m)
@@ -771,36 +794,257 @@ export function generateRoadsterGlbs() {
   const carPaintMatIdx = chassis.materials.findIndex((m: { name: string }) => m.name === 'car_paint');
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 1. AERODYNAMIC CARBON EXTERIOR WING MIRRORS & FRAMELESS INTERIOR TOP MIRROR
+  // 0. EXTRACT TARGA ROOF PANEL FROM MESH 6 (body_1 black_matt)
+  // Isolates the central removable black roof panel into a dedicated node 'targa_roof_panel'
+  // so it can be cleanly opened in Targa convertible mode without touching the main body.
   // ─────────────────────────────────────────────────────────────────────────────
-  // Left Exterior Side Mirror (Driver Door A-Pillar Base - Sleek Aerodynamic Carbon Winglet)
-  const leftMirrorStalk = buildBoxPrimitive([ 0.615, 0.470, 0.510], [0.035, 0.008, 0.016], 0.12, 0.08, -0.22);
-  const leftMirrorHousing = buildBoxPrimitive([ 0.650, 0.475, 0.505], [0.055, 0.024, 0.018], 0.06, 0.04, -0.18);
-  const leftMirrorGlass = buildBoxPrimitive([ 0.650, 0.475, 0.495], [0.050, 0.020, 0.002], 0.06, 0.04, -0.18);
-  const leftMirrorIndicator = buildBoxPrimitive([ 0.675, 0.475, 0.512], [0.010, 0.004, 0.012], 0.06);
+  const mesh6Prim = chassis.meshes[6].primitives[0];
+  const mesh6PosAcc = chassis.accessors[mesh6Prim.attributes.POSITION];
+  const mesh6NormAcc = chassis.accessors[mesh6Prim.attributes.NORMAL];
+  const mesh6IdxAcc = chassis.accessors[mesh6Prim.indices];
+  const mesh6PosOff = (chassis.bufferViews[mesh6PosAcc.bufferView].byteOffset || 0) + (mesh6PosAcc.byteOffset || 0);
+  const mesh6NormOff = (chassis.bufferViews[mesh6NormAcc.bufferView].byteOffset || 0) + (mesh6NormAcc.byteOffset || 0);
+  const mesh6IdxOff = (chassis.bufferViews[mesh6IdxAcc.bufferView].byteOffset || 0) + (mesh6IdxAcc.byteOffset || 0);
 
-  // Right Exterior Side Mirror (Passenger Door A-Pillar Base - Sleek Aerodynamic Carbon Winglet)
-  const rightMirrorStalk = buildBoxPrimitive([-0.615, 0.470, 0.510], [0.035, 0.008, 0.016], 0.12, -0.08, 0.22);
-  const rightMirrorHousing = buildBoxPrimitive([-0.650, 0.475, 0.505], [0.055, 0.024, 0.018], 0.06, -0.04, 0.18);
-  const rightMirrorGlass = buildBoxPrimitive([-0.650, 0.475, 0.495], [0.050, 0.020, 0.002], 0.06, -0.04, 0.18);
-  const rightMirrorIndicator = buildBoxPrimitive([-0.675, 0.475, 0.512], [0.010, 0.004, 0.012], 0.06);
+  const triCount = mesh6IdxAcc.count / 3;
+  let seedTri = -1;
+  for (let i = 0; i < triCount; i++) {
+    const i0 = chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3) * 2);
+    const i1 = chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3 + 1) * 2);
+    const i2 = chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3 + 2) * 2);
+    const x = (chassisBuf.readFloatLE(mesh6PosOff + i0 * 12) + chassisBuf.readFloatLE(mesh6PosOff + i1 * 12) + chassisBuf.readFloatLE(mesh6PosOff + i2 * 12)) / 3;
+    const y = (chassisBuf.readFloatLE(mesh6PosOff + i0 * 12 + 4) + chassisBuf.readFloatLE(mesh6PosOff + i1 * 12 + 4) + chassisBuf.readFloatLE(mesh6PosOff + i2 * 12 + 4)) / 3;
+    const z = (chassisBuf.readFloatLE(mesh6PosOff + i0 * 12 + 8) + chassisBuf.readFloatLE(mesh6PosOff + i1 * 12 + 8) + chassisBuf.readFloatLE(mesh6PosOff + i2 * 12 + 8)) / 3;
+    if (Math.abs(x) < 0.1 && y > 1.50 && Math.abs(z + 0.5) < 0.2) {
+      seedTri = i;
+      break;
+    }
+  }
 
-  // Top Frameless Interior Rearview Mirror (Windshield Center Header)
+  const vertToTris = new Map<number, number[]>();
+  for (let i = 0; i < triCount; i++) {
+    for (let j = 0; j < 3; j++) {
+      const v = chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3 + j) * 2);
+      let list = vertToTris.get(v);
+      if (!list) {
+        list = [];
+        vertToTris.set(v, list);
+      }
+      list.push(i);
+    }
+  }
+
+  const roofTris = new Set<number>();
+  if (seedTri !== -1) {
+    const queue = [seedTri];
+    roofTris.add(seedTri);
+    while (queue.length > 0) {
+      const curr = queue.pop()!;
+      for (let j = 0; j < 3; j++) {
+        const v = chassisBuf.readUInt16LE(mesh6IdxOff + (curr * 3 + j) * 2);
+        const nbrs = vertToTris.get(v) || [];
+        for (const n of nbrs) {
+          if (!roofTris.has(n)) {
+            roofTris.add(n);
+            queue.push(n);
+          }
+        }
+      }
+    }
+  }
+
+  const roofPositions: number[] = [];
+  const roofNormals: number[] = [];
+  const roofIndices: number[] = [];
+  const oldToNewVert = new Map<number, number>();
+
+  for (const t of roofTris) {
+    for (let j = 0; j < 3; j++) {
+      const oldV = chassisBuf.readUInt16LE(mesh6IdxOff + (t * 3 + j) * 2);
+      let newV = oldToNewVert.get(oldV);
+      if (newV === undefined) {
+        newV = roofPositions.length / 3;
+        oldToNewVert.set(oldV, newV);
+        roofPositions.push(
+          chassisBuf.readFloatLE(mesh6PosOff + oldV * 12),
+          chassisBuf.readFloatLE(mesh6PosOff + oldV * 12 + 4),
+          chassisBuf.readFloatLE(mesh6PosOff + oldV * 12 + 8)
+        );
+        roofNormals.push(
+          chassisBuf.readFloatLE(mesh6NormOff + oldV * 12),
+          chassisBuf.readFloatLE(mesh6NormOff + oldV * 12 + 4),
+          chassisBuf.readFloatLE(mesh6NormOff + oldV * 12 + 8)
+        );
+      }
+      roofIndices.push(newV);
+    }
+  }
+
+  // Rewrite Mesh 6 indices in-place to exclude the roof panel
+  let writePtr = mesh6IdxOff;
+  for (let i = 0; i < triCount; i++) {
+    if (!roofTris.has(i)) {
+      chassisBuf.writeUInt16LE(chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3) * 2), writePtr);
+      chassisBuf.writeUInt16LE(chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3 + 1) * 2), writePtr + 2);
+      chassisBuf.writeUInt16LE(chassisBuf.readUInt16LE(mesh6IdxOff + (i * 3 + 2) * 2), writePtr + 4);
+      writePtr += 6;
+    }
+  }
+  mesh6IdxAcc.count = (triCount - roofTris.size) * 3;
+
+  // Append isolated roof panel primitive as dedicated node 'targa_roof_panel'
+  const roofPrim = appendGeometryPrimitive(
+    chassis,
+    baseBuffers,
+    { positions: roofPositions, normals: roofNormals, indices: roofIndices },
+    mesh6Prim.material
+  );
+  const targaRoofMeshIdx = chassis.meshes.length;
+  chassis.meshes.push({
+    name: 'Tesla_Targa_Roof_Mesh',
+    primitives: [roofPrim],
+  });
+  const body1Node = chassis.nodes.find((n: { name: string }) => n.name === 'body_1');
+  const targaRoofNodeIdx = chassis.nodes.length;
+  chassis.nodes.push({
+    name: 'targa_roof_panel',
+    mesh: targaRoofMeshIdx,
+    rotation: body1Node?.rotation ? [...body1Node.rotation] : undefined,
+    scale: body1Node?.scale ? [...body1Node.scale] : undefined,
+    translation: body1Node?.translation ? [...body1Node.translation] : undefined,
+  });
+  sceneRootNode.children.push(targaRoofNodeIdx);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 0B. EXTRACT TARGA WINDSHIELD ROOF EXTENSION (Mesh 54 & 55 of wind sheild_5)
+  // Isolates the upper roof section of the glass and black trim (Z < 1.05) into
+  // a dedicated node 'targa_windshield_roof' so the cabin is 100% open-air when Targa is open,
+  // leaving only the upright front windshield (Z >= 1.05) in place!
+  // ─────────────────────────────────────────────────────────────────────────────
+  function extractMeshRoofTris(meshIdx: number, splitZ = 1.05) {
+    const prim = chassis.meshes[meshIdx].primitives[0];
+    const posAcc = chassis.accessors[prim.attributes.POSITION];
+    const normAcc = chassis.accessors[prim.attributes.NORMAL];
+    const idxAcc = chassis.accessors[prim.indices];
+    const posOff = (chassis.bufferViews[posAcc.bufferView].byteOffset || 0) + (posAcc.byteOffset || 0);
+    const normOff = (chassis.bufferViews[normAcc.bufferView].byteOffset || 0) + (normAcc.byteOffset || 0);
+    const idxOff = (chassis.bufferViews[idxAcc.bufferView].byteOffset || 0) + (idxAcc.byteOffset || 0);
+    const count = idxAcc.count / 3;
+
+    const roofPositions: number[] = [];
+    const roofNormals: number[] = [];
+    const roofIndices: number[] = [];
+    const oldToNew = new Map<number, number>();
+
+    const wsIdxs: number[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const i0 = chassisBuf.readUInt16LE(idxOff + (i * 3) * 2);
+      const i1 = chassisBuf.readUInt16LE(idxOff + (i * 3 + 1) * 2);
+      const i2 = chassisBuf.readUInt16LE(idxOff + (i * 3 + 2) * 2);
+      const z0 = chassisBuf.readFloatLE(posOff + i0 * 12 + 8);
+      const z1 = chassisBuf.readFloatLE(posOff + i1 * 12 + 8);
+      const z2 = chassisBuf.readFloatLE(posOff + i2 * 12 + 8);
+      const avgZ = (z0 + z1 + z2) / 3;
+
+      if (avgZ < splitZ) {
+        // Roof triangle
+        for (const oldV of [i0, i1, i2]) {
+          let newV = oldToNew.get(oldV);
+          if (newV === undefined) {
+            newV = roofPositions.length / 3;
+            oldToNew.set(oldV, newV);
+            roofPositions.push(
+              chassisBuf.readFloatLE(posOff + oldV * 12),
+              chassisBuf.readFloatLE(posOff + oldV * 12 + 4),
+              chassisBuf.readFloatLE(posOff + oldV * 12 + 8)
+            );
+            roofNormals.push(
+              chassisBuf.readFloatLE(normOff + oldV * 12),
+              chassisBuf.readFloatLE(normOff + oldV * 12 + 4),
+              chassisBuf.readFloatLE(normOff + oldV * 12 + 8)
+            );
+          }
+          roofIndices.push(newV);
+        }
+      } else {
+        // Windshield triangle: retain in original mesh
+        wsIdxs.push(i0, i1, i2);
+      }
+    }
+
+    // Rewrite original indices in-place with wsIdxs
+    for (let i = 0; i < wsIdxs.length; i++) {
+      chassisBuf.writeUInt16LE(wsIdxs[i], idxOff + i * 2);
+    }
+    idxAcc.count = wsIdxs.length;
+
+    return {
+      positions: roofPositions,
+      normals: roofNormals,
+      indices: roofIndices,
+      material: prim.material,
+    };
+  }
+
+  const wsRoofTrim = extractMeshRoofTris(54, 1.05);
+  const wsRoofGlass = extractMeshRoofTris(55, 1.05);
+
+  const wsRoofTrimPrim = appendGeometryPrimitive(
+    chassis,
+    baseBuffers,
+    { positions: wsRoofTrim.positions, normals: wsRoofTrim.normals, indices: wsRoofTrim.indices },
+    wsRoofTrim.material
+  );
+  const wsRoofGlassPrim = appendGeometryPrimitive(
+    chassis,
+    baseBuffers,
+    { positions: wsRoofGlass.positions, normals: wsRoofGlass.normals, indices: wsRoofGlass.indices },
+    wsRoofGlass.material
+  );
+
+  const wsRoofTrimMeshIdx = chassis.meshes.length;
+  chassis.meshes.push({
+    name: 'Tesla_Windshield_Roof_Trim_Mesh',
+    primitives: [wsRoofTrimPrim],
+  });
+  const wsRoofTrimNodeIdx = chassis.nodes.length;
+  chassis.nodes.push({
+    name: 'Object_ws_roof_trim',
+    mesh: wsRoofTrimMeshIdx,
+  });
+
+  const wsRoofGlassMeshIdx = chassis.meshes.length;
+  chassis.meshes.push({
+    name: 'Tesla_Windshield_Roof_Glass_Mesh',
+    primitives: [wsRoofGlassPrim],
+  });
+  const wsRoofGlassNodeIdx = chassis.nodes.length;
+  chassis.nodes.push({
+    name: 'Object_ws_roof_glass',
+    mesh: wsRoofGlassMeshIdx,
+  });
+
+  const windSheildNode = chassis.nodes.find((n: { name: string }) => n.name === 'wind sheild_5');
+  const targaWsRoofNodeIdx = chassis.nodes.length;
+  chassis.nodes.push({
+    name: 'targa_windshield_roof',
+    children: [wsRoofTrimNodeIdx, wsRoofGlassNodeIdx],
+    rotation: windSheildNode?.rotation ? [...windSheildNode.rotation] : undefined,
+    scale: windSheildNode?.scale ? [...windSheildNode.scale] : undefined,
+    translation: windSheildNode?.translation ? [...windSheildNode.translation] : undefined,
+  });
+  sceneRootNode.children.push(targaWsRoofNodeIdx);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1. FRAMELESS INTERIOR REARVIEW MIRROR (Windshield Center Header)
+  // (Exterior side mirrors removed for authentic aerodynamic mirrorless Roadster styling)
+  // ─────────────────────────────────────────────────────────────────────────────
   const topMirrorBracket = buildBoxPrimitive([0.0, 0.665, 0.065], [0.008, 0.018, 0.008], -0.22);
   const topMirrorHousing = buildBoxPrimitive([0.0, 0.650, 0.070], [0.120, 0.032, 0.006], -0.10);
   const topMirrorGlass = buildBoxPrimitive([0.0, 0.650, 0.066], [0.116, 0.028, 0.002], -0.10);
 
   const mirrorPrims = [
-    appendGeometryPrimitive(chassis, baseBuffers, leftMirrorStalk, carbonStalkMatIdx !== -1 ? carbonStalkMatIdx : 1),
-    appendGeometryPrimitive(chassis, baseBuffers, leftMirrorHousing, carPaintMatIdx !== -1 ? carPaintMatIdx : 2),
-    appendGeometryPrimitive(chassis, baseBuffers, leftMirrorGlass, mirrorChromeGlassMatIdx),
-    appendGeometryPrimitive(chassis, baseBuffers, leftMirrorIndicator, turnSignalAmberMatIdx),
-
-    appendGeometryPrimitive(chassis, baseBuffers, rightMirrorStalk, carbonStalkMatIdx !== -1 ? carbonStalkMatIdx : 1),
-    appendGeometryPrimitive(chassis, baseBuffers, rightMirrorHousing, carPaintMatIdx !== -1 ? carPaintMatIdx : 2),
-    appendGeometryPrimitive(chassis, baseBuffers, rightMirrorGlass, mirrorChromeGlassMatIdx),
-    appendGeometryPrimitive(chassis, baseBuffers, rightMirrorIndicator, turnSignalAmberMatIdx),
-
     appendGeometryPrimitive(chassis, baseBuffers, topMirrorBracket, carbonStalkMatIdx !== -1 ? carbonStalkMatIdx : 1),
     appendGeometryPrimitive(chassis, baseBuffers, topMirrorHousing, carbonStalkMatIdx !== -1 ? carbonStalkMatIdx : 1),
     appendGeometryPrimitive(chassis, baseBuffers, topMirrorGlass, mirrorChromeGlassMatIdx),
@@ -808,16 +1052,83 @@ export function generateRoadsterGlbs() {
 
   const mirrorsMeshIdx = chassis.meshes.length;
   chassis.meshes.push({
-    name: 'Cockpit_And_Exterior_Mirrors_Mesh',
+    name: 'Cockpit_Interior_Rearview_Mirror_Mesh',
     primitives: mirrorPrims,
   });
 
   const mirrorsNodeIdx = chassis.nodes.length;
   chassis.nodes.push({
-    name: 'cockpit_and_exterior_mirrors',
+    name: 'cockpit_interior_rearview_mirror',
     mesh: mirrorsMeshIdx,
   });
   sceneRootNode.children.push(mirrorsNodeIdx);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2. WINDSHIELD WIPER (Tesla Aerodynamic Single Blade with Automatic Rain Actuation)
+  // Attached to dedicated dynamic scene node 'windshield_wiper' for 60 FPS rain sweeping
+  // ─────────────────────────────────────────────────────────────────────────────
+  const wiperMatIdx = carbonStalkMatIdx !== -1 ? carbonStalkMatIdx : 1;
+
+  // Wiper Base Pivot / Spindle Mount on windshield cowl
+  const wiperPivotCap = buildCylinderPrimitive(
+    [0.0, 0.0, 0.0],
+    [0.002, 0.015, 0.006],
+    0.012,
+    12
+  );
+  // Wiper Arm Base Hinge / Bracket
+  const wiperArmHinge = buildBoxPrimitive(
+    [-0.010, 0.012, 0.004],
+    [0.016, 0.007, 0.010],
+    0.10, 0.05, -0.20
+  );
+  // Primary Aerodynamic Carbon Wiper Arm extending along cowl towards passenger side
+  const wiperArm = buildBoxPrimitive(
+    [-0.140, 0.012, 0.006],
+    [0.130, 0.005, 0.007],
+    0.02, 0.02, -0.22
+  );
+  // Articulated Wiper Arm Elbow / Blade Connector Clip
+  const wiperConnector = buildBoxPrimitive(
+    [-0.270, 0.011, 0.007],
+    [0.014, 0.006, 0.008],
+    0.0, 0.0, -0.22
+  );
+  // Aerodynamic Wiper Blade Spine & Wind Deflector Wing (~0.60m length spanning the cowl)
+  const wiperBladeWing = buildBoxPrimitive(
+    [-0.240, 0.009, 0.008],
+    [0.290, 0.004, 0.008],
+    0.0, 0.0, -0.22
+  );
+  // Rubber Squeegee Blade (Flexible black rubber touching windshield glass)
+  const wiperRubber = buildBoxPrimitive(
+    [-0.240, 0.004, 0.006],
+    [0.285, 0.002, 0.003],
+    0.0, 0.0, -0.22
+  );
+
+  const wiperPrims = [
+    appendGeometryPrimitive(chassis, baseBuffers, wiperPivotCap, wiperMatIdx),
+    appendGeometryPrimitive(chassis, baseBuffers, wiperArmHinge, wiperMatIdx),
+    appendGeometryPrimitive(chassis, baseBuffers, wiperArm, wiperMatIdx),
+    appendGeometryPrimitive(chassis, baseBuffers, wiperConnector, wiperMatIdx),
+    appendGeometryPrimitive(chassis, baseBuffers, wiperBladeWing, wiperMatIdx),
+    appendGeometryPrimitive(chassis, baseBuffers, wiperRubber, 1),
+  ];
+
+  const wiperMeshIdx = chassis.meshes.length;
+  chassis.meshes.push({
+    name: 'Tesla_Windshield_Wiper_Mesh',
+    primitives: wiperPrims,
+  });
+
+  const wiperNodeIdx = chassis.nodes.length;
+  chassis.nodes.push({
+    name: 'windshield_wiper',
+    mesh: wiperMeshIdx,
+    translation: [0.220, 0.508, 0.700],
+  });
+  sceneRootNode.children.push(wiperNodeIdx);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 7. REAR AERODYNAMIC DIFFUSER & CENTRAL SPACEX DE LAVAL ROCKET NOZZLE
@@ -1150,8 +1461,14 @@ export function generateRoadsterGlbs() {
   writeGlb(path.resolve('public/models/roadster_coupe.glb'), coupeChassis, baseBuffers);
   writeGlb(path.resolve('public/models/roadster_coupe_fire.glb'), coupeChassis, baseBuffers);
 
-  // 2. Targa Convertible (Removes the ENTIRE glass roof panel 'back windows_7' AND rear canopy 'back window_8', fully opening cabin to sky!)
-  const roofNodeNames = ['back windows_7', 'back window_8'];
+  // 2. Targa Convertible (Removes all roof panels, front windshield roof glass extension, side windows and rear canopy)
+  const roofNodeNames = [
+    'back windows_7',
+    'back window_8',
+    'front windows_6',
+    'targa_roof_panel',
+    'targa_windshield_roof',
+  ];
   const roofNodeIndices = roofNodeNames
     .map(name => chassis.nodes.findIndex((n: { name: string }) => n.name === name))
     .filter(idx => idx !== -1);
@@ -1161,6 +1478,14 @@ export function generateRoadsterGlbs() {
   targaRoot.children = targaRoot.children.filter((id: number) => !roofNodeIndices.includes(id));
   writeGlb(path.resolve('public/models/roadster_targa.glb'), targaChassis, baseBuffers);
   writeGlb(path.resolve('public/models/roadster_targa_fire.glb'), targaChassis, baseBuffers);
+
+  // Also sync to dist/models if present
+  if (fs.existsSync(path.resolve('dist/models'))) {
+    writeGlb(path.resolve('dist/models/roadster_coupe.glb'), coupeChassis, baseBuffers);
+    writeGlb(path.resolve('dist/models/roadster_coupe_fire.glb'), coupeChassis, baseBuffers);
+    writeGlb(path.resolve('dist/models/roadster_targa.glb'), targaChassis, baseBuffers);
+    writeGlb(path.resolve('dist/models/roadster_targa_fire.glb'), targaChassis, baseBuffers);
+  }
 
   console.log('✅ Successfully compiled all 4 Tesla Roadster GLBs:');
   console.log('   - public/models/roadster_coupe.glb');

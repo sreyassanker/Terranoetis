@@ -2920,6 +2920,9 @@ export default function App() {
         v.scene.imageryLayers.remove(defaultLayer);
       }
       addBaseImagery(v, activeImageryRef.current || 'satellite', false);
+      if (tokenToUse) {
+        void applyTerrainProvider(v, tokenToUse);
+      }
     } catch (err) {
       console.warn('Custom basemap failed, keeping default imagery:', err);
     }

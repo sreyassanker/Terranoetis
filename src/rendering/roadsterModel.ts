@@ -260,10 +260,9 @@ export function getTeslaRoadsterGltf(options?: RoadsterModelOptions): string {
   const isPlume = !!options?.showThrusterPlumes;
 
   // Browser runtime: stream the high-fidelity GLBs from public/models/
+  // Uses unified coupe GLB so Cesium can dynamically toggle Targa roof nodes in real-time with zero model reloads!
   if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
-    if (isTarga && isPlume) return '/models/roadster_targa_fire.glb';
-    if (isTarga && !isPlume) return '/models/roadster_targa.glb';
-    if (!isTarga && isPlume) return '/models/roadster_coupe_fire.glb';
+    if (isPlume) return '/models/roadster_coupe_fire.glb';
     return '/models/roadster_coupe.glb';
   }
 
@@ -447,10 +446,6 @@ export function getTeslaRoadsterGltf(options?: RoadsterModelOptions): string {
 
     // Gloss carbon-fiber ground-effect side skirts running under doors
     nodes.push(box(2.45, 0.045, 0.08, 'carbonFiber', 0.02, 0.11, 0.88 * s));
-
-    // Digital rearview side-camera repeater pod (flush on front fender)
-    nodes.push(box(0.12, 0.032, 0.045, 'carbonFiber', 0.86, 0.65, 0.85 * s));
-    nodes.push(sphere(0.015, 'headlightHousing', 0.89, 0.65, 0.87 * s));
   }
 
   /* ═══════════════ 5. REAR HAUNCHES, DECK LID & DUCKTAIL SPOILER ═══════════════
@@ -677,6 +672,9 @@ export function getTeslaRoadsterGltf(options?: RoadsterModelOptions): string {
   nodes.push(box(0.06, 0.035, 1.18, 'carbonFiber', 0.06, 1.14, 0));
   // Windshield cowl base blackout glass trim
   nodes.push(box(0.08, 0.035, 1.48, 'glassTrim', 0.74, 0.64, 0));
+  // Aerodynamic Tesla Single Windshield Wiper Blade across cowl
+  nodes.push(box(0.024, 0.016, 0.76, 'carbonFiber', 0.72, 0.66, 0.02));
+  nodes.push(cylinder(0.012, 0.016, 'carbonFiber', 0.73, 0.655, 0.32, 'y'));
 
   /* ═══════════════ 11. HYPER-REALISTIC COCKPIT INTERIOR (Image 9) ═══════════════ */
   // Minimalist Alcantara dashboard shelf running along cowl

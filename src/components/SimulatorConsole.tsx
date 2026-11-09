@@ -32,6 +32,7 @@ import {
   CheckSquare,
   Square,
   Footprints,
+  CloudRain,
 } from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
@@ -173,6 +174,8 @@ export function SimulatorConsole({
   const [targaOpen, setTargaOpen] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [headlightsOn, setHeadlightsOn] = useState(false);
+  const [rainMode, setRainMode] = useState<'auto' | 'rain' | 'clear'>('auto');
+  const [isRaining, setIsRaining] = useState(false);
   const [odometerKm, setOdometerKm] = useState(12480.0);
   const [steerAngleDeg, setSteerAngleDeg] = useState(0);
   const [throttlePct, setThrottlePct] = useState(0);
@@ -345,6 +348,8 @@ export function SimulatorConsole({
         if (state.targaOpen !== undefined) setTargaOpen(state.targaOpen);
         if (state.isAudioMuted !== undefined) setIsAudioMuted(state.isAudioMuted);
         if (state.headlightsOn !== undefined) setHeadlightsOn(state.headlightsOn);
+        if (state.rainMode !== undefined) setRainMode(state.rainMode);
+        if (state.isRaining !== undefined) setIsRaining(state.isRaining);
         if (state.odometerKm !== undefined) setOdometerKm(state.odometerKm);
         if (state.steerAngleDeg !== undefined) setSteerAngleDeg(state.steerAngleDeg);
         if (state.throttlePct !== undefined) setThrottlePct(state.throttlePct);
@@ -443,6 +448,7 @@ export function SimulatorConsole({
             isAudioMuted={isAudioMuted}
             targaOpen={targaOpen}
             headlightsOn={headlightsOn}
+            isRaining={isRaining}
             odometerKm={odometerKm}
             steerAngleDeg={steerAngleDeg}
             throttlePct={throttlePct}
@@ -453,6 +459,7 @@ export function SimulatorConsole({
             onToggleSound={() => groundWalkRef.current?.toggleAudioMute()}
             onToggleTarga={() => groundWalkRef.current?.toggleTargaRoof()}
             onToggleHeadlights={() => groundWalkRef.current?.toggleHeadlights()}
+            onToggleRain={() => groundWalkRef.current?.toggleRain()}
             onResetCamera={() => groundWalkRef.current?.resetOrbitCamera()}
             onManualThrottle={(fwd) => groundWalkRef.current?.setManualThrottle(fwd)}
             onManualSteer={(turn) => groundWalkRef.current?.setManualSteer(turn)}
@@ -728,6 +735,31 @@ export function SimulatorConsole({
               }}
             >
               <Lightbulb size={11} /> {headlightsOn ? 'Lights' : 'Off'}
+            </button>
+
+            {/* Rain & Automatic Wiper Toggle */}
+            <button
+              onClick={() => groundWalkRef.current?.toggleRain()}
+              title="Toggle Rain & Automatic Windshield Wiper [P]"
+              style={{
+                background: isRaining
+                  ? 'rgba(56, 189, 248, 0.25)'
+                  : rainMode === 'auto'
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${isRaining ? '#38bdf8' : 'rgba(255,255,255,0.15)'}`,
+                borderRadius: 6,
+                padding: '4px 7px',
+                color: isRaining ? '#38bdf8' : rainMode === 'auto' ? '#94a3b8' : '#64748b',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              <CloudRain size={11} /> {isRaining ? 'Rain: On' : rainMode === 'auto' ? 'Rain: Auto' : 'Rain: Off'}
             </button>
 
             {/* Reset Camera View */}
@@ -1867,6 +1899,31 @@ export function SimulatorConsole({
                         <Sun size={11} /> {targaOpen ? 'TARGA OPEN' : 'COUPE ROOF (T)'}
                       </button>
 
+                      {/* Rain & Automatic Windshield Wiper Toggle */}
+                      <button
+                        onClick={() => groundWalkRef.current?.toggleRain()}
+                        style={{
+                          padding: '7px 8px',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          background: isRaining
+                            ? 'rgba(56, 189, 248, 0.25)'
+                            : rainMode === 'auto'
+                            ? 'rgba(255,255,255,0.08)'
+                            : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${isRaining ? '#38bdf8' : 'rgba(255,255,255,0.15)'}`,
+                          color: isRaining ? '#38bdf8' : rainMode === 'auto' ? '#94a3b8' : '#64748b',
+                          fontSize: 10,
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <CloudRain size={11} /> {isRaining ? 'RAIN: ON' : rainMode === 'auto' ? 'RAIN: AUTO (P)' : 'RAIN: OFF (P)'}
+                      </button>
+
                       {/* Reset Camera Orbit */}
                       <button
                         onClick={() => groundWalkRef.current?.resetOrbitCamera()}
@@ -2144,6 +2201,7 @@ export function SimulatorConsole({
                         <div><span style={{ color: '#f87171', fontWeight: 600 }}>Mouse Wheel</span> — Smooth Zoom In / Out</div>
                         <div><span style={{ color: '#f87171', fontWeight: 600 }}>C / V</span> — Switch Cockpit View &amp; Chase Cam</div>
                         <div><span style={{ color: '#f87171', fontWeight: 600 }}>R</span> — 360° Studio Turntable Showcase Spin</div>
+                        <div><span style={{ color: '#38bdf8', fontWeight: 600 }}>P</span> — Rain Weather &amp; Automatic Windshield Wiper</div>
                       </div>
                     )}
                   </div>

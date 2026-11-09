@@ -67,26 +67,31 @@ function createImageryLayer(type: string): Cesium.ImageryLayer {
 }
 
 export async function applyTerrainProvider(viewer: Cesium.Viewer, ionToken?: string) {
-  const token = ionToken || (Cesium.Ion.defaultAccessToken as string | undefined);
+  const token = (ionToken || (Cesium.Ion.defaultAccessToken as string | undefined) || '').trim();
   if (token) {
     Cesium.Ion.defaultAccessToken = token;
-  }
-  try {
-    viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
-      requestVertexNormals: false,
-      requestWaterMask: false,
-    });
-    if (viewer.scene?.globe) {
-      viewer.scene.globe.depthTestAgainstTerrain = true;
+    try {
+      viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
+        // Vertex normals / water mask are cosmetic (lighting + ocean depth) and
+        // require premium Ion assets; the plain global terrain loads with any
+        // valid Ion token, which is all we need for height sampling.
+        requestVertexNormals: false,
+        requestWaterMask: false,
+      });
+      if (viewer.scene?.globe) {
+        viewer.scene.globe.depthTestAgainstTerrain = true;
+      }
+      return true;
+    } catch {
+      console.warn('[Terrain] Cesium World Terrain failed to load. Using flat ellipsoid. Scenario shapes will use ground-clamped heights.');
     }
-    return true;
-  } catch {
-    console.warn('[Terrain] Cesium World Terrain unavailable. Using flat ellipsoid.');
+  } else {
+    console.warn('[Terrain] No Cesium Ion token configured in API Vault. Terrain is flat ellipsoid. Set the token in API Vault for real terrain and ocean detection.');
   }
 
   viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
   if (viewer.scene?.globe) {
-    viewer.scene.globe.depthTestAgainstTerrain = false;
+    viewer.scene.globe.depthTestAgainstTerrain = true;
   }
   return false;
 }

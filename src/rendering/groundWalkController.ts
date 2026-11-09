@@ -10,6 +10,7 @@
  */
 
 import * as Cesium from 'cesium';
+import { sanitizeGlsl } from '../components/kaggle/gpu/cesiumRuntime';
 import {
   getTeslaRoadsterGltf,
   WHEEL_PIVOT_FL,
@@ -44,6 +45,9 @@ export interface GroundWalkState {
   brakePct?: number;          // 0 to 100% brake pedal depression
   headlightsOn?: boolean;     // Functional headlights & projector beams active
   odometerKm?: number;        // Authentic Tesla Roadster cumulative odometer reading
+  isRaining?: boolean;        // Rain active (triggers automatic wiper)
+  rainMode?: 'auto' | 'rain' | 'clear'; // Rain simulation / sensor mode
+  wiperActive?: boolean;      // Automatic windshield wiper currently sweeping
 }
 
 export type GroundWalkCallback = (state: GroundWalkState) => void;
@@ -113,6 +117,17 @@ export class GroundWalkController {
   private targaOpen = false;
   private wasFlying = false;
   private audioEngine: RoadsterAudioEngine | null = null;
+
+  // Windshield Wiper & Automatic Rain Simulation
+  private wiperNode: Cesium.ModelNode | null = null;
+  private initialWiperMatrix: Cesium.Matrix4 | null = null;
+  private currentWiperAngle = 0;
+  private wiperCycleTime = 0;
+  private isRaining = false;
+  private rainMode: 'auto' | 'rain' | 'clear' = 'auto';
+  private rainStage: Cesium.PostProcessStage | null = null;
+  private lastWeatherCheckTime = 0;
+  private rainShaderTime = 0;
 
   // Mouse orbit and look tracking
   private isMouseDown = false;
@@ -310,6 +325,9 @@ export class GroundWalkController {
         this.mouseYawOffset = 0;
         this.mousePitchOffset = 0;
         this.yawFlingVelocity = 0;
+        if (!this.targaOpen) {
+          this.stopRainEffect();
+        }
       }
       if (this.roverModel) {
         this.roverModel.show = true; // In cockpit view, dashboard, steering yoke & hood remain visible!
@@ -327,6 +345,9 @@ export class GroundWalkController {
         this.mouseYawOffset = 0;
         this.mousePitchOffset = 0;
         this.yawFlingVelocity = 0;
+        if (!this.targaOpen) {
+          this.stopRainEffect();
+        }
       }
       if (this.roverModel) {
         this.roverModel.show = true;
@@ -359,6 +380,9 @@ export class GroundWalkController {
         brakePct: Math.round(this.throttleInput < 0 ? Math.abs(this.throttleInput) * 100 : (this.keysHeld['KeyS'] || this.keysHeld['ArrowDown'] ? 100 : 0)),
         headlightsOn: this.headlightsOn,
         odometerKm: Math.round(this.odometerKm * 10) / 10,
+        isRaining: this.isRaining,
+        rainMode: this.rainMode,
+        wiperActive: this.isRaining || this.currentWiperAngle > 0.01,
       });
     }
   }
@@ -439,6 +463,10 @@ export class GroundWalkController {
           if (this.yokeNode) {
             this.initialYokeMatrix = Cesium.Matrix4.clone(this.yokeNode.matrix);
           }
+          this.wiperNode = model.getNode('windshield_wiper') ?? null;
+          if (this.wiperNode) {
+            this.initialWiperMatrix = Cesium.Matrix4.clone(this.wiperNode.matrix);
+          }
           if (this.thrusterNode) {
             this.thrusterNode.show = this.isFlying;
           }
@@ -452,6 +480,7 @@ export class GroundWalkController {
             // When stopped or braking, show intense brake light
             this.brakeLightNode.show = Math.abs(this.velocityMps) < 0.25;
           }
+          this.updateRoofVisibility();
         } catch { /* degrade gracefully */ }
       };
 
@@ -485,6 +514,9 @@ export class GroundWalkController {
     this.brakeLightNode = null;
     this.yokeNode = null;
     this.initialYokeMatrix = null;
+    this.wiperNode = null;
+    this.initialWiperMatrix = null;
+    this.stopRainEffect();
     if (this.hoverCushionEntity && this.viewer && !this.viewer.isDestroyed()) {
       try {
         this.viewer.entities.remove(this.hoverCushionEntity);
@@ -620,6 +652,131 @@ export class GroundWalkController {
         (Math.abs(this.velocityMps) < 0.25 && this.throttleInput === 0);
       this.brakeLightNode.show = isBraking;
     }
+
+    // 60 FPS Windshield Wiper Animation (Automatic Rain Actuation)
+    if (this.rainMode === 'rain') {
+      this.isRaining = true;
+    } else if (this.rainMode === 'clear') {
+      this.isRaining = false;
+    } else {
+      // Auto mode: check live weather precipitation periodically
+      const now = Date.now();
+      if (now - this.lastWeatherCheckTime > 20000) {
+        this.lastWeatherCheckTime = now;
+        this.checkLiveWeatherRain();
+      }
+    }
+
+    this.updateRainEffect(dt);
+
+    if (this.wiperNode && this.initialWiperMatrix) {
+      if (this.isRaining) {
+        // Continuous sweep cycle: ~1.05s period (approx 57 strokes/min)
+        this.wiperCycleTime += dt * 3.8;
+        const cycle = (Math.sin(this.wiperCycleTime) + 1) * 0.5;
+        const eased = cycle * cycle * (3 - 2 * cycle);
+        this.currentWiperAngle = eased * 1.25; // 0 to ~72 degrees across windshield glass
+      } else if (this.currentWiperAngle > 0.01) {
+        // Smooth return to parked cowl position
+        this.currentWiperAngle = Math.max(0, this.currentWiperAngle - dt * 2.2);
+        this.wiperCycleTime = 0;
+      }
+
+      // Rotate around windshield glass normal axis [0.12, 0.92, 0.36]
+      const axis = new Cesium.Cartesian3(0.12, 0.92, 0.36);
+      const qRot = Cesium.Quaternion.fromAxisAngle(axis, this.currentWiperAngle, new Cesium.Quaternion());
+      const rotM3 = Cesium.Matrix3.fromQuaternion(qRot, new Cesium.Matrix3());
+      const mRot = Cesium.Matrix4.fromRotationTranslation(rotM3, Cesium.Cartesian3.ZERO, new Cesium.Matrix4());
+      this.wiperNode.matrix = Cesium.Matrix4.multiply(
+        this.initialWiperMatrix,
+        mRot,
+        new Cesium.Matrix4()
+      );
+    }
+  }
+
+  private async checkLiveWeatherRain(): Promise<void> {
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${this.lat.toFixed(4)}&longitude=${this.lon.toFixed(4)}&current=precipitation,weather_code`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return;
+      const data = await res.json();
+      const precip = Number(data?.current?.precipitation ?? 0);
+      const code = Number(data?.current?.weather_code ?? 0);
+      const rainCodes = [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99];
+      const raining = precip > 0.05 || rainCodes.includes(code);
+      if (this.rainMode === 'auto' && this.isRaining !== raining) {
+        this.isRaining = raining;
+        this.emitUpdate();
+      }
+    } catch {
+      // degrade gracefully
+    }
+  }
+
+  private updateRainEffect(dt: number): void {
+    if (!this.viewer || this.viewer.isDestroyed()) return;
+    if (this.isRaining) {
+      // In enclosed cockpit view (perspective === 'cockpit' and !targaOpen),
+      // we are inside the closed car with windshield and glass roof -
+      // do not draw screen-space rain streaks falling inside the cabin!
+      if (this.perspective === 'cockpit' && !this.targaOpen) {
+        this.stopRainEffect();
+        return;
+      }
+      this.rainShaderTime += dt;
+      if (!this.rainStage) {
+        try {
+          const frag = `
+            uniform sampler2D colorTexture;
+            uniform float time;
+            in vec2 v_textureCoordinates;
+
+            float hash(vec2 p) {
+              return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+
+            void main(void) {
+              vec2 uv = v_textureCoordinates;
+              vec3 col = texture(colorTexture, uv).rgb;
+
+              // Primary angled falling rain streaks
+              vec2 rainCoord = uv * vec2(140.0, 12.0) + vec2(time * 3.8, time * 22.0);
+              float cell = hash(floor(rainCoord));
+              float streak = smoothstep(0.965, 1.0, cell) * fract(rainCoord.y);
+
+              // Fine mist spray
+              vec2 fineCoord = uv * vec2(280.0, 18.0) + vec2(time * 5.2, time * 32.0);
+              float cell2 = hash(floor(fineCoord));
+              float streak2 = smoothstep(0.978, 1.0, cell2) * fract(fineCoord.y);
+
+              col = mix(col, col * vec3(0.88, 0.92, 0.98), 0.20);
+              col += vec3(0.72, 0.82, 0.95) * (streak * 0.38 + streak2 * 0.24);
+
+              out_FragColor = vec4(col, 1.0);
+            }
+          `;
+          this.rainStage = new Cesium.PostProcessStage({
+            fragmentShader: sanitizeGlsl(frag),
+            uniforms: {
+              time: () => this.rainShaderTime,
+            },
+          });
+          this.viewer.scene.postProcessStages.add(this.rainStage);
+        } catch { /* degrade gracefully */ }
+      }
+    } else {
+      this.stopRainEffect();
+    }
+  }
+
+  private stopRainEffect(): void {
+    if (this.rainStage && this.viewer && !this.viewer.isDestroyed()) {
+      try {
+        this.viewer.scene.postProcessStages.remove(this.rainStage);
+      } catch { /* ignore */ }
+    }
+    this.rainStage = null;
   }
 
   private isDaylight(): boolean {
@@ -804,6 +961,9 @@ export class GroundWalkController {
       }
       if (e.code === 'KeyL') {
         this.toggleHeadlights();
+      }
+      if (e.code === 'KeyP') {
+        this.toggleRain();
       }
     };
 
@@ -1167,6 +1327,9 @@ export class GroundWalkController {
         brakePct: Math.round(this.throttleInput < 0 ? Math.abs(this.throttleInput) * 100 : (this.keysHeld['KeyS'] || this.keysHeld['ArrowDown'] ? 100 : 0)),
         headlightsOn: this.headlightsOn,
         odometerKm: Math.round(this.odometerKm * 10) / 10,
+        isRaining: this.isRaining,
+        rainMode: this.rainMode,
+        wiperActive: this.isRaining || this.currentWiperAngle > 0.01,
       });
     }
   }
@@ -1339,9 +1502,40 @@ export class GroundWalkController {
     return this.audioEngine?.muted ?? false;
   }
 
+  private updateRoofVisibility(): void {
+    if (!this.roverModel) return;
+    const roofNodeNames = [
+      'back windows_7',
+      'back window_8',
+      'front windows_6',
+      'targa_roof_panel',
+      'targa_windshield_roof',
+      'Object_18',
+      'Object_19',
+      'Object_21',
+      'Object_22',
+      'Object_24',
+      'Object_25',
+      'Object_ws_roof_trim',
+      'Object_ws_roof_glass',
+    ];
+    for (const name of roofNodeNames) {
+      try {
+        const node = (this.roverModel as any).getNode?.(name);
+        if (node) {
+          node.show = !this.targaOpen;
+        }
+      } catch { /* degrade gracefully */ }
+    }
+  }
+
   toggleTargaRoof(): boolean {
     this.targaOpen = !this.targaOpen;
-    this.reloadVehicleModel();
+    this.updateRoofVisibility();
+    if (this.perspective === 'cockpit') {
+      if (!this.targaOpen) this.stopRainEffect();
+      else if (this.isRaining) this.updateRainEffect(0.016);
+    }
     this.emitUpdate();
     return this.targaOpen;
   }
@@ -1367,5 +1561,36 @@ export class GroundWalkController {
 
   getOdometerKm(): number {
     return Math.round(this.odometerKm * 10) / 10;
+  }
+
+  toggleRain(): 'auto' | 'rain' | 'clear' {
+    if (this.rainMode === 'auto') {
+      this.rainMode = 'rain';
+      this.isRaining = true;
+    } else if (this.rainMode === 'rain') {
+      this.rainMode = 'clear';
+      this.isRaining = false;
+    } else {
+      this.rainMode = 'auto';
+      this.checkLiveWeatherRain();
+    }
+    this.emitUpdate();
+    return this.rainMode;
+  }
+
+  setRainMode(mode: 'auto' | 'rain' | 'clear'): void {
+    this.rainMode = mode;
+    if (mode === 'rain') this.isRaining = true;
+    else if (mode === 'clear') this.isRaining = false;
+    else this.checkLiveWeatherRain();
+    this.emitUpdate();
+  }
+
+  getRainMode(): 'auto' | 'rain' | 'clear' {
+    return this.rainMode;
+  }
+
+  getIsRaining(): boolean {
+    return this.isRaining;
   }
 }
